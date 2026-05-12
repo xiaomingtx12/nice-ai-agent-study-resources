@@ -35,9 +35,17 @@ const config: Config = {
             'https://github.com/xiaomingtx12/nice-ai-agent-study-resources/edit/main/',
         },
         blog: false,
-        theme: {
-          customCss: './src/css/custom.css',
-        },
+      },
+    ],
+  ],
+
+  plugins: [
+    [
+      require.resolve('@easyops-cn/docusaurus-search-local'),
+      {
+        hashed: true,
+        language: ['zh', 'en'],
+        indexBlog: false,
       },
     ],
   ],
@@ -46,6 +54,10 @@ const config: Config = {
     navbar: {
       title: 'Nice AI',
       items: [
+        {
+          type: 'search',
+          position: 'right',
+        },
         {
           href: 'https://github.com/xiaomingtx12/nice-ai-agent-study-resources',
           label: 'GitHub',
