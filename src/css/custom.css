@@ -1,0 +1,56 @@
+:root {
+  --ifm-color-primary: #2b9ed8;
+  --ifm-color-primary-dark: #2590c5;
+  --ifm-color-primary-darker: #2388ba;
+  --ifm-color-primary-darkest: #1c6f98;
+  --ifm-color-primary-light: #3aa6dc;
+  --ifm-color-primary-lighter: #4bb0e0;
+  --ifm-color-primary-lightest: #76c3e9;
+
+  --ifm-font-family-base: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+
+  --ifm-code-font-size: 90%;
+  --ifm-leading: 1.7;
+  --ifm-container-width: 1140px;
+  --ifm-container-width-xl: 1140px;
+}
+
+/* Clean content feel */
+.main-wrapper {
+  background: #f6f8fa;
+}
+
+.container {
+  padding-top: 24px;
+  padding-bottom: 40px;
+}
+
+/* Make docs content look like a card */
+.theme-doc-markdown {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 28px 32px;
+  box-shadow: 0 8px 24px rgba(31, 41, 55, 0.06);
+}
+
+@media (max-width: 996px) {
+  .theme-doc-markdown {
+    padding: 18px;
+    border-radius: 8px;
+  }
+}
+
+/* Slightly calmer headings */
+.markdown h1 {
+  font-size: 2.1rem;
+}
+
+.markdown p {
+  color: #374151;
+}
+
+/* Navbar subtle shadow */
+.navbar {
+  box-shadow: 0 8px 18px rgba(31, 41, 55, 0.06);
+}

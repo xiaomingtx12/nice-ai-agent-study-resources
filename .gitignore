@@ -13,8 +13,16 @@ __pycache__/
 .venv/
 venv/
 
-# MkDocs build output
-site/
+# Node
+node_modules/
+build/
+.docusaurus/
+
+# npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Misc
 *.log

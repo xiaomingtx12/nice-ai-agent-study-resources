@@ -1,6 +1,6 @@
 ﻿# HelloAgents（Datawhale）
 
-- 官网：<https://datawhalechina.github.io/hello-agents/#/>
+- 官网：[https://datawhalechina.github.io/hello-agents/](https://datawhalechina.github.io/hello-agents/)
 
 这个目录用于沉淀你在学习 HelloAgents 过程中的：
 - 章节/专题总结（`summaries/`）

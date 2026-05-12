@@ -1,7 +1,7 @@
 ﻿# 00｜HelloAgents 总览与我的学习路线（第一人称）
 
-- 原教程：<https://datawhalechina.github.io/hello-agents/#/>
-- 项目仓库：<https://github.com/datawhalechina/Hello-Agents>
+- 原教程：[https://datawhalechina.github.io/hello-agents/](https://datawhalechina.github.io/hello-agents/)
+- 项目仓库：[https://github.com/datawhalechina/Hello-Agents](https://github.com/datawhalechina/Hello-Agents)
 - 记录日期：2026-05-12
 
 ## TL;DR
