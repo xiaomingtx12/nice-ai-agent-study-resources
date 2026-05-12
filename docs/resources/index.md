@@ -15,6 +15,8 @@ sidebar_position: 1
 | HelloAgents | Agent 教程 / 开源文档 | 它不只教“怎么调模型”，而是试图把 Agent 的搭建思路讲成一条完整路径 | [查看资源页](./hello-agents/index.md) |
 | AI Agent Book | Agent 架构书 / 开源文档 | 它明显更偏架构模式和生产化设计，适合在“会做 demo”之后继续往系统层走 | [查看资源页](./ai-agent-book/index.md) |
 | Learn Claude Code | Agent Harness 教程 / 教学仓库 | 它不是泛泛讲 Agent，而是围绕 Claude Code 一层层拆 loop、工具、计划、子代理、压缩、任务与团队协作 | [查看资源页](./learn-claude-code/index.md) |
+| OpenClaw 源码解析 | 源码解析 / 架构导读 | 它不是从零讲概念，而是围绕一个真实的 AI 助手网关系统，拆消息流水线、Agent 运行时、扩展体系和安全模型 | [查看资源页](./openclaw-book/index.md) |
+| Claude Code Architecture（CCB） | 架构解析 / 逆向分析文档 | 它不教你从零做 Agent，而是把 Claude Code 直接拆成五层架构、工具权限、压缩、Provider、遥测和远程配置这些工程部件 | [查看资源页](./claude-code-architecture/index.md) |
 
 ## 我怎么看一条资源值不值得留
 

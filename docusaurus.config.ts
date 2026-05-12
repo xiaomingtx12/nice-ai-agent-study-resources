@@ -65,8 +65,18 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/application-notes',
+          label: '应用沉淀',
+          position: 'left',
+        },
+        {
           to: '/templates',
           label: '共建与模板',
+          position: 'left',
+        },
+        {
+          to: '/about',
+          label: '关于我',
           position: 'left',
         },
         {
