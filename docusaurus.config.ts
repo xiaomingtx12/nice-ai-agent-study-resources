@@ -66,7 +66,7 @@ const config: Config = {
         },
         {
           to: '/templates',
-          label: '写作模板',
+          label: '共建与模板',
           position: 'left',
         },
         {

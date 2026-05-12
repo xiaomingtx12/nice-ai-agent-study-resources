@@ -13,6 +13,8 @@ sidebar_position: 1
 | 资源 | 类型 | 我为什么收 | 入口 |
 | --- | --- | --- | --- |
 | HelloAgents | Agent 教程 / 开源文档 | 它不只教“怎么调模型”，而是试图把 Agent 的搭建思路讲成一条完整路径 | [查看资源页](./hello-agents/index.md) |
+| AI Agent Book | Agent 架构书 / 开源文档 | 它明显更偏架构模式和生产化设计，适合在“会做 demo”之后继续往系统层走 | [查看资源页](./ai-agent-book/index.md) |
+| Learn Claude Code | Agent Harness 教程 / 教学仓库 | 它不是泛泛讲 Agent，而是围绕 Claude Code 一层层拆 loop、工具、计划、子代理、压缩、任务与团队协作 | [查看资源页](./learn-claude-code/index.md) |
 
 ## 我怎么看一条资源值不值得留
 

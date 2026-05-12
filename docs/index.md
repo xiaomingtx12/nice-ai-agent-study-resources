@@ -15,8 +15,8 @@ sidebar_position: 1
 ## 你能在这里看到什么
 
 - [资源导航](./resources/index.md)：先看这份资源到底值不值得学，再决定要不要投入时间
-- [方法与复盘](./notes/index.md)：放跨资源可复用的学习方法、踩坑记录和学习流水账
-- [写作模板](./templates/index.md)：给后续新增资源和写笔记留统一骨架
+- [方法与复盘](./notes/index.md)：放跨资源可复用的学习方法、踩坑记录和阶段性判断
+- [共建与模板](./templates/index.md)：给想一起补资源的人一套可执行的共建流程和写作骨架
 
 ## 这个站点怎么用
 
@@ -28,11 +28,17 @@ sidebar_position: 1
 - 锐评：它真正强在哪，哪些地方别抱太高预期
 - 学习沉淀：我学的时候留下的笔记、总结和踩坑
 
-## 当前第一条资源
+## 当前收录
 
 - [HelloAgents](./resources/hello-agents/index.md)
+- [AI Agent Book](./resources/ai-agent-book/index.md)
+- [Learn Claude Code](./resources/learn-claude-code/index.md)
 
-我把它收进来的原因很简单：中文世界里，愿意把 Agent 从“能跑一个 demo”往“系统怎么搭”继续往下讲的教程并不算多。它不一定是终点，但很适合拿来搭自己的认知地图。
+我现在刻意保留了三种不同气质的材料：
+
+- `HelloAgents` 更像入场后的主线地图，帮我把 Agent 这件事先串起来
+- `AI Agent Book` 更像往架构和生产落地继续推进的一本手册
+- `Learn Claude Code` 更像一门 agent harness 拆解课，适合把“Claude Code 为什么好用”拆回具体机制
 
 ## 收录原则
 
