@@ -17,6 +17,7 @@ sidebar_position: 1
 | Learn Claude Code | Agent Harness 教程 / 教学仓库 | 它不是泛泛讲 Agent，而是围绕 Claude Code 一层层拆 loop、工具、计划、子代理、压缩、任务与团队协作 | [查看资源页](./learn-claude-code/index.md) |
 | OpenClaw 源码解析 | 源码解析 / 架构导读 | 它不是从零讲概念，而是围绕一个真实的 AI 助手网关系统，拆消息流水线、Agent 运行时、扩展体系和安全模型 | [查看资源页](./openclaw-book/index.md) |
 | Claude Code Architecture（CCB） | 架构解析 / 逆向分析文档 | 它不教你从零做 Agent，而是把 Claude Code 直接拆成五层架构、工具权限、压缩、Provider、遥测和远程配置这些工程部件 | [查看资源页](./claude-code-architecture/index.md) |
+| Easy-Vibe | Vibe Coding 教程 / 产品导向课程 | 它不是在教抽象 Agent 概念，而是在设计一条从零基础到能做原型、接数据、部署上线、继续做 AI 应用的学习路径 | [查看资源页](./easy-vibe/index.md) |
 
 ## 我怎么看一条资源值不值得留
 

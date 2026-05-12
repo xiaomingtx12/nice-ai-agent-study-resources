@@ -41,14 +41,16 @@ sidebar_position: 1
 - [Learn Claude Code](./resources/learn-claude-code/index.md)
 - [OpenClaw 源码解析](./resources/openclaw-book/index.md)
 - [Claude Code Architecture（CCB）](./resources/claude-code-architecture/index.md)
+- [Easy-Vibe](./resources/easy-vibe/index.md)
 
-我现在刻意保留了五种不同气质的材料：
+我现在刻意保留了六种不同气质的材料：
 
 - `HelloAgents` 更像入场后的主线地图，帮我把 Agent 这件事先串起来
 - `AI Agent Book` 更像往架构和生产落地继续推进的一本手册
 - `Learn Claude Code` 更像一门 agent harness 拆解课，适合把“Claude Code 为什么好用”拆回具体机制
 - `OpenClaw 源码解析` 更像一份 control plane 源码导读，适合从真实大项目里看消息网关、Agent 运行时、扩展和安全是怎么揉在一起的
 - `Claude Code Architecture（CCB）` 更像一份逆向分析白皮书，适合从五层架构、工具权限、压缩、遥测与配置下发这些角度理解 Claude Code
+- `Easy-Vibe` 更像一条面向产品和非科班开发者的 AI 编程学习路径，适合看“从会说需求到把应用做出来”这条路怎么被设计出来
 
 ## 收录原则
 
