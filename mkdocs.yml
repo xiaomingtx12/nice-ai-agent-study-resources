@@ -1,0 +1,28 @@
+site_name: Nice AI 应用开发教程整理
+site_description: 开源 AI 应用开发教程索引与个人学习总结
+repo_url: https://github.com/xiaomingtx12/nice-ai-agent-study-resources
+repo_name: xiaomingtx12/nice-ai-agent-study-resources
+
+docs_dir: docs
+site_dir: site
+
+nav:
+  - 首页: index.md
+  - 如何新增教程: how-to-add-tutorial.md
+  - 教程: tutorials/index.md
+  - HelloAgents:
+    - 入口: tutorials/hello-agents/index.md
+    - 总结: tutorials/hello-agents/summaries/index.md
+    - 笔记: tutorials/hello-agents/notes/index.md
+  - 学习心得:
+    - 主页: notes/index.md
+    - 学习日志: notes/learning-log.md
+  - 资源索引: resources/index.md
+  - 模板:
+    - 教程总结模板: templates/tutorial-summary-template.md
+    - 笔记模板: templates/note-template.md
+    - 学习日志模板: templates/learning-log-template.md
+
+markdown_extensions:
+  - toc:
+      permalink: true

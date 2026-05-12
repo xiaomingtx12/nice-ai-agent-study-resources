@@ -1,0 +1,20 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+.jbeval/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# MkDocs build output
+site/
+
+# Misc
+*.log
