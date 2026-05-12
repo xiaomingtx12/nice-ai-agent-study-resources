@@ -1,5 +1,6 @@
 {
-  "label": "资源索引",
+  "label": "资源导航",
+  "position": 2,
   "collapsible": true,
-  "collapsed": true
+  "collapsed": false
 }

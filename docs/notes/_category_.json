@@ -1,5 +1,6 @@
 {
-  "label": "学习心得",
+  "label": "方法与复盘",
+  "position": 3,
   "collapsible": true,
-  "collapsed": false
+  "collapsed": true
 }

@@ -1,8 +1,9 @@
-# Nice AI 应用开发教程整理（GitHub Pages）
+# Nice AI 资源库（GitHub Pages）
 
 这是一个**文档型仓库**，用于沉淀：
-- 优秀开源 AI 应用开发教程/文档的索引与总结（以链接 + 你的总结为主）
-- 个人学习心得与方法论
+- 值得长期跟踪的 AI 学习资源导航
+- 对这些资源的直接判断和锐评
+- 学习过程中留下来的个人笔记、复盘与模板
 
 站点由 **Docusaurus** 构建，内容统一放在 `docs/` 下。
 
@@ -36,8 +37,9 @@ npm run start
 ## 内容入口
 
 - 首页：docs/index.md
-- 教程：docs/tutorials/
-- HelloAgents：docs/tutorials/hello-agents/
+- 资源导航：docs/resources/
+- HelloAgents：docs/resources/hello-agents/
+- 方法与复盘：docs/notes/
 
 ## 备注
 
