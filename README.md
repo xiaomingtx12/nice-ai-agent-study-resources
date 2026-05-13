@@ -7,6 +7,15 @@
 
 站点由 **Docusaurus** 构建，内容统一放在 `docs/` 下。
 
+在线阅读：[Nice AI 资源库](https://xiaomingtx12.github.io/nice-ai-agent-study-resources/)
+
+如果你是第一次从 GitHub 点进来，建议先看这些入口：
+
+- 站点首页：`docs/index.md`
+- 资源导航：`docs/resources/`
+- 方法与复盘：`docs/notes/`
+- 应用沉淀：`docs/application-notes/`
+
 ## 目录结构（核心）
 
 ```
@@ -36,11 +45,8 @@ npm run start
 
 ## 内容入口
 
-- 首页：docs/index.md
-- 资源导航：docs/resources/
-- HelloAgents：docs/resources/hello-agents/
-- 方法与复盘：docs/notes/
-
-## 备注
-
-本仓库已完全切换到 Docusaurus 构建与部署。
+- 首页：`docs/index.md`
+- 资源导航：`docs/resources/`
+- 方法与复盘：`docs/notes/`
+- 应用沉淀：`docs/application-notes/`
+- 共建与模板：`docs/templates/`

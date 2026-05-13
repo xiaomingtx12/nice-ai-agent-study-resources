@@ -11,7 +11,12 @@ sidebar_position: 1
 - [先别急着通读：我为什么先把它当地图](./why-i-treat-it-as-a-map.md)
 - [怎么学这套教程更划算](./how-i-plan-to-study-it.md)
 
-## 后续会继续补什么
+## 建议先看顺序
+
+1. 先看 [先别急着通读：我为什么先把它当地图](./why-i-treat-it-as-a-map.md)，先把读法校正过来
+2. 再看 [怎么学这套教程更划算](./how-i-plan-to-study-it.md)，决定自己该先啃哪一块
+
+## 下一批最值得补的内容
 
 - 正式章节笔记
 - 做过的小实验

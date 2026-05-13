@@ -11,7 +11,12 @@ sidebar_position: 1
 - [为什么我把它看成逆向架构白皮书](./why-i-see-it-as-a-reverse-engineering-whitepaper.md)
 - [怎么把它和 Learn Claude Code 区分开来看](./how-i-separate-it-from-learn-claude-code.md)
 
-## 后续会继续补什么
+## 建议先看顺序
+
+1. 先看 [为什么我把它看成逆向架构白皮书](./why-i-see-it-as-a-reverse-engineering-whitepaper.md)，先抓住它的定位
+2. 再看 [怎么把它和 Learn Claude Code 区分开来看](./how-i-separate-it-from-learn-claude-code.md)，避免和教学型材料混读
+
+## 下一批最值得补的内容
 
 - 五层架构和主数据流的章节级锐评
 - QueryEngine、权限链路、压缩链路的专题笔记

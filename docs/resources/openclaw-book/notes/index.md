@@ -11,7 +11,12 @@ sidebar_position: 1
 - [为什么我把它看成 control plane 源码导读](./why-i-see-it-as-a-control-plane-walkthrough.md)
 - [怎么读这条资源，才不会淹死在大项目细节里](./how-to-read-it-without-drowning-in-details.md)
 
-## 后续会继续补什么
+## 建议先看顺序
+
+1. 先看 [为什么我把它看成 control plane 源码导读](./why-i-see-it-as-a-control-plane-walkthrough.md)，先把对象感立住
+2. 再看 [怎么读这条资源，才不会淹死在大项目细节里](./how-to-read-it-without-drowning-in-details.md)，避免一头扎进细节
+
+## 下一批最值得补的内容
 
 - Gateway 控制平面和消息流水线的章节级锐评
 - Pi 引擎、上下文、记忆、工具这条运行时主线

@@ -30,8 +30,8 @@ sidebar_position: 2
 
 如果你现在缺的是一张更广的 Agent 地图，或者你还没建立最基础的单 Agent 认知，它就不该是最先读的那条资源。
 
-## 我会怎么用它
+## 如果时间有限，先从哪部分入手
 
-- 把它当作 Claude Code 类产品的机制拆解课
-- 和更偏地图型、架构型的资源搭配着看，避免视角过窄
-- 抓它里面可迁移的 harness 模式，而不是执着于“原样复刻 Claude Code”
+- 先看 `s01-s06`，把 loop、tools、planning、subagents、skills、compression 这条主线搭起来
+- 再按需补 permissions、tasks、background tasks、teams、worktree isolation
+- 如果你还没实际用过 coding agent，先用一段时间再回来读，收获会更大
