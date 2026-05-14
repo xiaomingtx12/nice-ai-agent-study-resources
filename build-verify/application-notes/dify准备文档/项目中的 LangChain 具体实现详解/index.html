@@ -1,0 +1,842 @@
+<!doctype html>
+<html lang="zh-Hans" dir="ltr" class="docs-wrapper plugin-docs plugin-id-default docs-version-current docs-doc-page docs-doc-id-application-notes/dify准备文档/项目中的 LangChain 具体实现详解" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">my-dify 项目中的 LangChain 具体实现详解 | Nice AI 资源库</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://xiaomingtx12.github.io/nice-ai-agent-study-resources/application-notes/dify准备文档/项目中的 LangChain 具体实现详解"><meta data-rh="true" property="og:locale" content="zh_Hans"><meta data-rh="true" name="docusaurus_locale" content="zh-Hans"><meta data-rh="true" name="docsearch:language" content="zh-Hans"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="my-dify 项目中的 LangChain 具体实现详解 | Nice AI 资源库"><meta data-rh="true" name="description" content="先说结论：这个项目里 LangChain 负责“组件抽象”，LangGraph 负责“流程编排”"><meta data-rh="true" property="og:description" content="先说结论：这个项目里 LangChain 负责“组件抽象”，LangGraph 负责“流程编排”"><link data-rh="true" rel="canonical" href="https://xiaomingtx12.github.io/nice-ai-agent-study-resources/application-notes/dify准备文档/项目中的 LangChain 具体实现详解"><link data-rh="true" rel="alternate" href="https://xiaomingtx12.github.io/nice-ai-agent-study-resources/application-notes/dify准备文档/项目中的 LangChain 具体实现详解" hreflang="zh-Hans"><link data-rh="true" rel="alternate" href="https://xiaomingtx12.github.io/nice-ai-agent-study-resources/application-notes/dify准备文档/项目中的 LangChain 具体实现详解" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"应用沉淀","item":"https://xiaomingtx12.github.io/nice-ai-agent-study-resources/application-notes/"},{"@type":"ListItem","position":2,"name":"my-dify 项目中的 LangChain 具体实现详解","item":"https://xiaomingtx12.github.io/nice-ai-agent-study-resources/application-notes/dify准备文档/项目中的 LangChain 具体实现详解"}]}</script><link rel="stylesheet" href="/nice-ai-agent-study-resources/assets/css/styles.64c4b491.css">
+<script src="/nice-ai-agent-study-resources/assets/js/runtime~main.81571d16.js" defer="defer"></script>
+<script src="/nice-ai-agent-study-resources/assets/js/main.6bfb4225.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||"light"),document.documentElement.setAttribute("data-theme-choice",t||"light")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="跳到主要内容"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">跳到主要内容</a></div><nav aria-label="主导航" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="切换导航栏" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/nice-ai-agent-study-resources/"><b class="navbar__title text--truncate">Nice AI</b></a><a class="navbar__item navbar__link" href="/nice-ai-agent-study-resources/resources">资源导航</a><a class="navbar__item navbar__link" href="/nice-ai-agent-study-resources/notes">方法与复盘</a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/nice-ai-agent-study-resources/application-notes">应用沉淀</a><a class="navbar__item navbar__link" href="/nice-ai-agent-study-resources/templates">共建与模板</a><a class="navbar__item navbar__link" href="/nice-ai-agent-study-resources/about">关于我</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><div class="navbarSearchContainer_Bca1"><div class="navbar__search searchBarContainer_NW3z" dir="ltr"><input placeholder="搜索" aria-label="Search" class="navbar__search-input searchInput_YFbd" value=""><div class="loadingRing_RJI3 searchBarLoadingRing_YnHq"><div></div><div></div><div></div><div></div></div></div></div><a href="https://github.com/xiaomingtx12/nice-ai-agent-study-resources" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="切换浅色/暗黑模式（当前为system mode）"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0"><div class="docsWrapper_hBAB"><button aria-label="回到顶部" class="clean-btn theme-back-to-top-button backToTopButton_sjWU" type="button"></button><div class="docRoot_UBD9"><aside class="theme-doc-sidebar-container docSidebarContainer_YfHR"><div class="sidebarViewport_aRkj"><div class="sidebar_njMd"><nav aria-label="文档侧边栏" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/nice-ai-agent-study-resources/"><span title="Nice AI 资源库" class="linkLabel_WmDU">Nice AI 资源库</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/nice-ai-agent-study-resources/resources/"><span title="资源导航" class="categoryLinkLabel_W154">  资源导航</span></a><button aria-label="折叠侧边栏分类 &#x27;资源导航&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/ai-agent-book/"><span title="AI Agent Book" class="categoryLinkLabel_W154">AI Agent Book</span></a><button aria-label="折叠侧边栏分类 &#x27;AI Agent Book&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-3 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/ai-agent-book/notes/"><span title="学习沉淀" class="categoryLinkLabel_W154">学习沉淀</span></a><button aria-label="折叠侧边栏分类 &#x27;学习沉淀&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/ai-agent-book/notes/chapter-level-critique"><span title="章节级锐评：哪些章值得先看，哪些别急着啃" class="linkLabel_WmDU">章节级锐评：哪些章值得先看，哪些别急着啃</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/ai-agent-book/notes/why-it-feels-like-an-architecture-manual"><span title="为什么我把它看成“架构手册”而不是普通教程" class="linkLabel_WmDU">为什么我把它看成“架构手册”而不是普通 教程</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/ai-agent-book/notes/how-i-plan-to-read-it"><span title="我准备怎么读这本书，才不至于只剩概念感" class="linkLabel_WmDU">我准备怎么读这本书，才不至于只剩概念感</span></a></li></ul></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/ai-agent-book/review"><span title="AI Agent Book 锐评" class="linkLabel_WmDU">AI Agent Book 锐评</span></a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/claude-code-architecture/"><span title="Claude Code Architecture（CCB）" class="categoryLinkLabel_W154">Claude Code Architecture（CCB）</span></a><button aria-label="折叠侧边栏分类 &#x27;Claude Code Architecture（CCB）&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-3 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/claude-code-architecture/notes/"><span title="学习沉淀" class="categoryLinkLabel_W154">学习沉淀</span></a><button aria-label="折叠侧边栏分类 &#x27;学习沉淀&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/claude-code-architecture/notes/why-i-see-it-as-a-reverse-engineering-whitepaper"><span title="为什么我把它看成逆向架构白皮书" class="linkLabel_WmDU">为什么我把它看成逆向架构白皮书</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/claude-code-architecture/notes/how-i-separate-it-from-learn-claude-code"><span title="怎么把它和 Learn Claude Code 区分开来看" class="linkLabel_WmDU">怎么把它和 Learn Claude Code 区分开来看</span></a></li></ul></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/claude-code-architecture/review"><span title="Claude Code Architecture（CCB）锐评" class="linkLabel_WmDU">Claude Code Architecture（CCB）锐评</span></a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/easy-vibe/"><span title="Easy-Vibe" class="categoryLinkLabel_W154">Easy-Vibe</span></a><button aria-label="折叠侧边栏分类 &#x27;Easy-Vibe&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-3 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/easy-vibe/notes/"><span title="学习沉淀" class="categoryLinkLabel_W154">学习沉淀</span></a><button aria-label="折叠侧边栏分类 &#x27;学习沉淀&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/easy-vibe/notes/why-i-see-it-as-an-ai-coding-learning-path"><span title="为什么我把它看成 AI 编程学习路径，而不是普通教程" class="linkLabel_WmDU">为什么我把它看成 AI 编程学习路径，而不是普通教程</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/easy-vibe/notes/how-i-distinguish-it-from-other-agent-resources"><span title="怎么把它和站里其他 Agent 资源区分开来看" class="linkLabel_WmDU">怎么把它和站里其他 Agent 资源区分开来看</span></a></li></ul></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/easy-vibe/review"><span title="Easy-Vibe 锐评" class="linkLabel_WmDU">Easy-Vibe 锐评</span></a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/hello-agents/"><span title="HelloAgents" class="categoryLinkLabel_W154">HelloAgents</span></a><button aria-label="折叠侧边栏分类 &#x27;HelloAgents&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-3 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/hello-agents/notes/"><span title="学习沉淀" class="categoryLinkLabel_W154">学习沉淀</span></a><button aria-label="折叠侧边栏分类 &#x27;学习沉淀&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/hello-agents/notes/why-i-treat-it-as-a-map"><span title="先别急着通读：我为什么先把它当地图" class="linkLabel_WmDU">先别急着通读：我为什么先把它当地图</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/hello-agents/notes/how-i-plan-to-study-it"><span title="怎么学这套教程更划算" class="linkLabel_WmDU">怎么学这套教程更划算</span></a></li></ul></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/hello-agents/review"><span title="HelloAgents 锐评" class="linkLabel_WmDU">HelloAgents 锐评</span></a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/learn-claude-code/"><span title="Learn Claude Code" class="categoryLinkLabel_W154">Learn Claude Code</span></a><button aria-label="折叠侧边栏分类 &#x27;Learn Claude Code&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-3 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/learn-claude-code/notes/"><span title="学习沉淀" class="categoryLinkLabel_W154">学习沉淀</span></a><button aria-label="折叠侧边栏分类 &#x27;学习沉淀&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/learn-claude-code/notes/why-i-see-it-as-an-agent-harness-course"><span title="为什么我把它看成“agent harness 拆解课”" class="linkLabel_WmDU">为什么我把它看成“agent harness 拆解课”</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/learn-claude-code/notes/how-i-would-pair-it-with-other-resources"><span title="怎么把它和别的 Agent 资源搭配着学" class="linkLabel_WmDU">怎么把它和别的 Agent 资源搭配着学</span></a></li></ul></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/learn-claude-code/review"><span title="Learn Claude Code 锐评" class="linkLabel_WmDU">Learn Claude Code 锐评</span></a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/openclaw-book/"><span title="OpenClaw 源码解析" class="categoryLinkLabel_W154">OpenClaw 源码解析</span></a><button aria-label="折叠侧边栏分类 &#x27;OpenClaw 源码解析&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-3 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/resources/openclaw-book/notes/"><span title="学习沉淀" class="categoryLinkLabel_W154">学习沉淀</span></a><button aria-label="折叠侧边栏分类 &#x27;学习沉淀&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/openclaw-book/notes/why-i-see-it-as-a-control-plane-walkthrough"><span title="为什么我把它看成 control plane 源码导读" class="linkLabel_WmDU">为什么我把它看成 control plane 源码导读</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-4 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/openclaw-book/notes/how-to-read-it-without-drowning-in-details"><span title="怎么读这条资源，才不会淹死在大项目细节里" class="linkLabel_WmDU">怎么读这条资源，才不会淹死在大项目细节里</span></a></li></ul></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/resources/openclaw-book/review"><span title="OpenClaw 源码解析 锐评" class="linkLabel_WmDU">OpenClaw 源码解析 锐评</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/nice-ai-agent-study-resources/notes/"><span title="方法与复盘" class="categoryLinkLabel_W154">方法与复盘</span></a><button aria-label="展开侧边栏分类 &#x27;方法与复盘&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--active" href="/nice-ai-agent-study-resources/application-notes/"><span title="应用沉淀" class="categoryLinkLabel_W154">应用沉淀</span></a><button aria-label="折叠侧边栏分类 &#x27;应用沉淀&#x27;" aria-expanded="true" type="button" class="clean-btn menu__caret"></button></div><ul class="menu__list"><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" tabindex="0" href="/nice-ai-agent-study-resources/application-notes/dify-type-application/"><span title="一站式Agent开发平台实践" class="categoryLinkLabel_W154">一站式Agent开发平台实践</span></a><button aria-label="展开侧边栏分类 &#x27;一站式Agent开发平台实践&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/application-notes/what-i-want-to-write-here"><span title="怎么把一篇 AI 应用文档写得真正有用" class="linkLabel_WmDU">怎么把一篇 AI 应用文档写得真正有用</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/nice-ai-agent-study-resources/application-notes/dify准备文档/RAG 检索增强链路与会话记忆机制实现详解"><span title="dify准备文档" class="categoryLinkLabel_W154">dify准备文档</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/application-notes/dify准备文档/RAG 检索增强链路与会话记忆机制实现详解"><span title="my-dify RAG 检索增强链路与会话记忆机制实现详解" class="linkLabel_WmDU">my-dify RAG 检索增强链路与会话记忆机制实现详解</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/application-notes/dify准备文档/可视化工作流引擎 LangGraph 实现详解"><span title="my-dify 可视化工作流引擎 LangGraph 实现详解" class="linkLabel_WmDU">my-dify 可视化工作流引擎 LangGraph 实现详解</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/application-notes/dify准备文档/插件工具平台与多模型统一管理实现详解"><span title="my-dify 插件工具平台与多模型统一管理实现详解" class="linkLabel_WmDU">my-dify 插件工具平台与多模型统一管理实现详解</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/application-notes/dify准备文档/智能体双模式执行 LangGraph 实现详解"><span title="my-dify 智能体双模式执行 LangGraph 实现详解" class="linkLabel_WmDU">my-dify 智能体双模式执行 LangGraph 实现详解</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/nice-ai-agent-study-resources/application-notes/dify准备文档/项目中的 LangChain 具体实现详解"><span title="my-dify 项目中的 LangChain 具体实现详解" class="linkLabel_WmDU">my-dify 项目中的 LangChain 具体实现详解</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/nice-ai-agent-study-resources/application-notes/dify准备文档/项目中的 LangGraph 具体实现详解"><span title="my-dify 项目中的 LangGraph 具体实现详解" class="linkLabel_WmDU">my-dify 项目中的 LangGraph 具体实现详解</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist" href="/nice-ai-agent-study-resources/templates/"><span title="共建与模板" class="categoryLinkLabel_W154">共建与模板</span></a><button aria-label="展开侧边栏分类 &#x27;共建与模板&#x27;" aria-expanded="false" type="button" class="clean-btn menu__caret"></button></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/nice-ai-agent-study-resources/about/"><span title="关于我" class="linkLabel_WmDU">关于我</span></a></li></ul></nav></div></div></aside><main class="docMainContainer_TBSr"><div class="container padding-top--md padding-bottom--lg"><div class="row"><div class="col docItemCol_VOVn"><div class="docItemContainer_Djhp"><article><nav class="theme-doc-breadcrumbs breadcrumbsContainer_Z_bl" aria-label="页面路径"><ul class="breadcrumbs"><li class="breadcrumbs__item"><a aria-label="主页面" class="breadcrumbs__link" href="/nice-ai-agent-study-resources/"><svg viewBox="0 0 24 24" class="breadcrumbHomeIcon_YNFT"><path d="M10 19v-5h4v5c0 .55.45 1 1 1h3c.55 0 1-.45 1-1v-7h1.7c.46 0 .68-.57.33-.87L12.67 3.6c-.38-.34-.96-.34-1.34 0l-8.36 7.53c-.34.3-.13.87.33.87H5v7c0 .55.45 1 1 1h3c.55 0 1-.45 1-1z" fill="currentColor"></path></svg></a></li><li class="breadcrumbs__item"><a class="breadcrumbs__link" href="/nice-ai-agent-study-resources/application-notes/"><span>应用沉淀</span></a></li><li class="breadcrumbs__item"><span class="breadcrumbs__link">dify准备文档</span></li><li class="breadcrumbs__item breadcrumbs__item--active"><span class="breadcrumbs__link">my-dify 项目中的 LangChain 具体实现详解</span></li></ul></nav><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_ITEo"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">本页总览</button></div><div class="theme-doc-markdown markdown"><header><h1>my-dify 项目中的 LangChain 具体实现详解</h1></header>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="先说结论这个项目里-langchain-负责组件抽象langgraph-负责流程编排">先说结论：这个项目里 LangChain 负责“组件抽象”，LangGraph 负责“流程编排”<a href="#先说结论这个项目里-langchain-负责组件抽象langgraph-负责流程编排" class="hash-link" aria-label="先说结论：这个项目里 LangChain 负责“组件抽象”，LangGraph 负责“流程编排”的直接链接" title="先说结论：这个项目里 LangChain 负责“组件抽象”，LangGraph 负责“流程编排”的直接链接" translate="no">​</a></h2>
+<p>如果只看项目名词，很容易把 LangChain 和 LangGraph 混在一起。这个仓库里，两者分工其实很清楚：</p>
+<ul>
+<li class="">LangChain 负责统一组件接口<!-- -->
+<ul>
+<li class="">模型接口</li>
+<li class="">Prompt 接口</li>
+<li class="">Output Parser 接口</li>
+<li class="">Tool 接口</li>
+<li class="">Message 接口</li>
+<li class="">Document / Loader / Splitter / Retriever / VectorStore / Embeddings 接口</li>
+</ul>
+</li>
+<li class="">LangGraph 负责控制流编排<!-- -->
+<ul>
+<li class="">DAG</li>
+<li class="">条件分支</li>
+<li class="">循环</li>
+<li class="">状态归并</li>
+</ul>
+</li>
+</ul>
+<p>所以这份文档讲的重点不是“LangChain 怎么替代 LangGraph”，而是：</p>
+<ul>
+<li class="">LangChain 的每个核心组件到底是什么</li>
+<li class="">在这个项目里是怎么被组合起来的</li>
+<li class="">为什么项目没有直接用 LangChain 内置 Agent，而是自己在 LangGraph 上编排，但仍然大量复用 LangChain 组件</li>
+</ul>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="1-这个项目里实际用到的-langchain-生态不是一个包而是一整套分层">1. 这个项目里实际用到的 LangChain 生态，不是一个包，而是一整套分层<a href="#1-这个项目里实际用到的-langchain-生态不是一个包而是一整套分层" class="hash-link" aria-label="1. 这个项目里实际用到的 LangChain 生态，不是一个包，而是一整套分层的直接链接" title="1. 这个项目里实际用到的 LangChain 生态，不是一个包，而是一整套分层的直接链接" translate="no">​</a></h2>
+<p>当前本地环境里能确认到这些版本：</p>
+<ul>
+<li class=""><code>langchain==1.2.3</code></li>
+<li class=""><code>langchain_core==1.2.7</code></li>
+<li class=""><code>langchain_classic==1.0.1</code></li>
+<li class=""><code>langchain_community==0.4.1</code></li>
+<li class=""><code>langchain_openai==1.1.7</code></li>
+<li class=""><code>langchain_text_splitters==1.1.0</code></li>
+<li class=""><code>langchain_weaviate==0.0.6</code></li>
+<li class=""><code>langchain_mcp_adapters==0.2.1</code></li>
+</ul>
+<p>这件事本身就值得在面试里讲，因为它解释了为什么项目里 import 路径看起来很分散：</p>
+<ul>
+<li class=""><code>langchain_core</code>：最核心的协议层</li>
+<li class=""><code>langchain_openai</code>：模型适配器</li>
+<li class=""><code>langchain_community</code>：社区组件，比如 Embeddings、DocumentLoader、FAISS、Google Serper</li>
+<li class=""><code>langchain_text_splitters</code>：文本切分</li>
+<li class=""><code>langchain_weaviate</code>：向量库适配</li>
+<li class=""><code>langchain_classic</code>：经典组件，比如 <code>EnsembleRetriever</code>、<code>CacheBackedEmbeddings</code></li>
+</ul>
+<p>所以这个项目里的“用了 LangChain”，更准确地说是：</p>
+<ul>
+<li class="">以 <code>langchain_core</code> 为主协议层</li>
+<li class="">以不同扩展包承接模型、向量库、加载器、工具和检索器</li>
+</ul>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="2-先把-langchain-的核心组件和典型组装方式讲清楚">2. 先把 LangChain 的核心组件和典型组装方式讲清楚<a href="#2-先把-langchain-的核心组件和典型组装方式讲清楚" class="hash-link" aria-label="2. 先把 LangChain 的核心组件和典型组装方式讲清楚的直接链接" title="2. 先把 LangChain 的核心组件和典型组装方式讲清楚的直接链接" translate="no">​</a></h2>
+<p>LangChain 最核心的心智模型，不是“一个万能 Agent 框架”，而是“标准化组件 + 组合表达式”。</p>
+<p>在这个项目里最常见的组装方式有四种。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="21-最常见prompt--llm--parser">2.1 最常见：<code>Prompt | LLM | Parser</code><a href="#21-最常见prompt--llm--parser" class="hash-link" aria-label="21-最常见prompt--llm--parser的直接链接" title="21-最常见prompt--llm--parser的直接链接" translate="no">​</a></h3>
+<p>这是 LCEL 的基本链式写法。项目里很多链都是这么拼出来的：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">chain </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> prompt </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> llm </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> StrOutputParser</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">result </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> chain</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">invoke</span><span class="token punctuation" style="color:#393A34">(</span><span class="token builtin">input</span><span class="token punctuation" style="color:#393A34">)</span><br></div></code></pre></div></div>
+<p>这条链里每个组件的职责分别是：</p>
+<ul>
+<li class=""><code>prompt</code>：把输入变量填成最终提示词</li>
+<li class=""><code>llm</code>：调模型</li>
+<li class=""><code>parser</code>：把模型输出转成你想要的结构</li>
+</ul>
+<p>项目里的真实例子：</p>
+<ul>
+<li class=""><code>internal/service/ai_service.py</code></li>
+<li class=""><code>internal/service/conversation_service.py</code></li>
+<li class=""><code>internal/service/workflow_generator_service.py</code></li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="22-并行执行runnableparallel">2.2 并行执行：<code>RunnableParallel</code><a href="#22-并行执行runnableparallel" class="hash-link" aria-label="22-并行执行runnableparallel的直接链接" title="22-并行执行runnableparallel的直接链接" translate="no">​</a></h3>
+<p>当几条链互不依赖，但输入相同，就可以并行跑。</p>
+<p>项目里的典型例子在 <code>internal/service/app_service.py</code>：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">generate_app_config_chain </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> RunnableParallel</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token punctuation" style="color:#393A34">{</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">        </span><span class="token string" style="color:#e3116c">&quot;icon&quot;</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> generate_icon_chain</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">        </span><span class="token string" style="color:#e3116c">&quot;preset_prompt&quot;</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> generate_preset_prompt_chain</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token punctuation" style="color:#393A34">}</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">)</span><br></div></code></pre></div></div>
+<p>它的作用不是“并发线程管理器”，而是 LangChain 语义上的并行 runnable 组合器。输入同一份 <code>{&quot;name&quot;: ..., &quot;description&quot;: ...}</code>，输出一个字典：</p>
+<ul>
+<li class=""><code>icon</code></li>
+<li class=""><code>preset_prompt</code></li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="23-工具化basetool--tool--structuredtool">2.3 工具化：<code>BaseTool</code> / <code>@tool</code> / <code>StructuredTool</code><a href="#23-工具化basetool--tool--structuredtool" class="hash-link" aria-label="23-工具化basetool--tool--structuredtool的直接链接" title="23-工具化basetool--tool--structuredtool的直接链接" translate="no">​</a></h3>
+<p>LangChain 的工具抽象，本质上是在解决一个问题：</p>
+<ul>
+<li class="">如何把“一个外部能力”变成模型和 Agent 都能调用的标准对象</li>
+</ul>
+<p>最关键的统一协议是 <code>BaseTool</code>。项目里几乎所有外部能力最后都被收敛成了 <code>BaseTool</code>：</p>
+<ul>
+<li class="">内置工具</li>
+<li class="">API Tool</li>
+<li class="">MCP Tool</li>
+<li class="">Workflow Tool</li>
+<li class="">Dataset Retrieval Tool</li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="24-检索链document---embeddings---vectorstore---retriever---tool">2.4 检索链：<code>Document -&gt; Embeddings -&gt; VectorStore -&gt; Retriever -&gt; Tool</code><a href="#24-检索链document---embeddings---vectorstore---retriever---tool" class="hash-link" aria-label="24-检索链document---embeddings---vectorstore---retriever---tool的直接链接" title="24-检索链document---embeddings---vectorstore---retriever---tool的直接链接" translate="no">​</a></h3>
+<p>RAG 在 LangChain 里的典型链路，不是某个单类完成，而是一串组件接力：</p>
+<ol>
+<li class=""><code>DocumentLoader</code> 把文件变成 <code>Document</code></li>
+<li class=""><code>TextSplitter</code> 把文档切成片段</li>
+<li class=""><code>Embeddings</code> 把文本转成向量</li>
+<li class=""><code>VectorStore</code> 存向量</li>
+<li class=""><code>Retriever</code> 执行召回</li>
+<li class="">必要时再封成 Tool，给 Agent 或 Workflow 使用</li>
+</ol>
+<p>这个项目的 RAG 全链路几乎就是按这套组件模型搭出来的。</p>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="3-这个项目里-langchain-最关键的组件分别是什么">3. 这个项目里 LangChain 最关键的组件分别是什么<a href="#3-这个项目里-langchain-最关键的组件分别是什么" class="hash-link" aria-label="3. 这个项目里 LangChain 最关键的组件分别是什么的直接链接" title="3. 这个项目里 LangChain 最关键的组件分别是什么的直接链接" translate="no">​</a></h2>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="31-baselanguagemodel统一模型接口">3.1 <code>BaseLanguageModel</code>：统一模型接口<a href="#31-baselanguagemodel统一模型接口" class="hash-link" aria-label="31-baselanguagemodel统一模型接口的直接链接" title="31-baselanguagemodel统一模型接口的直接链接" translate="no">​</a></h3>
+<p>LangChain 的模型接口不是简单的 SDK 包装，而是一套统一协议。</p>
+<p>这个项目没有直接把各厂商 SDK 散着用，而是先在 <code>internal/core/language_model/entities/model_entity.py</code> 里定义了：</p>
+<ul>
+<li class=""><code>BaseLanguageModel(LCBaseLanguageModel, ABC)</code></li>
+</ul>
+<p>也就是说，项目自己的模型基类，是直接建立在 LangChain 的 <code>BaseLanguageModel</code> 之上的。</p>
+<p>它额外补了两类项目能力：</p>
+<ul>
+<li class=""><code>features</code>
+<ul>
+<li class="">标记模型是否支持 <code>tool_call</code>、<code>agent_thought</code>、图片输入等</li>
+</ul>
+</li>
+<li class=""><code>metadata</code>
+<ul>
+<li class="">存价格、上下文等元信息</li>
+</ul>
+</li>
+</ul>
+<p>以及两个很实用的方法：</p>
+<ul>
+<li class=""><code>get_pricing()</code></li>
+<li class=""><code>convert_to_human_message()</code></li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="311-项目里的模型是怎么接入-langchain-的">3.1.1 项目里的模型是怎么接入 LangChain 的<a href="#311-项目里的模型是怎么接入-langchain-的" class="hash-link" aria-label="3.1.1 项目里的模型是怎么接入 LangChain 的的直接链接" title="3.1.1 项目里的模型是怎么接入 LangChain 的的直接链接" translate="no">​</a></h4>
+<p>项 目的具体 provider 类并不是完全从零实现，而是尽量复用 LangChain 已有模型适配器。</p>
+<p>比如：</p>
+<ul>
+<li class=""><code>internal/core/language_model/providers/openai/chat.py</code>
+<ul>
+<li class=""><code>class Chat(ChatOpenAI, BaseLanguageModel)</code></li>
+</ul>
+</li>
+<li class=""><code>internal/core/language_model/providers/openai/completion.py</code>
+<ul>
+<li class=""><code>class Completion(OpenAI, BaseLanguageModel)</code></li>
+</ul>
+</li>
+<li class=""><code>internal/core/language_model/providers/tongyi/chat.py</code>
+<ul>
+<li class="">也是基于 <code>ChatOpenAI</code>，<strong>只是改了兼容接口的 base URL</strong></li>
+</ul>
+</li>
+</ul>
+<p>这说明项目在模型层的策略非常清楚：</p>
+<ul>
+<li class="">能复用 LangChain 标准模型类就复用</li>
+<li class="">自己只补统一特性标记、价格元信息、消息转换等平台能力</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="312-languagemodelservice-在做什么">3.1.2 <code>LanguageModelService</code> 在做什么<a href="#312-languagemodelservice-在做什么" class="hash-link" aria-label="312-languagemodelservice-在做什么的直接链接" title="312-languagemodelservice-在做什么的直接链接" translate="no">​</a></h4>
+<p><code>internal/service/language_model_service.py</code> 做的是“LangChain 模型实例装配”：</p>
+<ol>
+<li class="">根据 <code>provider + model + parameters</code> 找到 provider</li>
+<li class="">取出 <code>model_entity</code></li>
+<li class="">根据 <code>model_type</code> 找到具体 <code>model_class</code></li>
+<li class="">注入 API Key</li>
+<li class="">用 <code>attributes + parameters + features + metadata</code> 实例化</li>
+</ol>
+<p>所以项目没有把 LangChain 模型实例直接散着 new，而是统一走服务层装配。</p>
+<p>这层的价值是：</p>
+<ul>
+<li class="">用户级 API Key 注入统一</li>
+<li class="">多 provider 的构造参数被统一管理</li>
+<li class="">上层拿到的始终是 LangChain 模型对象</li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="32-chatprompttemplate把提示词模板标准化">3.2 <code>ChatPromptTemplate</code>：把提示词模板标准化<a href="#32-chatprompttemplate把提示词模板标准化" class="hash-link" aria-label="32-chatprompttemplate把提示词模板标准化的直接链接" title="32-chatprompttemplate把提示词模板标准化的直接链接" translate="no">​</a></h3>
+<p><code>ChatPromptTemplate</code> 的本质是：</p>
+<ul>
+<li class="">不是字符串拼接</li>
+<li class="">而是“带变量的消息模板”</li>
+</ul>
+<p>项目里有三种典型用法。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="321-from_template">3.2.1 <code>from_template</code><a href="#321-from_template" class="hash-link" aria-label="321-from_template的直接链接" title="321-from_template的直接链接" translate="no">​</a></h4>
+<p>适合单模板填参。</p>
+<p>比如 <code>internal/service/conversation_service.py</code> 的摘要生成：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">prompt </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> ChatPromptTemplate</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">from_template</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">SUMMARIZER_TEMPLATE</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">summary_chain </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> prompt </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> llm </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> StrOutputParser</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">)</span><br></div></code></pre></div></div>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="322-from_messages">3.2.2 <code>from_messages</code><a href="#322-from_messages" class="hash-link" aria-label="322-from_messages的直接链接" title="322-from_messages的直接链接" translate="no">​</a></h4>
+<p>适合显式区分 system 和 human 消息。</p>
+<p>比如 <code>internal/service/ai_service.py</code> 的 prompt 优化链：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">prompt_template </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> ChatPromptTemplate</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">from_messages</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token punctuation" style="color:#393A34">[</span><span class="token punctuation" style="color:#393A34">(</span><span class="token string" style="color:#e3116c">&quot;system&quot;</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"> OPTIMIZE_PROMPT_TEMPLATE</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"> </span><span class="token punctuation" style="color:#393A34">(</span><span class="token string" style="color:#e3116c">&quot;human&quot;</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"> </span><span class="token string" style="color:#e3116c">&quot;{prompt}&quot;</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">]</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">)</span><br></div></code></pre></div></div>
+<p>还有 <code>conversation_service.py</code> 里生成会话标题：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">prompt </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> ChatPromptTemplate</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">from_messages</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token punctuation" style="color:#393A34">[</span><span class="token punctuation" style="color:#393A34">(</span><span class="token string" style="color:#e3116c">&quot;system&quot;</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"> CONVERSATION_NAME_TEMPLATE</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"> </span><span class="token punctuation" style="color:#393A34">(</span><span class="token string" style="color:#e3116c">&quot;human&quot;</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"> </span><span class="token string" style="color:#e3116c">&quot;{query}&quot;</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">]</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">)</span><br></div></code></pre></div></div>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="323-项目为什么要用-chatprompttemplate">3.2.3 项目为什么要用 <code>ChatPromptTemplate</code><a href="#323-项目为什么要用-chatprompttemplate" class="hash-link" aria-label="323-项目为什么要用-chatprompttemplate的直接链接" title="323-项目为什么要用-chatprompttemplate的直接链接" translate="no">​</a></h4>
+<p>不是为了显得规范，而是因为它天然兼容：</p>
+<ul>
+<li class="">LangChain LLM / ChatModel 输入协议</li>
+<li class="">后续 <code>| llm | parser</code> 的链式写法</li>
+<li class="">结构化输出和流式输出</li>
+</ul>
+<p>这使得项目里很多“AI 小功能”都能复用同一套写法。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="33-stroutputparser-和-with_structured_output">3.3 <code>StrOutputParser</code> 和 <code>with_structured_output</code><a href="#33-stroutputparser-和-with_structured_output" class="hash-link" aria-label="33-stroutputparser-和-with_structured_output的直接链接" title="33-stroutputparser-和-with_structured_output的直接链接" translate="no">​</a></h3>
+<p>这两个组件都是在解决“模型输出怎么落地”的问题。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="331-stroutputparser">3.3.1 <code>StrOutputParser</code><a href="#331-stroutputparser" class="hash-link" aria-label="331-stroutputparser的直接链接" title="331-stroutputparser的直接链接" translate="no">​</a></h4>
+<p>它最简单，意思就是：</p>
+<ul>
+<li class="">你不需要复杂对象</li>
+<li class="">只要模型输出的纯文本</li>
+</ul>
+<p>项目里用得非常多：</p>
+<ul>
+<li class="">AIService 优化 prompt</li>
+<li class="">ConversationService 生成摘要</li>
+<li class="">ConversationService 生成建议问题</li>
+<li class="">WorkflowGeneratorService 生成工作流配置 JSON 字符串</li>
+<li class="">AppService 生成 icon prompt、preset prompt</li>
+</ul>
+<p>也就是说，这个项目大量 AI 能力本质上都是：</p>
+<ul>
+<li class="">Prompt</li>
+<li class="">LLM</li>
+<li class="">字符串解析</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="332-with_structured_output">3.3.2 <code>with_structured_output</code><a href="#332-with_structured_output" class="hash-link" aria-label="332-with_structured_output的直接链接" title="332-with_structured_output的直接链接" translate="no">​</a></h4>
+<p>这个能力比 <code>StrOutputParser</code> 更进一步：</p>
+<ul>
+<li class="">不是拿字符串</li>
+<li class="">而是直接让模型按 Pydantic 结构输出</li>
+</ul>
+<p>项目里的典型例子在 <code>conversation_service.py</code>：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">structured_llm </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> llm</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">with_structured_output</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">ConversationInfo</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">chain </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> prompt </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> structured_llm</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">conversation_info </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> chain</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">invoke</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">{</span><span class="token string" style="color:#e3116c">&quot;query&quot;</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> query</span><span class="token punctuation" style="color:#393A34">}</span><span class="token punctuation" style="color:#393A34">)</span><br></div></code></pre></div></div>
+<p>这里 <code>ConversationInfo</code> 是项目自己的 Pydantic 模型。这个设计的好处是：</p>
+<ul>
+<li class="">会话命名不再依赖手写 JSON 解析</li>
+<li class="">输出格式稳定</li>
+<li class="">上层直接拿结构化对象，而不是半结构文本</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="333-为什么不是所有地方都用-with_structured_output">3.3.3 为什么不是所有地方都用 <code>with_structured_output</code><a href="#333-为什么不是所有地方都用-with_structured_output" class="hash-link" aria-label="333-为什么不是所有地方都用-with_structured_output的直接链接" title="333-为什么不是所有地方都用-with_structured_output的直接链接" translate="no">​</a></h4>
+<p>因为它要求：</p>
+<ul>
+<li class="">模型能力更稳定</li>
+<li class="">输出结构更确定</li>
+</ul>
+<p>而像“建议问题生成”这种场景，项目当前还是选择：</p>
+<ul>
+<li class="">让模型输出 JSON 数组文本</li>
+<li class="">再手工清理 markdown code block</li>
+<li class="">再自己解析 JSON</li>
+</ul>
+<p>这属于工程上的保守取舍，不是不会用，而是看场景选择。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="34-runnablelcel-和-runnableparallel">3.4 <code>Runnable</code>、LCEL 和 <code>RunnableParallel</code><a href="#34-runnablelcel-和-runnableparallel" class="hash-link" aria-label="34-runnablelcel-和-runnableparallel的直接链接" title="34-runnablelcel-和-runnableparallel的直接链接" translate="no">​</a></h3>
+<p>LangChain 里很多东西之所以能用 <code>|</code> 串起来，背后依赖的是 Runnable 协议。</p>
+<p>项目里这套协议主要落在三种对象上：</p>
+<ul>
+<li class="">Prompt 是 runnable</li>
+<li class="">LLM 是 runnable</li>
+<li class="">一些项目自定义对象也做成了 runnable</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="341-baseagent-为什么继承-runnable">3.4.1 <code>BaseAgent</code> 为什么继承 <code>Runnable</code><a href="#341-baseagent-为什么继承-runnable" class="hash-link" aria-label="341-baseagent-为什么继承-runnable的直接链接" title="341-baseagent-为什么继承-runnable的直接链接" translate="no">​</a></h4>
+<p><code>internal/core/agent/agents/base_agent.py</code>：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token keyword" style="color:#00009f">class</span><span class="token plain"> </span><span class="token class-name">BaseAgent</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">Serializable</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"> Runnable</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">:</span><br></div></code></pre></div></div>
+<p>这说明项目不是把 Agent 当成一个普通 service，而是把它也做成 LangChain 风格的可执行对象。于是它自然拥有：</p>
+<ul>
+<li class=""><code>invoke()</code></li>
+<li class=""><code>stream()</code></li>
+</ul>
+<p>这对上层服务很重要，因为 App / OpenAPI / WebApp 都能统一用 Agent 的 runnable 调用方式。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="342-basenode-为什么继承-runnableserializable">3.4.2 <code>BaseNode</code> 为什么继承 <code>RunnableSerializable</code><a href="#342-basenode-为什么继承-runnableserializable" class="hash-link" aria-label="342-basenode-为什么继承-runnableserializable的直接链接" title="342-basenode-为什么继承-runnableserializable的直接链接" translate="no">​</a></h4>
+<p>Workflow 节点基类 <code>internal/core/workflow/nodes/base_node.py</code>：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token keyword" style="color:#00009f">class</span><span class="token plain"> </span><span class="token class-name">BaseNode</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">RunnableSerializable</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"> ABC</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">:</span><br></div></code></pre></div></div>
+<p>虽然 Workflow 最终用的是 LangGraph，但节点本身仍然选择了 LangChain runnable 体系。这样带来的好处是：</p>
+<ul>
+<li class="">节点是标准可执行对象</li>
+<li class="">Graph 编译器只需要 <code>graph.add_node(name, node_instance)</code></li>
+<li class="">节点序列化、统一协议、后续扩展都更自然</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="343-runnableparallel-在项目里的真实作用">3.4.3 <code>RunnableParallel</code> 在项目里的真实作用<a href="#343-runnableparallel-在项目里的真实作用" class="hash-link" aria-label="343-runnableparallel-在项目里的真实作用的直接链接" title="343-runnableparallel-在项目里的真实作用的直接链接" translate="no">​</a></h4>
+<p><code>internal/service/app_service.py</code> 里有一段很典型：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">generate_icon_chain </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> ChatPromptTemplate</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">from_template</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"> </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> llm </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> StrOutputParser</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"> </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> qwen_image_wrapper</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">_run</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">generate_preset_prompt_chain </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> ChatPromptTemplate</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">from_messages</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"> </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> llm </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> StrOutputParser</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">generate_app_config_chain </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> RunnableParallel</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token punctuation" style="color:#393A34">{</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">        </span><span class="token string" style="color:#e3116c">&quot;icon&quot;</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> generate_icon_chain</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">        </span><span class="token string" style="color:#e3116c">&quot;preset_prompt&quot;</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> generate_preset_prompt_chain</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token punctuation" style="color:#393A34">}</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">)</span><br></div></code></pre></div></div>
+<p>这说明项目对 LangChain 的使用不是“只会串直线链”，而是已经用了 LCEL 的组合表达能力。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="35-basetool--tool--structuredtool整个工具平台的统一接口">3.5 <code>BaseTool</code> / <code>@tool</code> / <code>StructuredTool</code>：整个工具平台的统一接口<a href="#35-basetool--tool--structuredtool整个工具平台的统一接口" class="hash-link" aria-label="35-basetool--tool--structuredtool整个工具平台的统一接口的直接链接" title="35-basetool--tool--structuredtool整个工具平台的统一接口的直接链接" translate="no">​</a></h3>
+<p>如果只看项目功能，会觉得它有很多工具类型：</p>
+<ul>
+<li class="">内置工具</li>
+<li class="">API Tool</li>
+<li class="">MCP Tool</li>
+<li class="">Workflow Tool</li>
+<li class="">Dataset Retrieval Tool</li>
+</ul>
+<p>但从 LangChain 视角看，它们最后都被统一成了 <code>BaseTool</code>。</p>
+<p>这其实是整个项目工具平台最重要的抽象层。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="351-basetool-是什么">3.5.1 <code>BaseTool</code> 是什么<a href="#351-basetool-是什么" class="hash-link" aria-label="351-basetool-是什么的直接链接" title="351-basetool-是什么的直接链接" translate="no">​</a></h4>
+<p>它的意义不是“有个 <code>_run</code> 方法”这么简单，而是：</p>
+<ul>
+<li class="">有名字</li>
+<li class="">有描述</li>
+<li class="">有参数 schema</li>
+<li class="">可以被模型 bind</li>
+<li class="">可以被 Agent 调用</li>
+<li class="">可以被 Workflow 节点或 App 配置统一注入</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="352-内置工具怎么做">3.5.2 内置工具怎么做<a href="#352-内置工具怎么做" class="hash-link" aria-label="3.5.2 内置工具怎么做的直接链接" title="3.5.2 内置工具怎么做的直接链接" translate="no">​</a></h4>
+<p>比如 <code>internal/core/tools/builtin_tools/providers/google/google_serper.py</code>：</p>
+<ul>
+<li class="">直接复用 <code>langchain_community.tools.GoogleSerperRun</code></li>
+<li class="">用自定义 <code>GoogleSerperArgsSchema</code> 补参数 schema</li>
+</ul>
+<p>这说明项目对 builtin tool 的策略是：</p>
+<ul>
+<li class="">能直接复用 LangChain 社区工具就复用</li>
+<li class="">只在外面包一层平台需要的 schema / provider 管理</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="353-api-tool-怎么做">3.5.3 API Tool 怎么做<a href="#353-api-tool-怎么做" class="hash-link" aria-label="3.5.3 API Tool 怎么做的直接链接" title="3.5.3 API Tool 怎么做的直接链接" translate="no">​</a></h4>
+<p><code>internal/core/tools/api_tools/providers/api_provider_manager.py</code> 里最关键的点是：</p>
+<ol>
+<li class="">根据 OpenAPI 解析结果拿到参数定义</li>
+<li class="">动态生成 Pydantic <code>args_schema</code></li>
+<li class="">生成真正发 HTTP 请求的函数</li>
+<li class="">用 <code>StructuredTool.from_function(...)</code> 包成标准工具</li>
+</ol>
+<p>也就是说，API Tool 本质上不是项目自己发请求就完了，而是：</p>
+<ul>
+<li class="">先转成 LangChain 的 <code>StructuredTool</code></li>
+<li class="">再纳入统一工具体系</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="354-mcp-tool-怎么做">3.5.4 MCP Tool 怎么做<a href="#354-mcp-tool-怎么做" class="hash-link" aria-label="3.5.4 MCP Tool 怎么做的直接链接" title="3.5.4 MCP Tool 怎么做的直接链接" translate="no">​</a></h4>
+<p>MCP 那边也是同一个思路。</p>
+<p><code>internal/core/mcp/adapters/langchain_adapter.py</code> 做了三件事：</p>
+<ol>
+<li class="">把 MCP 工具目录里的 JSON Schema 转成 Pydantic <code>args_schema</code></li>
+<li class="">定义 <code>MCPManagedTool(BaseTool)</code></li>
+<li class=""><code>_run()</code> 里把执行转发给 <code>MCPRuntimeManager.execute_tool(...)</code></li>
+</ol>
+<p>所以 MCP Tool 对 LangChain 来说，最后也只是一个标准 <code>BaseTool</code>。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="355-workflow-为什么也能变成工具">3.5.5 Workflow 为什么也能变成工具<a href="#355-workflow-为什么也能变成工具" class="hash-link" aria-label="3.5.5 Workflow 为什么也能变成工具的直接链接" title="3.5.5 Workflow 为什么也能变成工具的直接链接" translate="no">​</a></h4>
+<p><code>internal/core/workflow/workflow.py</code> 里：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token keyword" style="color:#00009f">class</span><span class="token plain"> </span><span class="token class-name">Workflow</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">BaseTool</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">:</span><br></div></code></pre></div></div>
+<p>这意味着工作流不是“只能在工作流调试页里运行”，而是一个真正的 LangChain 工具。它有：</p>
+<ul>
+<li class=""><code>name</code></li>
+<li class=""><code>description</code></li>
+<li class=""><code>args_schema</code></li>
+<li class=""><code>_run()</code></li>
+</ul>
+<p>这也是为什么 <code>AppConfigService.get_langchain_tools_by_workflow_ids()</code> 能把发布后的 Workflow 重新装成工具，注入到 App / Agent。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="356-dataset-retrieval-为什么也被封成工具">3.5.6 Dataset Retrieval 为什么也被封成工具<a href="#356-dataset-retrieval-为什么也被封成工具" class="hash-link" aria-label="3.5.6 Dataset Retrieval 为什么也被封成工具的直接链接" title="3.5.6 Dataset Retrieval 为什么也被封成工具的直接链接" translate="no">​</a></h4>
+<p><code>internal/service/retrieval_service.py</code> 里用了 <code>@tool</code>：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token decorator annotation punctuation" style="color:#393A34">@tool</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">DATASET_RETRIEVAL_TOOL_NAME</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"> args_schema</span><span class="token operator" style="color:#393A34">=</span><span class="token plain">DatasetRetrievalInput</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token keyword" style="color:#00009f">def</span><span class="token plain"> </span><span class="token function" style="color:#d73a49">dataset_retrieval</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">query</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token builtin">str</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"> </span><span class="token operator" style="color:#393A34">-</span><span class="token operator" style="color:#393A34">&gt;</span><span class="token plain"> </span><span class="token builtin">str</span><span class="token punctuation" style="color:#393A34">:</span><br></div></code></pre></div></div>
+<p>这段代码的意义非常大：</p>
+<ul>
+<li class="">知识库检索不再只是“后端内部服务”</li>
+<li class="">它被暴露成 Agent 可调用的标准 Tool</li>
+</ul>
+<p>所以 Agent 不需要知道检索系统细节，它只知道自己手上有一个 <code>dataset_retrieval</code> 工具。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="36-消息对象humanmessageaimessagesystemmessagetoolmessage">3.6 消息对象：<code>HumanMessage</code>、<code>AIMessage</code>、<code>SystemMessage</code>、<code>ToolMessage</code><a href="#36-消息对象humanmessageaimessagesystemmessagetoolmessage" class="hash-link" aria-label="36-消息对象humanmessageaimessagesystemmessagetoolmessage的直接链接" title="36-消息对象humanmessageaimessagesystemmessagetoolmessage的直接链接" translate="no">​</a></h3>
+<p>LangChain 的消息抽象，是这个项目 Agent 体系的重要基础。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="361-为什么不能只用字符串">3.6.1 为什么不能只用字符串<a href="#361-为什么不能只用字符串" class="hash-link" aria-label="3.6.1 为什么不能只用字符串的直接链接" title="3.6.1 为什么不能只用字符串的直接链接" translate="no">​</a></h4>
+<p>因为 Agent 不是纯文本问答，它需要明确区分：</p>
+<ul>
+<li class="">用户说的话</li>
+<li class="">系统提示</li>
+<li class="">模型回复</li>
+<li class="">工具调用结果</li>
+</ul>
+<p>这正是 LangChain message schema 解决的问题。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="362-项目里怎么用这些消息">3.6.2 项目里怎么用这些消息<a href="#362-项目里怎么用这些消息" class="hash-link" aria-label="3.6.2 项目里怎么用这些消息的直接链接" title="3.6.2 项目里怎么用这些消息的直接链接" translate="no">​</a></h4>
+<p>在 <code>internal/core/agent/agents/function_call_agent.py</code> 里可以看到完整链路：</p>
+<ul>
+<li class="">用户输入封成 <code>HumanMessage</code></li>
+<li class="">预设系统提示封成 <code>SystemMessage</code></li>
+<li class="">模型回答封成 <code>AIMessage</code></li>
+<li class="">工具执行结果封成 <code>ToolMessage</code></li>
+</ul>
+<p>此外还用了：</p>
+<ul>
+<li class=""><code>RemoveMessage</code></li>
+<li class=""><code>messages_to_dict</code></li>
+</ul>
+<p>它们分别服务于：</p>
+<ul>
+<li class="">动态重写消息上下文</li>
+<li class="">事件流落库和前端展示</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="363-模型如何适配多模态消息">3.6.3 模型如何适配多模态消息<a href="#363-模型如何适配多模态消息" class="hash-link" aria-label="3.6.3 模型如何适配多模态消息的直接链接" title="3.6.3 模型如何适配多模态消  息的直接链接" translate="no">​</a></h4>
+<p>项目自己的 <code>BaseLanguageModel.convert_to_human_message()</code> 里做了一个很实用的封装：</p>
+<ul>
+<li class="">如果模型不支持图片输入，就返回普通 <code>HumanMessage(content=query)</code></li>
+<li class="">如果支持图片输入，就按 LangChain 多模态消息格式把 text 和 image_url 拼进 <code>HumanMessage.content</code></li>
+</ul>
+<p>这说明项目不是绕过 LangChain 消息规范自己造结构，而是直接沿用 LangChain message schema。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="37-documentrag-链路里的标准文本单元">3.7 <code>Document</code>：RAG 链路里的标准文本单元<a href="#37-documentrag-链路里的标准文本单元" class="hash-link" aria-label="37-documentrag-链路里的标准文本单元的直接链接" title="37-documentrag-链路里的标准文本单元的直接链接" translate="no">​</a></h3>
+<p>LangChain 里的 <code>Document</code> 很重要，但这个项目里有一个非常容易混淆的点：</p>
+<ul>
+<li class="">项目自己数据库里也有一个 ORM 模型叫 <code>Document</code></li>
+<li class="">LangChain 里也有 <code>Document</code></li>
+</ul>
+<p>所以项目源码里经常写成：</p>
+<ul>
+<li class=""><code>from langchain_core.documents import Document as LCDocument</code></li>
+</ul>
+<p>这是非常合理的做法，因为它们不是一回事：</p>
+<ul>
+<li class="">ORM <code>Document</code>：数据库中的文档记录</li>
+<li class=""><code>LCDocument</code>：LangChain 检索和切分链路里的文本对象</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="371-lcdocument-在项目里承接什么">3.7.1 <code>LCDocument</code> 在项目里承接什么<a href="#371-lcdocument-在项目里承接什么" class="hash-link" aria-label="371-lcdocument-在项目里承接什么的直接链接" title="371-lcdocument-在项目里承接什么的直接链接" translate="no">​</a></h4>
+<p>它至少承接三件事：</p>
+<ol>
+<li class="">文件加载后的文档对象</li>
+<li class="">文本切分后的片段对象</li>
+<li class="">召回结果对象</li>
+</ol>
+<p>也就是说，RAG 链路里跨阶段流转的“标准文本载体”，就是 LangChain Document。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="38-documentloader多格式文件接入">3.8 <code>DocumentLoader</code>：多格式文件接入<a href="#38-documentloader多格式文件接入" class="hash-link" aria-label="38-documentloader多格式文件接入的直接链接" title="38-documentloader多格式文件接入的直接链接" translate="no">​</a></h3>
+<p><code>internal/core/file_extractor/file_extractor.py</code> 就是项目里最典型的 LangChain Loader 落点。</p>
+<p>它根据文件后缀，动态选择不同 loader：</p>
+<ul>
+<li class=""><code>UnstructuredExcelLoader</code></li>
+<li class=""><code>UnstructuredPDFLoader</code></li>
+<li class=""><code>UnstructuredMarkdownLoader</code></li>
+<li class=""><code>UnstructuredHTMLLoader</code></li>
+<li class=""><code>UnstructuredCSVLoader</code></li>
+<li class=""><code>UnstructuredPowerPointLoader</code></li>
+<li class=""><code>UnstructuredXMLLoader</code></li>
+<li class=""><code>UnstructuredFileLoader</code></li>
+<li class=""><code>TextLoader</code></li>
+</ul>
+<p>这说明项目没有手写一堆 PDF/Markdown/Excel 解析逻辑，而是直接复用 LangChain 社区 loader 生态。</p>
+<p>Loader 做完以后，输出就是：</p>
+<ul>
+<li class=""><code>list[LCDocument]</code></li>
+</ul>
+<p>后面的清洗、切分、索引和检索都围绕这个标准对象继续处理。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="39-textsplitter把文档切成可索引片段">3.9 <code>TextSplitter</code>：把文档切成可索引片段<a href="#39-textsplitter把文档切成可索引片段" class="hash-link" aria-label="39-textsplitter把文档切成可索引片段的直接链接" title="39-textsplitter把文档切成可索引片段的直接链接" translate="no">​</a></h3>
+<p><code>internal/service/process_rule_service.py</code> 用的是：</p>
+<ul>
+<li class=""><code>TextSplitter</code></li>
+<li class=""><code>RecursiveCharacterTextSplitter</code></li>
+</ul>
+<p>它做的事情是：</p>
+<ol>
+<li class="">根据 <code>ProcessRule</code> 选择 chunk size、overlap、separator</li>
+<li class="">支持默认规则和自定义规则</li>
+<li class="">接受 <code>length_function</code></li>
+</ol>
+<p>这里一个很关键的项目细节是：</p>
+<ul>
+<li class=""><code>length_function</code> 不是固定 <code>len</code></li>
+<li class="">而是可以传 <code>EmbeddingsService.calculate_token_count</code></li>
+</ul>
+<p>这意味着项目的切分不是简单按字符数，而是可以按 token 近似约束来切片。</p>
+<p>在 <code>IndexingService._splitting()</code> 里，真实执行就是：</p>
+<ol>
+<li class="">先拿 <code>text_splitter</code></li>
+<li class="">再 <code>split_documents(lc_documents)</code></li>
+<li class="">最终拿到 <code>lc_segments</code></li>
+</ol>
+<p>这就是标准的 LangChain split pipeline。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="310-embeddings--cachebackedembeddings--redisstore">3.10 <code>Embeddings</code> / <code>CacheBackedEmbeddings</code> / <code>RedisStore</code><a href="#310-embeddings--cachebackedembeddings--redisstore" class="hash-link" aria-label="310-embeddings--cachebackedembeddings--redisstore的直接链接" title="310-embeddings--cachebackedembeddings--redisstore的直接链接" translate="no">​</a></h3>
+<p>RAG 里另一个核心组件就是 Embeddings。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="3101-项目用的是什么-embeddings">3.10.1 项目用的是什么 Embeddings<a href="#3101-项目用的是什么-embeddings" class="hash-link" aria-label="3.10.1 项目用的是什么 Embeddings的直接链接" title="3.10.1 项目用的是什么 Embeddings的直接链接" translate="no">​</a></h4>
+<p><code>internal/service/embeddings_service.py</code> 里用的是：</p>
+<ul>
+<li class=""><code>langchain_community.embeddings.DashScopeEmbeddings</code></li>
+</ul>
+<p>并且对外暴露成：</p>
+<ul>
+<li class=""><code>embeddings</code></li>
+<li class=""><code>cache_backed_embeddings</code></li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="3102-为什么要套-cachebackedembeddings">3.10.2 为什么要套 <code>CacheBackedEmbeddings</code><a href="#3102-为什么要套-cachebackedembeddings" class="hash-link" aria-label="3102-为什么要套-cachebackedembeddings的直接链接" title="3102-为什么要套-cachebackedembeddings的直接链接" translate="no">​</a></h4>
+<p>项目不是直接每次都重新算 embedding，而是：</p>
+<ol>
+<li class="">底层 embedding 模型是 <code>DashScopeEmbeddings</code></li>
+<li class="">存储后端是 <code>RedisStore</code></li>
+<li class="">再用 <code>CacheBackedEmbeddings.from_bytes_store(...)</code> 包起来</li>
+</ol>
+<p>这套设计的意义非常直接：</p>
+<ul>
+<li class="">相同文本不重复向量化</li>
+<li class="">降低调用成本</li>
+<li class="">提高索引和检索链路稳定性</li>
+</ul>
+<p>这正对应你前面 RAG 文档里提到的“Redis 缓存 Embedding 减少重复计算”。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="3103-为什么会有两层缓存字典">3.10.3 为什么会有两层缓存字典<a href="#3103-为什么会有两层缓存字典" class="hash-link" aria-label="3.10.3 为什么会有两层缓存字典的直接链接" title="3.10.3 为什么会有两层缓存字典的直接链接" translate="no">​</a></h4>
+<p><code>EmbeddingsService</code> 里除了 Redis 外，还维护了：</p>
+<ul>
+<li class=""><code>_embeddings_cache</code></li>
+<li class=""><code>_cache_backed_embeddings_cache</code></li>
+</ul>
+<p>这是用户级实例缓存，目标是：</p>
+<ul>
+<li class="">每个账号单独初始化 embeddings</li>
+<li class="">每个请求从 Flask <code>g</code> 上下文取当前用户对应实例</li>
+</ul>
+<p>所以这里其实有两层缓存：</p>
+<ul>
+<li class="">进程内实例缓存</li>
+<li class="">Redis 文本向量缓存</li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="311-vectorstore主路径用-weaviate辅助路径保留-faiss">3.11 <code>VectorStore</code>：主路径用 Weaviate，辅助路径保留 FAISS<a href="#311-vectorstore主路径用-weaviate辅助路径保留-faiss" class="hash-link" aria-label="311-vectorstore主路径用-weaviate辅助路径保留-faiss的直接链接" title="311-vectorstore主路径用-weaviate辅助路径保留-faiss的直接链接" translate="no">​</a></h3>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="3111-主路径weaviatevectorstore">3.11.1 主路径：<code>WeaviateVectorStore</code><a href="#3111-主路径weaviatevectorstore" class="hash-link" aria-label="3111-主路径weaviatevectorstore的直接链接" title="3111-主路径weaviatevectorstore的直接链接" translate="no">​</a></h4>
+<p><code>internal/service/vector_database_service.py</code> 里，主向量库适配器是：</p>
+<ul>
+<li class=""><code>langchain_weaviate.WeaviateVectorStore</code></li>
+</ul>
+<p>构造时绑定了：</p>
+<ul>
+<li class=""><code>client</code></li>
+<li class=""><code>index_name</code></li>
+<li class=""><code>text_key</code></li>
+<li class=""><code>embedding=self.embeddings_service.cache_backed_embeddings</code></li>
+</ul>
+<p>这意味着项目主路径里的向量检索，不是绕开 LangChain 直连 Weaviate，而是通过 LangChain 的 VectorStore 抽象来接入。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="3112-辅助路径faiss">3.11.2 辅助路径：<code>FAISS</code><a href="#3112-辅助路径faiss" class="hash-link" aria-label="3112-辅助路径faiss的直接链接" title="3112-辅助路径faiss的直接链接" translate="no">​</a></h4>
+<p>项目里还有一份 <code>internal/service/faiss_service.py</code>，用的是：</p>
+<ul>
+<li class=""><code>langchain_community.vectorstores.FAISS</code></li>
+</ul>
+<p>它能：</p>
+<ul>
+<li class=""><code>load_local(...)</code></li>
+<li class=""><code>as_retriever(...)</code></li>
+<li class="">再通过 <code>retrieval | combine_documents</code> 封装成 Tool</li>
+</ul>
+<p>从项目结构看，FAISS 更像保留的本地向量库能力，而 Weaviate 是主线路。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="312-baseretriever--ensembleretriever检索不是服务函数而是标准检索器">3.12 <code>BaseRetriever</code> / <code>EnsembleRetriever</code>：检索不是服务函数，而是标准检索器<a href="#312-baseretriever--ensembleretriever检索不是服务函数而是标准检索器" class="hash-link" aria-label="312-baseretriever--ensembleretriever检索不是服务函数而是标准检索器的直接链接" title="312-baseretriever--ensembleretriever检索不是服务函数而是标准检索器的直接链接" translate="no">​</a></h3>
+<p>这部分是项目里 LangChain 用得很扎实的一块。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="3121-semanticretriever">3.12.1 <code>SemanticRetriever</code><a href="#3121-semanticretriever" class="hash-link" aria-label="3121-semanticretriever的直接链接" title="3121-semanticretriever的直接链接" translate="no">​</a></h4>
+<p><code>internal/core/retrievers/semantic_retriever.py</code>：</p>
+<ul>
+<li class="">继承 <code>BaseRetriever</code></li>
+<li class="">内部持有 <code>WeaviateVectorStore</code></li>
+<li class="">实现 <code>_get_relevant_documents(...)</code></li>
+</ul>
+<p>也就是说，语义检索不是一个普通函数，而是标准 LangChain retriever。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="3122-fulltextretriever">3.12.2 <code>FullTextRetriever</code><a href="#3122-fulltextretriever" class="hash-link" aria-label="3122-fulltextretriever的直接链接" title="3122-fulltextretriever的直接链接" translate="no">​</a></h4>
+<p><code>internal/core/retrievers/full_text_retriever.py</code>：</p>
+<ul>
+<li class="">同样继承 <code>BaseRetriever</code></li>
+<li class="">内部走 <code>jieba + KeywordTable + Counter</code></li>
+<li class="">最后也统一返回 <code>list[LCDocument]</code></li>
+</ul>
+<p>这很关键。因为虽然全文检索底层不是向量检索，但它对上游暴露的仍然是 LangChain retriever 接口。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="3123-ensembleretriever">3.12.3 <code>EnsembleRetriever</code><a href="#3123-ensembleretriever" class="hash-link" aria-label="3123-ensembleretriever的直接链接" title="3123-ensembleretriever的直接链接" translate="no">​</a></h4>
+<p><code>internal/service/retrieval_service.py</code> 里把两者组合成：</p>
+<ul>
+<li class=""><code>langchain_classic.retrievers.EnsembleRetriever</code></li>
+</ul>
+<p>具体就是：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">hybrid_retriever </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> EnsembleRetriever</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    retrievers</span><span class="token operator" style="color:#393A34">=</span><span class="token punctuation" style="color:#393A34">[</span><span class="token plain">semantic_retriever</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"> full_text_retriever</span><span class="token punctuation" style="color:#393A34">]</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    weights</span><span class="token operator" style="color:#393A34">=</span><span class="token punctuation" style="color:#393A34">[</span><span class="token number" style="color:#36acaa">0.5</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"> </span><span class="token number" style="color:#36acaa">0.5</span><span class="token punctuation" style="color:#393A34">]</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">)</span><br></div></code></pre></div></div>
+<p>这说明项目的混合检索不是自己再写一套接口，而是利用 LangChain retriever 统一抽象，把不同检索器组合起来。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="3124-为什么这是个好设计">3.12.4 为什么这是个好设计<a href="#3124-为什么这是个好设计" class="hash-link" aria-label="3.12.4 为什么这是个好设计的直接链接" title="3.12.4 为什么这是个好设计的直接链接" translate="no">​</a></h4>
+<p>因为只要遵守 <code>BaseRetriever</code> 协议：</p>
+<ul>
+<li class="">语义检索</li>
+<li class="">全文检索</li>
+<li class="">混合检索</li>
+</ul>
+<p>就都能：</p>
+<ul>
+<li class=""><code>invoke(query)</code></li>
+<li class="">返回 <code>list[Document]</code></li>
+<li class="">被 Tool、Workflow、Agent 继续复用</li>
+</ul>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="4-项目里-langchain-组件到底是怎么组合起来干活的">4. 项目里 LangChain 组件到底是怎么组合起来干活的<a href="#4-项目里-langchain-组件到底是怎么组合起来干活的" class="hash-link" aria-label="4. 项目里 LangChain 组件到底是怎么组合起来干活的的直接链接" title="4. 项目里 LangChain 组件到底是怎么组合起来干活的的直接链接" translate="no">​</a></h2>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="41-ai-小能力prompt--llm--parser">4.1 AI 小能力：Prompt + LLM + Parser<a href="#41-ai-小能力prompt--llm--parser" class="hash-link" aria-label="4.1 AI 小能力：Prompt + LLM + Parser的直接链接" title="4.1 AI 小能力：Prompt + LLM + Parser的直接链接" translate="no">​</a></h3>
+<p>这是项目里最常见的一类用法。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="411-prompt-优化">4.1.1 Prompt 优化<a href="#411-prompt-优化" class="hash-link" aria-label="4.1.1 Prompt 优化的直接链接" title="4.1.1 Prompt 优化的直接链接" translate="no">​</a></h4>
+<p><code>internal/service/ai_service.py</code>：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">prompt_template </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> ChatPromptTemplate</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">from_messages</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">optimize_chain </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> prompt_template </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> llm </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> StrOutputParser</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token keyword" style="color:#00009f">for</span><span class="token plain"> chunk </span><span class="token keyword" style="color:#00009f">in</span><span class="token plain"> optimize_chain</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">stream</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">{</span><span class="token string" style="color:#e3116c">&quot;prompt&quot;</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> prompt</span><span class="token punctuation" style="color:#393A34">}</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><br></div></code></pre></div></div>
+<p>这里的重点是：</p>
+<ul>
+<li class="">直接用 LCEL 拼链</li>
+<li class="">直接用 <code>stream()</code> 流式输出</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="412-会话摘要">4.1.2 会话摘要<a href="#412-会话摘要" class="hash-link" aria-label="4.1.2 会话摘要的直接链接" title="4.1.2 会话摘要的直接链接" translate="no">​</a></h4>
+<p><code>internal/service/conversation_service.py</code>：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">prompt </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> ChatPromptTemplate</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">from_template</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">SUMMARIZER_TEMPLATE</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">summary_chain </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> prompt </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> llm </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> StrOutputParser</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">new_summary </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> summary_chain</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">invoke</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">)</span><br></div></code></pre></div></div>
+<p>这条链非常典型，说明“长期记忆摘要”本质上也是一个 LangChain chain。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="413-会话命名">4.1.3 会话命名<a href="#413-会话命名" class="hash-link" aria-label="4.1.3 会话命名的直接链接" title="4.1.3 会话命名的直接链接" translate="no">​</a></h4>
+<p>同一个 service 里，会话命名用的是：</p>
+<div class="language-python codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-python codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">prompt </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> ChatPromptTemplate</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">from_messages</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">structured_llm </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> llm</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">with_structured_output</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">ConversationInfo</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">chain </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> prompt </span><span class="token operator" style="color:#393A34">|</span><span class="token plain"> structured_llm</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">conversation_info </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> chain</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">invoke</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">.</span><span class="token punctuation" style="color:#393A34">)</span><br></div></code></pre></div></div>
+<p>这说明项目对不同任务用了不同层级的 LangChain 输出能力：</p>
+<ul>
+<li class="">简单文本任务：<code>StrOutputParser</code></li>
+<li class="">结构化任务：<code>with_structured_output</code></li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="414-生成建议问题">4.1.4 生成建议问题<a href="#414-生成建议问题" class="hash-link" aria-label="4.1.4 生成建议问题的直接链接" title="4.1.4 生成建议问题的直接链接" translate="no">​</a></h4>
+<p>这条链又回到了：</p>
+<ul>
+<li class=""><code>Prompt | LLM | StrOutputParser</code></li>
+</ul>
+<p>然后项目自己清洗 JSON 字符串。</p>
+<p>这个细节面试时可以讲成：</p>
+<ul>
+<li class="">项目不是死板地全用结构化输出</li>
+<li class="">而是根据任务稳定性选择不同 parser 策略</li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="42-app-初始化两个链并行生成配置">4.2 App 初始化：两个链并行生成配置<a href="#42-app-初始化两个链并行生成配置" class="hash-link" aria-label="4.2 App 初始化：两个链并行生成配置的直接链接" title="4.2 App 初始化：两个链并行生成配置的直接链接" translate="no">​</a></h3>
+<p><code>internal/service/app_service.py</code> 里是个很好的 LangChain 组合案例。</p>
+<p>它不是一条链，而是三层组合：</p>
+<ol>
+<li class=""><code>generate_icon_chain = prompt | llm | parser | image_tool</code></li>
+<li class=""><code>generate_preset_prompt_chain = prompt | llm | parser</code></li>
+<li class=""><code>RunnableParallel({...})</code> 把两条链并行起来</li>
+</ol>
+<p>这个例子特别适合面试，因为它能说明：</p>
+<ul>
+<li class="">你不只会写简单链</li>
+<li class="">你知道 LCEL 可以把 runnable 再组合成更大的 runnable</li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="43-工具平台所有外部能力最后都落到-basetool">4.3 工具平台：所有外部能力最后都落到 <code>BaseTool</code><a href="#43-工具平台所有外部能力最后都落到-basetool" class="hash-link" aria-label="43-工具平台所有外部能力最后都落到-basetool的直接链接" title="43-工具平台所有外部能力最后都落到-basetool的直接链接" translate="no">​</a></h3>
+<p>项目里的工具体系非常平台化，但站在 LangChain 视角，核心其实很简单：</p>
+<ul>
+<li class="">上游配置来源不同</li>
+<li class="">最终全都收敛成 <code>BaseTool</code></li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="431-app-配置层怎么统一注入工具">4.3.1 App 配置层怎么统一注入工具<a href="#431-app-配置层怎么统一注入工具" class="hash-link" aria-label="4.3.1 App 配置层怎么统一注入工具的直接链接" title="4.3.1 App 配置层怎么统一注入工具的直接链接" translate="no">​</a></h4>
+<p><code>internal/service/app_config_service.py</code>：</p>
+<ul>
+<li class=""><code>get_langchain_tools_by_tools_config()</code></li>
+<li class=""><code>get_langchain_tools_by_workflow_ids()</code></li>
+</ul>
+<p>这两个方法做的就是：</p>
+<ol>
+<li class="">把 builtin / api / mcp 工具解析成 <code>BaseTool</code></li>
+<li class="">把发布后的 workflow 也解析成 <code>BaseTool</code></li>
+<li class="">最后把所有工具列表统一交给 AgentConfig</li>
+</ol>
+<p>所以从 Agent 视角，它根本不关心工具来源，它看到的只是：</p>
+<ul>
+<li class=""><code>list[BaseTool]</code></li>
+</ul>
+<p>这就是 LangChain 工具协议带来的平台红利。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="432-为什么-workflow-一定要继承-basetool">4.3.2 为什么 Workflow 一定要继承 <code>BaseTool</code><a href="#432-为什么-workflow-一定要继承-basetool" class="hash-link" aria-label="432-为什么-workflow-一定要继承-basetool的直接链接" title="432-为什么-workflow-一定要继承-basetool的直接链接" translate="no">​</a></h4>
+<p>因为一旦 Workflow 变成 <code>BaseTool</code>，它就自动具备：</p>
+<ul>
+<li class="">被 App / Agent 挂载</li>
+<li class="">被 <code>bind_tools</code> 传给模型</li>
+<li class="">具备 <code>name/description/args_schema</code></li>
+</ul>
+<p>所以可视化工作流不是和工具体系平行存在，而是被 LangChain Tool 协议纳入同一套运行时。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="44-rag-全链路langchain-在这里几乎串起了整条管道">4.4 RAG 全链路：LangChain 在这里几乎串起了整条管道<a href="#44-rag-全链路langchain-在这里几乎串起了整条管道" class="hash-link" aria-label="4.4 RAG 全链路：LangChain 在这里几乎串起了整条管道的直接链接" title="4.4 RAG 全链路：LangChain 在这里几乎串起了整条管道的直接链接" translate="no">​</a></h3>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="441-上传与解析">4.4.1 上传与解析<a href="#441-上传与解析" class="hash-link" aria-label="4.4.1 上传与解析的直接链接" title="4.4.1 上传与解析的直接链接" translate="no">​</a></h4>
+<p><code>FileExtractor</code> 用 LangChain Loader 把多种文件转成 <code>list[LCDocument]</code>。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="442-清洗与切分">4.4.2 清洗与切分<a href="#442-清洗与切分" class="hash-link" aria-label="4.4.2 清洗与切分的直接链接" title="4.4.2 清洗与切分的直接链接" translate="no">​</a></h4>
+<p><code>ProcessRuleService</code> 用 <code>RecursiveCharacterTextSplitter</code> 把 <code>Document</code> 切成小块。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="443-向量化与存储">4.4.3 向量化与存储<a href="#443-向量化与存储" class="hash-link" aria-label="4.4.3 向量化与存储的直接链接" title="4.4.3 向量化与存储的直接链接" translate="no">​</a></h4>
+<p><code>EmbeddingsService</code> 提供 embedding，<code>VectorDatabaseService</code> 用 <code>WeaviateVectorStore</code> 存储。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="444-召回">4.4.4 召回<a href="#444-召回" class="hash-link" aria-label="4.4.4 召回的直接链接" title="4.4.4 召回的直接链接" translate="no">​</a></h4>
+<p><code>SemanticRetriever</code> 和 <code>FullTextRetriever</code> 都继承 <code>BaseRetriever</code>，然后通过 <code>EnsembleRetriever</code> 做混合检索。</p>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="445-对外暴露">4.4.5 对外暴露<a href="#445-对外暴露" class="hash-link" aria-label="4.4.5 对外暴露的直接链接" title="4.4.5 对外暴露的直接链接" translate="no">​</a></h4>
+<p><code>RetrievalService.create_langchain_tool_from_search()</code> 再把检索器包成 <code>BaseTool</code>。</p>
+<p>这意味着 RAG 最终不只给后端服务用，还能直接给：</p>
+<ul>
+<li class="">Agent</li>
+<li class="">Workflow 节点</li>
+<li class="">App</li>
+</ul>
+<p>复用。</p>
+<p>这就是 LangChain 组件化设计的真正价值：每一层都能独立复用。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="45-agent项目没有直接用-langchain-内置-agent但底层全是-langchain-组件">4.5 Agent：项目没有直接用 LangChain 内置 Agent，但底层全是 LangChain 组件<a href="#45-agent项目没有直接用-langchain-内置-agent但底层全是-langchain-组件" class="hash-link" aria-label="4.5 Agent：项目没有直接用 LangChain 内置 Agent，但底层全是 LangChain 组件的直接链接" title="4.5 Agent：项目没有直接用 LangChain 内置 Agent，但底层全是 LangChain 组件的直接链接" translate="no">​</a></h3>
+<p>这是最容易被误解的一点。</p>
+<p>项目里的 Agent 没有直接用：</p>
+<ul>
+<li class=""><code>create_react_agent</code></li>
+<li class=""><code>AgentExecutor</code></li>
+</ul>
+<p>而是自己用 LangGraph 编排。</p>
+<p>但 Agent 内核里仍然重度依赖 LangChain 组件：</p>
+<ul>
+<li class="">模型：<code>BaseLanguageModel</code></li>
+<li class="">工具：<code>BaseTool</code></li>
+<li class="">消息：<code>HumanMessage / AIMessage / ToolMessage / SystemMessage</code></li>
+<li class="">工具描述：<code>render_text_description_and_args</code></li>
+<li class="">多模态消息：<code>HumanMessage(content=[...])</code></li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="451-function-call-模式怎么用-langchain">4.5.1 Function Call 模式怎么用 LangChain<a href="#451-function-call-模式怎么用-langchain" class="hash-link" aria-label="4.5.1 Function Call 模式怎么用 LangChain的直接链接" title="4.5.1 Function Call 模式怎么用 LangChain的直接链接" translate="no">​</a></h4>
+<p><code>FunctionCallAgent</code> 里会：</p>
+<ol>
+<li class="">拿到 <code>list[BaseTool]</code></li>
+<li class="">对 <code>llm.bind_tools(self.agent_config.tools)</code> 做绑定</li>
+<li class="">用 <code>llm.stream(state[&quot;messages&quot;])</code> 调模型</li>
+<li class="">从 <code>AIMessage.tool_calls</code> 里拿工具调用</li>
+<li class="">工具执行后产出 <code>ToolMessage</code></li>
+</ol>
+<p>这套机制能成立，核心前提就是：</p>
+<ul>
+<li class="">模型、消息、工具都遵守 LangChain 协议</li>
+</ul>
+<h4 class="anchor anchorTargetStickyNavbar_Vzrq" id="452-react-模式怎么用-langchain">4.5.2 ReACT 模式怎么用 LangChain<a href="#452-react-模式怎么用-langchain" class="hash-link" aria-label="4.5.2 ReACT 模式怎么用 LangChain的直接链接" title="4.5.2 ReACT 模式怎么用 LangChain的直接链接" translate="no">​</a></h4>
+<p>ReACTAgent 没有原生 tool call 时，会：</p>
+<ol>
+<li class="">用 <code>render_text_description_and_args(self.agent_config.tools)</code> <strong>把工具转成提示词描述</strong></li>
+<li class=""><strong>让模型输出 fenced JSON</strong></li>
+<li class="">再包装成 <code>**AIMessage(tool_calls=...)**</code></li>
+</ol>
+<p>所以即使没有 LangChain 内置 AgentExecutor，项目仍然复用了 LangChain 的：</p>
+<ul>
+<li class="">工具 schema</li>
+<li class="">消息 schema</li>
+<li class="">工具描述渲染</li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="46-memory短期记忆也复用了-langchain-消息工具">4.6 Memory：短期记忆也复用了 LangChain 消息工具<a href="#46-memory短期记忆也复用了-langchain-消息工具" class="hash-link" aria-label="4.6 Memory：短期记忆也复用了 LangChain 消息工具的直接链接" title="4.6 Memory：短期记忆也复用了 LangChain 消息工具的直接链接" translate="no">​</a></h3>
+<p><code>internal/core/memory/token_buffer_memory.py</code> 是一个很好的例子。</p>
+<p>它虽然是项目自定义组件，但直接复用了 LangChain 的：</p>
+<ul>
+<li class=""><code>HumanMessage</code></li>
+<li class=""><code>AIMessage</code></li>
+<li class=""><code>trim_messages</code></li>
+<li class=""><code>get_buffer_string</code></li>
+</ul>
+<p>具体流程是：</p>
+<ol>
+<li class="">从数据库查最近 <code>message_limit</code> 轮对话</li>
+<li class="">转成 LangChain 消息列表</li>
+<li class="">用 <code>trim_messages(...)</code> 按 token 上限裁剪</li>
+<li class="">如有需要，再用 <code>get_buffer_string(...)</code> 转成文本形式</li>
+</ol>
+<p>这说明项目不是自己手写消息裁剪逻辑，而是站在 LangChain 消息抽象上做记忆管理。</p>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="5-这个项目为什么不直接用-langchain-内置-agent而是自己搭">5. 这个项目为什么不直接用 LangChain 内置 Agent，而是自己搭<a href="#5-这个项目为什么不直接用-langchain-内置-agent而是自己搭" class="hash-link" aria-label="5. 这个项目为什么不直接用 LangChain 内置 Agent，而是自己搭的直接链接" title="5. 这个项目为什么不直接用 LangChain 内置 Agent，而是自己搭的直接链接" translate="no">​</a></h2>
+<p>这是 LangChain 相关面试里非常关键的一问。</p>
+<p>答案不是“LangChain 不好”，而是项目需求决定了：</p>
+<ul>
+<li class="">Agent 需要和 Workflow 共用更复杂的控制流</li>
+<li class="">需要统一事件流</li>
+<li class="">需要会话级停止控制</li>
+<li class="">需要 FunctionCallAgent / ReACTAgent 双模式共用一张执行骨架</li>
+</ul>
+<p>这些事情更适合用 LangGraph 来做调度。</p>
+<p>但项目又不想丢掉 LangChain 已经非常成熟的组件层，所以最后形成的架构是：</p>
+<ul>
+<li class="">LangChain 负责标准化组件</li>
+<li class="">LangGraph 负责控制流调度</li>
+</ul>
+<p>这其实是一个非常合理的组合，而不是“两个框架重复使用”。</p>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="6-这个项目里最值得讲的-langchain-工程选择">6. 这个项目里最值得讲的 LangChain 工程选择<a href="#6-这个项目里最值得讲的-langchain-工程选择" class="hash-link" aria-label="6. 这个项目里最值得讲的 LangChain 工程选择的直接链接" title="6. 这个项目里最值得讲的 LangChain 工程选择的直接链接" translate="no">​</a></h2>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="61-以-langchain_core-为协议中心而不是依赖某个具体-provider-sdk">6.1 以 <code>langchain_core</code> 为协议中心，而不是依赖某个具体 provider SDK<a href="#61-以-langchain_core-为协议中心而不是依赖某个具体-provider-sdk" class="hash-link" aria-label="61-以-langchain_core-为协议中心而不是依赖某个具体-provider-sdk的直接链接" title="61-以-langchain_core-为协议中心而不是依赖某个具体-provider-sdk的直接链接" translate="no">​</a></h3>
+<p>项目几乎所有高层抽象，都站在 LangChain 协议上：</p>
+<ul>
+<li class=""><code>BaseLanguageModel</code></li>
+<li class=""><code>BaseTool</code></li>
+<li class=""><code>Runnable</code></li>
+<li class=""><code>BaseRetriever</code></li>
+<li class=""><code>Document</code></li>
+</ul>
+<p>这让它天然具备 provider 可替换性。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="62-所有外部能力都尽量落到-basetool">6.2 所有外部能力都尽量落到 <code>BaseTool</code><a href="#62-所有外部能力都尽量落到-basetool" class="hash-link" aria-label="62-所有外部能力都尽量落到-basetool的直接链接" title="62-所有外部能力都尽量落到-basetool的直接链接" translate="no">​</a></h3>
+<p>这是平台化最强的一点。</p>
+<p>只要最后能变成 <code>BaseTool</code>，它就能被：</p>
+<ul>
+<li class="">App 挂载</li>
+<li class="">Agent 绑定</li>
+<li class="">Workflow 调用</li>
+</ul>
+<p>这让工具平台、工作流平台、Agent 平台三者之间不是烟囱，而是共享同一层协议。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="63-rag-不是手写逻辑拼凑而是严格走-langchain-文本组件链">6.3 RAG 不是手写逻辑拼凑，而是严格走 LangChain 文本组件链<a href="#63-rag-不是手写逻辑拼凑而是严格走-langchain-文本组件链" class="hash-link" aria-label="6.3 RAG 不是手写逻辑拼凑，而是严格走 LangChain 文本组件链的直接链接" title="6.3 RAG 不是手写逻辑拼凑，而是严格走 LangChain 文本组件链的直接链接" translate="no">​</a></h3>
+<p>这条链的每个阶段都对应标准组件：</p>
+<ul>
+<li class="">Loader</li>
+<li class="">Document</li>
+<li class="">Splitter</li>
+<li class="">Embeddings</li>
+<li class="">VectorStore</li>
+<li class="">Retriever</li>
+<li class="">Tool</li>
+</ul>
+<p>这使得整条链路可替换、可调试、可扩展 。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="64-项目没有滥用-langchain-的高级黑盒">6.4 项目没有滥用 LangChain 的高级黑盒<a href="#64-项目没有滥用-langchain-的高级黑盒" class="hash-link" aria-label="6.4 项目没有滥用 LangChain 的高级黑盒的直接链接" title="6.4 项目没有滥用 LangChain 的高级黑盒的直接链接" translate="no">​</a></h3>
+<p>比如：</p>
+<ul>
+<li class="">Agent 没有直接依赖黑盒 <code>AgentExecutor</code></li>
+<li class="">检索逻辑没有完全塞进现成 chain</li>
+<li class="">很多地方依然保留了项目级控制</li>
+</ul>
+<p>这说明项目对 LangChain 的使用是“拿它最擅长的标准组件层”，而不是把所有业务都交给它自动推断。</p>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="7-面试高频追问和标准回答">7. 面试高频追问和标准回答<a href="#7-面试高频追问和标准回答" class="hash-link" aria-label="7. 面试高频追问和标准回答的直接链接" title="7. 面试高频追问和标准回答的直接链接" translate="no">​</a></h2>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="71-这个项目里-langchain-和-langgraph-的关系是什么">7.1 这个项目里 LangChain 和 LangGraph 的关系是什么<a href="#71-这个项目里-langchain-和-langgraph-的关系是什么" class="hash-link" aria-label="7.1 这个项目里 LangChain 和 LangGraph 的关系是什么的直接链接" title="7.1 这个项目里 LangChain 和 LangGraph 的关系是什么的直接链接" translate="no">​</a></h3>
+<p>LangChain 负责组件接口，LangGraph 负责控制流编排。项目里的模型、工具、消息、检索器、向量库、Prompt、Parser 都走 LangChain；DAG、条件分支、循环和状态归并走 LangGraph。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="72-为什么-workflow-要做成-basetool">7.2 为什么 Workflow 要做成 <code>BaseTool</code><a href="#72-为什么-workflow-要做成-basetool" class="hash-link" aria-label="72-为什么-workflow-要做成-basetool的直接链接" title="72-为什么-workflow-要做成-basetool的直接链接" translate="no">​</a></h3>
+<p>因为一旦 Workflow 是 <code>BaseTool</code>，它就不只是“一个页面里的图”，而是一个标准可调用能力，能直接被 App / Agent 注入，形成统一工具体系。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="73-为什么项目要自定义-baselanguagemodel">7.3 为什么项目要自定义 <code>BaseLanguageModel</code><a href="#73-为什么项目要自定义-baselanguagemodel" class="hash-link" aria-label="73-为什么项目要自定义-baselanguagemodel的直接链接" title="73-为什么项目要自定义-baselanguagemodel的直接链接" translate="no">​</a></h3>
+<p>因为需要在 LangChain 模型协议上再补一层项目能力：</p>
+<ul>
+<li class=""><code>features</code></li>
+<li class=""><code>metadata</code></li>
+<li class="">定价</li>
+<li class="">多模态消息转换</li>
+</ul>
+<p>这样上层就不用感知不同 provider 的差异。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="74-为什么检索最终还要封成-tool">7.4 为什么检索最终还要封成 Tool<a href="#74-为什么检索最终还要封成-tool" class="hash-link" aria-label="7.4 为什么检索最终还要封成 Tool的直接链接" title="7.4 为什么检索最终还要封成 Tool的直接链接" translate="no">​</a></h3>
+<p>因为 Agent 不应该直接依赖数据库或向量库服务，它只应该看到一个“可调用工具”。这样检索能力才能和其他工具一样统一管理。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="75-这个项目里最典型的-langchain-链长什么样">7.5 这个项目里最典型的 LangChain 链长什么样<a href="#75-这个项目里最典型的-langchain-链长什么样" class="hash-link" aria-label="7.5 这个项目里最典型的 LangChain 链长什么样的直接链接" title="7.5 这个项目里最典型的 LangChain 链长什么样的直接链接" translate="no">​</a></h3>
+<p>最典型的就是：</p>
+<ul>
+<li class=""><code>ChatPromptTemplate | LLM | StrOutputParser</code></li>
+</ul>
+<p>在这个仓库里，Prompt 优化、摘要生成、建议问题生成、工作流配置生成，基本都沿用这套范式。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="76-为什么不是所有场景都用-with_structured_output">7.6 为什么不是所有场景都用 <code>with_structured_output</code><a href="#76-为什么不是所有场景都用-with_structured_output" class="hash-link" aria-label="76-为什么不是所有场景都用-with_structured_output的直接链接" title="76-为什么不是所有场景都用-with_structured_output的直接链接" translate="no">​</a></h3>
+<p>因为结构化输出虽然更稳，但也更依赖模型能力和任务确定性。对于一些简单文本任务，<code>StrOutputParser</code> 更轻、更直接；对于强结构任务，比如会话标题生成，才更适合 <code>with_structured_output</code>。</p>
+<h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="77-项目里-langchain-用得最深的地方是哪里">7.7 项目里 LangChain 用得最深的地方是哪里<a href="#77-项目里-langchain-用得最深的地方是哪里" class="hash-link" aria-label="7.7 项目里 LangChain 用得最深的地方是哪里的直接链接" title="7.7 项目里 LangChain 用得最深的地方是哪里的直接链接" translate="no">​</a></h3>
+<p>我认为有三块：</p>
+<ol>
+<li class="">工具平台，把 builtin / api / mcp / workflow / retrieval 全部统一到 <code>BaseTool</code></li>
+<li class="">RAG 链路，把 loader、document、splitter、embedding、vector store、retriever 串成标准流水线</li>
+<li class="">模型与消息层，让 Agent 虽然自己编排，但底层仍然复用 LangChain 的模型、消息、工具协议</li>
+</ol>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="8-一句话总结">8. 一句话总结<a href="#8-一句话总结" class="hash-link" aria-label="8. 一句话总 结的直接链接" title="8. 一句话总结的直接链接" translate="no">​</a></h2>
+<p>这个项目里 LangChain 不是“拿来直接跑 Agent 黑盒”的，而是被当成一层标准化组件协议来用。</p>
+<p>真正被项目反复复用的是这些能力：</p>
+<ul>
+<li class=""><code>BaseLanguageModel</code></li>
+<li class=""><code>ChatPromptTemplate</code></li>
+<li class=""><code>StrOutputParser</code></li>
+<li class=""><code>Runnable</code> / <code>RunnableParallel</code></li>
+<li class=""><code>BaseTool</code> / <code>StructuredTool</code> / <code>@tool</code></li>
+<li class=""><code>HumanMessage / AIMessage / ToolMessage / SystemMessage</code></li>
+<li class=""><code>DocumentLoader / Document / TextSplitter</code></li>
+<li class=""><code>Embeddings / CacheBackedEmbeddings</code></li>
+<li class=""><code>VectorStore / BaseRetriever / EnsembleRetriever</code></li>
+</ul>
+<p>也正因为项目把 LangChain 用在了最适合它的位置上，所以它上面能同时长出：</p>
+<ul>
+<li class="">App 链</li>
+<li class="">RAG 链</li>
+<li class="">Workflow Tool 链</li>
+<li class="">Agent 双模式链</li>
+</ul>
+<p>而不会互相打架。</p></div><footer class="theme-doc-footer docusaurus-mt-lg"><div class="row margin-top--sm theme-doc-footer-edit-meta-row"><div class="col noPrint_WFHX"><a href="https://github.com/xiaomingtx12/nice-ai-agent-study-resources/edit/main/docs/application-notes/dify准备文档/项目中的 LangChain 具体实现详解.md" target="_blank" rel="noopener noreferrer" class="theme-edit-this-page"><svg fill="currentColor" height="20" width="20" viewBox="0 0 40 40" class="iconEdit_Z9Sw" aria-hidden="true"><g><path d="m34.5 11.7l-3 3.1-6.3-6.3 3.1-3q0.5-0.5 1.2-0.5t1.1 0.5l3.9 3.9q0.5 0.4 0.5 1.1t-0.5 1.2z m-29.5 17.1l18.4-18.5 6.3 6.3-18.4 18.4h-6.3v-6.2z"></path></g></svg>编辑此页</a></div><div class="col lastUpdated_JAkA"></div></div></footer></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="文件选项卡"><a class="pagination-nav__link pagination-nav__link--prev" href="/nice-ai-agent-study-resources/application-notes/dify准备文档/智能体双模式执行 LangGraph 实现详解"><div class="pagination-nav__sublabel">上一页</div><div class="pagination-nav__label">my-dify 智能体双模式执行 LangGraph 实现详解</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/nice-ai-agent-study-resources/application-notes/dify准备文档/项目中的 LangGraph 具体实现详解"><div class="pagination-nav__sublabel">下一页</div><div class="pagination-nav__label">my-dify 项目中的 LangGraph 具体实现详解</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#先说结论这个项目里-langchain-负责组件抽象langgraph-负责流程编排" class="table-of-contents__link toc-highlight">先说结论：这个项目里 LangChain 负责“组件抽象”，LangGraph 负责“流程编排”</a></li><li><a href="#1-这个项目里实际用到的-langchain-生态不是一个包而是一整套分层" class="table-of-contents__link toc-highlight">1. 这个项目里实际用到的 LangChain 生态，不是一个包，而是一整套分层</a></li><li><a href="#2-先把-langchain-的核心组件和典型组装方式讲清楚" class="table-of-contents__link toc-highlight">2. 先把 LangChain 的核心组件和典型组装方式讲清楚</a><ul><li><a href="#21-最常见prompt--llm--parser" class="table-of-contents__link toc-highlight">2.1 最常见：<code>Prompt | LLM | Parser</code></a></li><li><a href="#22-并行执行runnableparallel" class="table-of-contents__link toc-highlight">2.2 并行执行：<code>RunnableParallel</code></a></li><li><a href="#23-工具化basetool--tool--structuredtool" class="table-of-contents__link toc-highlight">2.3 工具化：<code>BaseTool</code> / <code>@tool</code> / <code>StructuredTool</code></a></li><li><a href="#24-检索链document---embeddings---vectorstore---retriever---tool" class="table-of-contents__link toc-highlight">2.4 检索链：<code>Document -&gt; Embeddings -&gt; VectorStore -&gt; Retriever -&gt; Tool</code></a></li></ul></li><li><a href="#3-这个项目里-langchain-最关键的组件分别是什么" class="table-of-contents__link toc-highlight">3. 这个项目里 LangChain 最关键的组件分别是什么</a><ul><li><a href="#31-baselanguagemodel统一模型接口" class="table-of-contents__link toc-highlight">3.1 <code>BaseLanguageModel</code>：统一模型接口</a></li><li><a href="#32-chatprompttemplate把提示词模板标准化" class="table-of-contents__link toc-highlight">3.2 <code>ChatPromptTemplate</code>：把提示词模板标准化</a></li><li><a href="#33-stroutputparser-和-with_structured_output" class="table-of-contents__link toc-highlight">3.3 <code>StrOutputParser</code> 和 <code>with_structured_output</code></a></li><li><a href="#34-runnablelcel-和-runnableparallel" class="table-of-contents__link toc-highlight">3.4 <code>Runnable</code>、LCEL 和 <code>RunnableParallel</code></a></li><li><a href="#35-basetool--tool--structuredtool整个工具平台的统一接口" class="table-of-contents__link toc-highlight">3.5 <code>BaseTool</code> / <code>@tool</code> / <code>StructuredTool</code>：整个工具平台的统一接口</a></li><li><a href="#36-消息对象humanmessageaimessagesystemmessagetoolmessage" class="table-of-contents__link toc-highlight">3.6 消息对象：<code>HumanMessage</code>、<code>AIMessage</code>、<code>SystemMessage</code>、<code>ToolMessage</code></a></li><li><a href="#37-documentrag-链路里的标准文本单元" class="table-of-contents__link toc-highlight">3.7 <code>Document</code>：RAG 链路里的标准文本单元</a></li><li><a href="#38-documentloader多格式文件接入" class="table-of-contents__link toc-highlight">3.8 <code>DocumentLoader</code>：多格式文件接入</a></li><li><a href="#39-textsplitter把文档切成可索引片段" class="table-of-contents__link toc-highlight">3.9 <code>TextSplitter</code>：把文档切成可索引片段</a></li><li><a href="#310-embeddings--cachebackedembeddings--redisstore" class="table-of-contents__link toc-highlight">3.10 <code>Embeddings</code> / <code>CacheBackedEmbeddings</code> / <code>RedisStore</code></a></li><li><a href="#311-vectorstore主路径用-weaviate辅助路径保留-faiss" class="table-of-contents__link toc-highlight">3.11 <code>VectorStore</code>：主路径用 Weaviate，辅助路径保留 FAISS</a></li><li><a href="#312-baseretriever--ensembleretriever检索不是服务函数而是标准检索器" class="table-of-contents__link toc-highlight">3.12 <code>BaseRetriever</code> / <code>EnsembleRetriever</code>：检索不是服务函数，而是标准检索器</a></li></ul></li><li><a href="#4-项目里-langchain-组件到底是怎么组合起来干活的" class="table-of-contents__link toc-highlight">4. 项目里 LangChain 组件到底是怎么组合起来干活的</a><ul><li><a href="#41-ai-小能力prompt--llm--parser" class="table-of-contents__link toc-highlight">4.1 AI 小能力：Prompt + LLM + Parser</a></li><li><a href="#42-app-初始化两个链并行生成配置" class="table-of-contents__link toc-highlight">4.2 App 初始化：两个链并行生成配置</a></li><li><a href="#43-工具平台所有外部能力最后都落到-basetool" class="table-of-contents__link toc-highlight">4.3 工具平台：所有外部能力最后都落到 <code>BaseTool</code></a></li><li><a href="#44-rag-全链路langchain-在这里几乎串起了整条管道" class="table-of-contents__link toc-highlight">4.4 RAG 全链路：LangChain 在这里几乎串起了整条管道</a></li><li><a href="#45-agent项目没有直接用-langchain-内置-agent但底层全是-langchain-组件" class="table-of-contents__link toc-highlight">4.5 Agent：项目没有直接用 LangChain 内置 Agent，但底层全是 LangChain 组件</a></li><li><a href="#46-memory短期记忆也复用了-langchain-消息工具" class="table-of-contents__link toc-highlight">4.6 Memory ：短期记忆也复用了 LangChain 消息工具</a></li></ul></li><li><a href="#5-这个项目为什么不直接用-langchain-内置-agent而是自己搭" class="table-of-contents__link toc-highlight">5. 这个项目为什么不直接用 LangChain 内置 Agent，而是自己搭</a></li><li><a href="#6-这个项目里最值得讲的-langchain-工程选择" class="table-of-contents__link toc-highlight">6. 这个项目里最值得讲的 LangChain 工程选择</a><ul><li><a href="#61-以-langchain_core-为协议中心而不是依赖某个具体-provider-sdk" class="table-of-contents__link toc-highlight">6.1 以 <code>langchain_core</code> 为协议中心，而不是依赖某个具体 provider SDK</a></li><li><a href="#62-所有外部能力都尽量落到-basetool" class="table-of-contents__link toc-highlight">6.2 所有外部能力都尽量落到 <code>BaseTool</code></a></li><li><a href="#63-rag-不是手写逻辑拼凑而是严格走-langchain-文本组件链" class="table-of-contents__link toc-highlight">6.3 RAG 不是手写逻辑拼凑，而是严格走 LangChain 文本组件链</a></li><li><a href="#64-项目没有滥用-langchain-的高级黑盒" class="table-of-contents__link toc-highlight">6.4 项目没有滥用 LangChain 的高级黑盒</a></li></ul></li><li><a href="#7-面试高频追问和标准回答" class="table-of-contents__link toc-highlight">7. 面试高频追问和标准回答</a><ul><li><a href="#71-这个项目里-langchain-和-langgraph-的关系是什么" class="table-of-contents__link toc-highlight">7.1 这个项目里 LangChain 和 LangGraph 的关系是什么</a></li><li><a href="#72-为什么-workflow-要做成-basetool" class="table-of-contents__link toc-highlight">7.2 为什么 Workflow 要做成 <code>BaseTool</code></a></li><li><a href="#73-为什么项目要自定义-baselanguagemodel" class="table-of-contents__link toc-highlight">7.3 为什么项目要自定义 <code>BaseLanguageModel</code></a></li><li><a href="#74-为什么检索最终还要封成-tool" class="table-of-contents__link toc-highlight">7.4 为什么检索最终还要封成 Tool</a></li><li><a href="#75-这个项目里最典型的-langchain-链长什么样" class="table-of-contents__link toc-highlight">7.5 这个项目里最典型的 LangChain 链长什么样</a></li><li><a href="#76-为什么不是所有场景都用-with_structured_output" class="table-of-contents__link toc-highlight">7.6 为什么不是所有场景都用 <code>with_structured_output</code></a></li><li><a href="#77-项目里-langchain-用得最深的地方是哪里" class="table-of-contents__link toc-highlight">7.7 项目里 LangChain 用得最深的地方是哪里</a></li></ul></li><li><a href="#8-一句话总结" class="table-of-contents__link toc-highlight">8. 一句话总结</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 xiaomingtx12</div></div></div></footer></div>
+</body>
+</html>
