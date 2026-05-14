@@ -100,7 +100,7 @@ const config: Config = {
     },
     mermaid: {
       theme: {
-        light: 'neutral',
+        light: 'base',
         dark: 'forest',
       },
     },
