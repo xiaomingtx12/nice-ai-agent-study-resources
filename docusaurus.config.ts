@@ -7,16 +7,17 @@ const config: Config = {
   url: 'https://xiaomingtx12.github.io',
   baseUrl: '/nice-ai-agent-study-resources/',
 
-  organizationName: 'xiaomingtx12',
-  projectName: 'nice-ai-agent-study-resources',
-
-  onBrokenLinks: 'throw',
-
   markdown: {
+    mermaid: true,
     hooks: {
       onBrokenMarkdownLinks: 'warn',
     },
   },
+
+  organizationName: 'xiaomingtx12',
+  projectName: 'nice-ai-agent-study-resources',
+
+  onBrokenLinks: 'throw',
 
   i18n: {
     defaultLocale: 'zh-Hans',
@@ -49,6 +50,8 @@ const config: Config = {
       },
     ],
   ],
+
+  themes: ['@docusaurus/theme-mermaid'],
 
   themeConfig: {
     navbar: {
@@ -94,6 +97,12 @@ const config: Config = {
       style: 'light',
       links: [],
       copyright: `Copyright © ${new Date().getFullYear()} xiaomingtx12`,
+    },
+    mermaid: {
+      theme: {
+        light: 'neutral',
+        dark: 'forest',
+      },
     },
     prism: {
       theme: prismThemes.github,
