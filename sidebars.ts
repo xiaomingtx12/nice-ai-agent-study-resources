@@ -38,7 +38,9 @@ const sidebars: SidebarsConfig = {
           'resources/hello-agents/notes/index',
           [
             'resources/hello-agents/notes/why-i-treat-it-as-a-map',
+            'resources/hello-agents/notes/which-modules-are-worth-reading-first',
             'resources/hello-agents/notes/how-i-plan-to-study-it',
+            'resources/hello-agents/notes/how-to-check-whether-you-learned-more-than-vocabulary',
           ],
         ),
         resourceEntry(
@@ -48,6 +50,8 @@ const sidebars: SidebarsConfig = {
           'resources/ai-agents-from-zero/notes/index',
           [
             'resources/ai-agents-from-zero/notes/why-i-see-it-as-a-project-driven-agent-path',
+            'resources/ai-agents-from-zero/notes/which-projects-are-worth-doing-first',
+            'resources/ai-agents-from-zero/notes/which-parts-of-workflow-mcp-and-rag-are-portable',
             'resources/ai-agents-from-zero/notes/how-i-distinguish-it-from-helloagents-and-easy-vibe',
           ],
         ),
@@ -75,6 +79,8 @@ const sidebars: SidebarsConfig = {
           'resources/learn-claude-code/notes/index',
           [
             'resources/learn-claude-code/notes/why-i-see-it-as-an-agent-harness-course',
+            'resources/learn-claude-code/notes/what-in-s01-to-s06-is-the-real-backbone',
+            'resources/learn-claude-code/notes/which-runtime-mechanisms-i-would-steal-first',
             'resources/learn-claude-code/notes/how-i-would-pair-it-with-other-resources',
           ],
         ),
@@ -85,7 +91,9 @@ const sidebars: SidebarsConfig = {
           'resources/claude-code-architecture/notes/index',
           [
             'resources/claude-code-architecture/notes/why-i-see-it-as-a-reverse-engineering-whitepaper',
+            'resources/claude-code-architecture/notes/which-layers-are-most-worth-reusing-as-a-framework',
             'resources/claude-code-architecture/notes/how-i-separate-it-from-learn-claude-code',
+            'resources/claude-code-architecture/notes/why-queryengine-permissions-compaction-and-telemetry-are-the-real-product-divide',
           ],
         ),
       ],
@@ -104,6 +112,8 @@ const sidebars: SidebarsConfig = {
             'resources/ai-agent-book/notes/why-it-feels-like-an-architecture-manual',
             'resources/ai-agent-book/notes/how-i-plan-to-read-it',
             'resources/ai-agent-book/notes/chapter-level-critique',
+            'resources/ai-agent-book/notes/which-questions-have-to-enter-your-head-first',
+            'resources/ai-agent-book/notes/which-patterns-are-worth-using-now-and-which-should-wait',
           ],
         ),
       ],
@@ -121,6 +131,8 @@ const sidebars: SidebarsConfig = {
           [
             'resources/openclaw-book/notes/why-i-see-it-as-a-control-plane-walkthrough',
             'resources/openclaw-book/notes/how-to-read-it-without-drowning-in-details',
+            'resources/openclaw-book/notes/if-i-only-follow-one-line-i-follow-gateway-to-runtime',
+            'resources/openclaw-book/notes/which-implementations-are-worth-extracting-into-general-patterns',
           ],
         ),
       ],

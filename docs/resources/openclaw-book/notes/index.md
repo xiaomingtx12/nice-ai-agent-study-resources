@@ -9,12 +9,16 @@ sidebar_position: 1
 ## 当前内容
 
 - [为什么我把它看成 control plane 源码导读](./why-i-see-it-as-a-control-plane-walkthrough.md)
+- [如果只抓一条主线，我会先抓 Gateway 到运行时这条链](./if-i-only-follow-one-line-i-follow-gateway-to-runtime.md)
 - [怎么读这条资源，才不会淹死在大项目细节里](./how-to-read-it-without-drowning-in-details.md)
+- [OpenClaw 里哪些实现最值得提炼成通用系统模式](./which-implementations-are-worth-extracting-into-general-patterns.md)
 
 ## 建议先看顺序
 
 1. 先看 [为什么我把它看成 control plane 源码导读](./why-i-see-it-as-a-control-plane-walkthrough.md)，先把对象感立住
-2. 再看 [怎么读这条资源，才不会淹死在大项目细节里](./how-to-read-it-without-drowning-in-details.md)，避免一头扎进细节
+2. 再看 [如果只抓一条主线，我会先抓 Gateway 到运行时这条链](./if-i-only-follow-one-line-i-follow-gateway-to-runtime.md)，先把系统骨架串起来
+3. 再看 [怎么读这条资源，才不会淹死在大项目细节里](./how-to-read-it-without-drowning-in-details.md)，避免一头扎进细节
+4. 最后看 [OpenClaw 里哪些实现最值得提炼成通用系统模式](./which-implementations-are-worth-extracting-into-general-patterns.md)，把阅读结果提炼成可迁移判断
 
 ## 下一批最值得补的内容
 
