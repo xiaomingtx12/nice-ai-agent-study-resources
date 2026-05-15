@@ -1,13 +1,9 @@
-/* Center standalone doc pages like Home and About when sidebar is hidden */
-.centered-doc-page {
-  max-width: 960px;
-  margin-left: auto;
-  margin-right: auto;
-  width: 100%;
-  padding-left: 1rem;
-  padding-right: 1rem;
-}
-
-.centered-doc-page .theme-doc-markdown {
-  max-width: 100%;
+@media (min-width: 997px) {
+  html[class~='docs-doc-id-index'] main[class*='docMainContainer'],
+  html[class~='docs-doc-id-about/index'] main[class*='docMainContainer'] {
+    width: calc(100% - var(--doc-sidebar-width));
+    max-width: calc(100% - var(--doc-sidebar-width));
+    margin-left: var(--doc-sidebar-width);
+    margin-right: 0;
+  }
 }
