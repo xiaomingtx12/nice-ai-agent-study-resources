@@ -42,6 +42,16 @@ const sidebars: SidebarsConfig = {
           ],
         ),
         resourceEntry(
+          'AI Agents From Zero',
+          'resources/ai-agents-from-zero/index',
+          'resources/ai-agents-from-zero/review',
+          'resources/ai-agents-from-zero/notes/index',
+          [
+            'resources/ai-agents-from-zero/notes/why-i-see-it-as-a-project-driven-agent-path',
+            'resources/ai-agents-from-zero/notes/how-i-distinguish-it-from-helloagents-and-easy-vibe',
+          ],
+        ),
+        resourceEntry(
           'Easy-Vibe',
           'resources/easy-vibe/index',
           'resources/easy-vibe/review',
