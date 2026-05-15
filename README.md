@@ -7,6 +7,8 @@
 
 站点由 **Docusaurus** 构建，内容统一放在 `docs/` 下。
 
+维护站点结构时，优先看仓库根目录的 [SITE_STRUCTURE_GUIDE.md](./SITE_STRUCTURE_GUIDE.md)。
+
 在线阅读：[Nice AI 资源库](https://xiaomingtx12.github.io/nice-ai-agent-study-resources/)
 
 如果你是第一次从 GitHub 点进来，建议先看这些入口：

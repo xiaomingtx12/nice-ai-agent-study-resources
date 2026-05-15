@@ -16,6 +16,8 @@ venv/
 # Node
 node_modules/
 build/
+build-*/
+build-verify/
 .docusaurus/
 
 # npm

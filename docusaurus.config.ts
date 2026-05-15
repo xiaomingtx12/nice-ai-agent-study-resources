@@ -36,6 +36,9 @@ const config: Config = {
             'https://github.com/xiaomingtx12/nice-ai-agent-study-resources/edit/main/',
         },
         blog: false,
+        theme: {
+          customCss: require.resolve('./src/css/custom.css'),
+        },
       },
     ],
   ],
@@ -57,6 +60,12 @@ const config: Config = {
     navbar: {
       title: 'Nice AI',
       items: [
+        {
+          to: '/',
+          label: '首页',
+          position: 'left',
+          activeBaseRegex: '^/$',
+        },
         {
           to: '/resources',
           label: '资源导航',

@@ -1,0 +1,13 @@
+/* Center standalone doc pages like Home and About when sidebar is hidden */
+.centered-doc-page {
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.centered-doc-page .theme-doc-markdown {
+  max-width: 100%;
+}
