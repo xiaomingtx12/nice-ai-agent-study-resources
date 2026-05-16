@@ -19,14 +19,14 @@ sidebar_position: 2.2
 
 所以这一篇更关注 LangGraph 在平台里的“内核角色”，而不是某个单页面功能。
 
-## 我会把它拆成六个部分
+## 可以把它拆成六个部分
 
 ### 1. 状态模型
 
 - `StateGraph` 的前提不是节点多，而是先把共享状态定义清楚
 - Workflow 侧的 `inputs`、`outputs`、`node_results`、`intent_condition` 对应不同 reducer 规则
 - Agent 侧则围绕消息状态展开，用消息归并承接多轮推理和工具调用
-- 这决定了节点只声明“我改了什么”，不用反复重建整份状态
+- 这决定了节点只声明“改了什么”，不用反复重建整份状态
 
 ### 2. 图构建
 
@@ -65,7 +65,7 @@ sidebar_position: 2.2
 
 ### 1. 前端 DSL 不等于 LangGraph
 
-LangGraph 不认识你的业务节点定义，编译和校验层是平台自己补的。
+LangGraph 不认识业务节点定义，编译和校验层是平台自己补的。
 
 ### 2. 节点不一定非要继承 `Runnable`
 
@@ -79,15 +79,15 @@ LangGraph 要的是可执行单元，类节点只是项目为了统一抽象做�
 
 调试回放、发布门禁、事件流、中断控制都还是平台层自己补齐的。
 
-## 如果你要顺着学
+## 建议阅读路径
 
 建议按这个顺序看：
 
-- 先看 [平台的可视化工作流实现](./visual-workflow.md)，理解 Workflow 这条链怎么从 DSL 变成执行图
-- 再看 [平台的核心 Agent 层](./core-agent-layer.md)，理解同一套编排思路怎么落到对话执行层
-- 最后回看这一篇，你会更容易把 `StateGraph`、reducer、条件路由和消息状态这些概念放回工程语境里
+- 先看 [Workflow 编排引擎](./workflow-orchestration-engine.md)，理解 Workflow 这条链怎么从 DSL 变成执行图
+- 再看 [Agent 运行时与记忆机制](./agent-runtime-and-memory.md)，理解同一套编排思路怎么落到对话执行层
+- 最后回看这一篇，更容易把 `StateGraph`、reducer、条件路由和消息状态这些概念放回工程语境里
 
-## 我现在的判断
+## 这一层的关键判断
 
 这个项目把 LangGraph 放在了两个最合适的位置上：
 

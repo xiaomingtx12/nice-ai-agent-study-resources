@@ -1,0 +1,9 @@
+{"type":"click","text":"02 配置资产与平台底座\n            应用配置、模型配置、工具配置、工作流配置、知识库配置怎么存、怎么装配、怎么版本化。","choice":"02-foundation","id":null,"timestamp":1778905248215}
+{"type":"click","text":"02 配置资产与平台底座\n            应用配置、模型配置、工具配置、工作流配置、知识库配置怎么存、怎么装配、怎么版本化。","choice":"02-foundation","id":null,"timestamp":1778905248582}
+{"type":"click","text":"03 Agent 运行时内核\n            请求进入后怎样装上下文、选模型、拼工具、跑双模式 Agent、输出事件流和中断控制。","choice":"03-runtime","id":null,"timestamp":1778905254011}
+{"type":"click","text":"05 知识库与记忆系统\n            文档入库、切分、检索、融合、短期上下文、长期摘要记忆如何接到主对话链路。","choice":"05-rag","id":null,"timestamp":1778905259336}
+{"type":"click","text":"04 工具与外部能力平台\n            Builtin / API / MCP 工具如何统一注册、调试、鉴权和执行。","choice":"04-tools","id":null,"timestamp":1778905266559}
+{"type":"click","text":"05 知识库与记忆系统\n            文档入库、切分、检索、融合、短期上下文、长期摘要记忆如何接到主对话链路。","choice":"05-rag","id":null,"timestamp":1778905267661}
+{"type":"click","text":"04 工具与外部能力平台\n            Builtin / API / MCP 工具如何统一注册、调试、鉴权和执行。","choice":"04-tools","id":null,"timestamp":1778905368760}
+{"type":"click","text":"04 工具与外部能力平台\n            Builtin / API / MCP 工具如何统一注册、调试、鉴权和执行。","choice":"04-tools","id":null,"timestamp":1778905369142}
+{"type":"click","text":"05 知识库与记忆系统\n            文档入库、切分、检索、融合、短期上下文、长期摘要记忆如何接到主对话链路。","choice":"05-rag","id":null,"timestamp":1778905369600}

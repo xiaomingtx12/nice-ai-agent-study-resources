@@ -1,0 +1,103 @@
+<h2>Agent 开发平台文档重组草案 v2</h2>
+<p class="subtitle">已采纳你的调整：记忆系统并入 Agent 主线。知识库保留独立，但只负责文档生产链和检索消费链。</p>
+
+<div class="section">
+  <div class="label">Updated Mainline</div>
+  <div class="mockup">
+    <div class="mockup-header">主线改成：底座 -> Agent 主链 -> 外部能力 -> Workflow -> 治理 -> 场景</div>
+    <div class="mockup-body">
+      <div class="cards">
+        <div class="card" data-choice="01-overview" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>01 平台定义与总览</h3>
+            <p>先讲平台解决什么问题、核心资产是什么、用户如何从想法走到可运行应用。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="02-foundation" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>02 配置资产与平台底座</h3>
+            <p>应用、模型、工具、工作流、知识库这些资产怎么存、怎么装、怎么版本化。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="03-agent-memory" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>03 Agent 运行时与记忆机制</h3>
+            <p>请求进入后怎样装上下文、选模型、拼工具、跑双模式 Agent，并在主链里处理短期记忆、长期摘要、事件流和中断恢复。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="04-tools" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>04 工具与外部能力平台</h3>
+            <p>Builtin / API / MCP 工具如何统一注册、调试、鉴权和执行，并被 Agent / Workflow 共用。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="05-rag-only" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>05 知识库与检索链路</h3>
+            <p>只讲文档上传、解析、切分、索引、召回、融合，以及检索结果如何被 Tool 化复用。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="06-workflow" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>06 Workflow 编排引擎</h3>
+            <p>前端 DSL、draft / publish 双态、图校验、LangGraph 编译、工作流工具化闭环。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="07-governance" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>07 发布、治理与异步执行</h3>
+            <p>多租户隔离、API Key、队列、预算、发布门禁、后台任务、观测性这些生产化能力。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="08-scenarios" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>08 场景模板与手搓路线</h3>
+            <p>把前面的底座和能力重新装回客服、内容生产、企业知识助手等场景模板。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Boundary Change</div>
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">并入 Agent 的内容</div>
+      <div class="mockup-body">
+        <p><strong>短期记忆：</strong>历史裁剪、token budget、上下文拼装。</p>
+        <p><strong>长期记忆：</strong>摘要生成、异步更新、推理前注入。</p>
+        <p><strong>运行时联动：</strong>记忆何时读、何时写、何时阻塞、何时异步。</p>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">留在知识库篇的内容</div>
+      <div class="mockup-body">
+        <p><strong>知识生产链：</strong>上传、解析、切块、向量化、索引。</p>
+        <p><strong>知识消费链：</strong>召回、重排、融合、Tool 化。</p>
+        <p><strong>边界强调：</strong>知识库不等于记忆，检索是外部知识接入，记忆是会话状态管理。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Question</div>
+  <div class="options">
+    <div class="option" data-choice="workflow-separate" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>Workflow 继续独立成篇</h3>
+        <p>把它看成平台第二条正式执行内核，和 Agent 并列。</p>
+      </div>
+    </div>
+    <div class="option" data-choice="workflow-merge-agent" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Workflow 并进 Agent / 编排篇</h3>
+        <p>把它当成 Agent 平台里的一个可视化能力，不再给它完整独立位置。</p>
+      </div>
+    </div>
+  </div>
+</div>

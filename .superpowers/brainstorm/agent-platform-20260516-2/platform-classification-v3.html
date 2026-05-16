@@ -1,0 +1,116 @@
+<h2>Agent 开发平台主线文档定义</h2>
+<p class="subtitle">当前版本已经采用两条关键约束：记忆系统并入 Agent 主线；Workflow 保持独立成篇。</p>
+
+<div class="section">
+  <div class="label">Mainline Docs</div>
+  <div class="cards">
+    <div class="card" data-choice="doc-01" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>01 平台定义与总览</h3>
+        <p><strong>作用：</strong>先讲这个平台到底服务谁、解决什么问题、核心资产有哪些。</p>
+        <p><strong>业务主线：</strong>用户创建应用 -> 配置模型/工具/知识库/工作流 -> 调试 -> 发布 -> 多端使用。</p>
+        <p><strong>旧内容来源：</strong>现有项目总览 + 整体架构中的全局叙事。</p>
+      </div>
+    </div>
+    <div class="card" data-choice="doc-02" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>02 配置资产与平台底座</h3>
+        <p><strong>作用：</strong>讲平台为什么不是一堆页面，而是一组可装配、可发布、可复用的配置资产。</p>
+        <p><strong>实现重点：</strong>应用配置、模型配置、工具配置、知识库配置、工作流配置、版本与发布态。</p>
+        <p><strong>旧内容来源：</strong>多模型集成、工具调用、可视化工作流、整体架构里的配置驱动部分。</p>
+      </div>
+    </div>
+    <div class="card" data-choice="doc-03" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>03 Agent 运行时与记忆机制</h3>
+        <p><strong>作用：</strong>讲一条对话请求进入平台后，怎样真正跑起来。</p>
+        <p><strong>业务主线：</strong>加载应用配置 -> 装配模型和工具 -> 取短期上下文 -> 注入长期摘要 -> 选择执行模式 -> 输出事件流 -> 异步更新记忆。</p>
+        <p><strong>旧内容来源：</strong>核心 Agent 层 + 多模型集成 + RAG 文档里关于会话记忆的部分。</p>
+      </div>
+    </div>
+    <div class="card" data-choice="doc-04" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>04 工具与外部能力平台</h3>
+        <p><strong>作用：</strong>讲平台怎么把外部能力收口成统一运行时接口。</p>
+        <p><strong>实现重点：</strong>Builtin / API / MCP 三类工具的注册、调试、鉴权、执行和 Agent / Workflow 复用。</p>
+        <p><strong>旧内容来源：</strong>工具调用 + 准备文档里的插件工具平台实现详解。</p>
+      </div>
+    </div>
+    <div class="card" data-choice="doc-05" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>05 知识库与检索链路</h3>
+        <p><strong>作用：</strong>只讲平台如何生产和消费外部知识，不再把记忆混进来。</p>
+        <p><strong>业务主线：</strong>文档上传 -> 解析切分 -> 建索引 -> 查询召回 -> 融合重排 -> 作为 Tool 或上下文复用。</p>
+        <p><strong>旧内容来源：</strong>在线知识库设计 + 准备文档中的 RAG 实现详解。</p>
+      </div>
+    </div>
+    <div class="card" data-choice="doc-06" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>06 Workflow 编排引擎</h3>
+        <p><strong>作用：</strong>把 Workflow 作为平台第二条正式执行内核来讲，而不是附属画布。</p>
+        <p><strong>业务主线：</strong>前端 DSL 编辑 -> draft_graph 保存 -> 调试运行 -> 严格校验 -> 发布 graph -> 工具化复用。</p>
+        <p><strong>旧内容来源：</strong>可视化工作流 + LangGraph 编排骨架 + 准备文档里的工作流实现详解。</p>
+      </div>
+    </div>
+    <div class="card" data-choice="doc-07" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>07 发布、治理与异步执行</h3>
+        <p><strong>作用：</strong>补齐一个平台从 demo 走向可交付系统的约束层。</p>
+        <p><strong>实现重点：</strong>多租户、API Key 隔离、后台任务、发布门禁、预算控制、观测性、失败恢复。</p>
+        <p><strong>旧内容来源：</strong>整体架构 + 多模型集成 + 准备文档里的队列/后台处理材料。</p>
+      </div>
+    </div>
+    <div class="card" data-choice="doc-08" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>08 场景模板与手搓路线</h3>
+        <p><strong>作用：</strong>把前面拆开的能力重新装回几个可落地场景，形成真正的手搓指南。</p>
+        <p><strong>业务主线：</strong>客服、知识助手、内容生产等模板分别需要哪些底座、哪些能力、哪些取舍。</p>
+        <p><strong>旧内容来源：</strong>现有总览里提到的模板能力 + 新增的工程落地总结。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">What Gets Merged</div>
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">不再作为主线独立篇目</div>
+      <div class="mockup-body">
+        <p><strong>LangChain 组件抽象：</strong>并入 02 / 03 / 04，按资产装配和运行时角色解释，不单开框架综述。</p>
+        <p><strong>LangGraph 编排骨架：</strong>并入 03 / 06，分别服务 Agent 执行链与 Workflow 编排链。</p>
+        <p><strong>整体架构：</strong>不保留成一篇泛总括，而是把真正有用的系统约束拆到 01 / 02 / 07。</p>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">保留但重写进入主线</div>
+      <div class="mockup-body">
+        <p><strong>项目总览：</strong>升级为平台总览。</p>
+        <p><strong>核心 Agent 层：</strong>升级为 Agent 运行时与记忆机制。</p>
+        <p><strong>工具调用：</strong>升级为工具与外部能力平台。</p>
+        <p><strong>在线知识库：</strong>升级为知识库与检索链路。</p>
+        <p><strong>可视化工作流：</strong>升级为 Workflow 编排引擎。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Check</div>
+  <div class="options">
+    <div class="option" data-choice="structure-yes" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>这套主线成立</h3>
+        <p>可以按这个方向写正式 spec，再进入实施层。</p>
+      </div>
+    </div>
+    <div class="option" data-choice="structure-adjust" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>还需要调</h3>
+        <p>结构方向对，但某几篇的边界或映射还需要改。</p>
+      </div>
+    </div>
+  </div>
+</div>

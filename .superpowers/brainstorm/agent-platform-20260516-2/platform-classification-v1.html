@@ -1,0 +1,110 @@
+<h2>Agent 开发平台文档重组草案</h2>
+<p class="subtitle">推荐方案：主线按“能手搓出来”的实现顺序组织，源码深挖降为实现附录，历史备份保留为归档。</p>
+
+<div class="section">
+  <div class="label">Three Layers</div>
+  <div class="cards">
+    <div class="card" data-choice="mainline" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>主线文档</h3>
+        <p>真正给人照着做的平台搭建路径。</p>
+        <p>目标是让读者看完能把平台底座、运行时、业务能力和治理链路手搓出来。</p>
+      </div>
+    </div>
+    <div class="card" data-choice="appendix" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>实现附录</h3>
+        <p>保留源码级深挖材料，但不占主阅读路径。</p>
+        <p>适合主线读完后，回头补 LangGraph、工具平台、RAG、队列等细节证据。</p>
+      </div>
+    </div>
+    <div class="card" data-choice="archive" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>历史归档</h3>
+        <p>原有备份继续保留，不再承担主分类职责。</p>
+        <p>它的价值是留存旧表达和旧结构，不再和新主线并列竞争注意力。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Mainline Order</div>
+  <div class="mockup">
+    <div class="mockup-header">推荐主线：先底座，再运行时，再业务能力，再治理，再场景</div>
+    <div class="mockup-body">
+      <div class="cards">
+        <div class="card" data-choice="01-overview" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>01 平台定义与总览</h3>
+            <p>平台解决什么问题，目标用户是谁，核心资产和核心业务流是什么。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="02-foundation" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>02 配置资产与平台底座</h3>
+            <p>应用配置、模型配置、工具配置、工作流配置、知识库配置怎么存、怎么装配、怎么版本化。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="03-runtime" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>03 Agent 运行时内核</h3>
+            <p>请求进入后怎样装上下文、选模型、拼工具、跑双模式 Agent、输出事件流和中断控制。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="04-tools" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>04 工具与外部能力平台</h3>
+            <p>Builtin / API / MCP 工具如何统一注册、调试、鉴权和执行。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="05-rag" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>05 知识库与记忆系统</h3>
+            <p>文档入库、切分、检索、融合、短期上下文、长期摘要记忆如何接到主对话链路。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="06-workflow" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>06 Workflow 编排引擎</h3>
+            <p>前端 DSL、草稿/发布双态、图校验、LangGraph 编译、工作流工具化复用怎么闭环。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="07-governance" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>07 发布、治理与异步执行</h3>
+            <p>多租户隔离、API Key、队列、预算、发布门禁、后台任务、观测性如何补齐生产化能力。</p>
+          </div>
+        </div>
+        <div class="card" data-choice="08-scenarios" onclick="toggleSelect(this)">
+          <div class="card-body">
+            <h3>08 场景模板与手搓路线</h3>
+            <p>把前面能力重新装回客服、内容生产、企业知识助手等实际应用模板。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Old Docs Handling</div>
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">保留并改名 / 重写进入主线</div>
+      <div class="mockup-body">
+        <p><strong>保留核心骨架：</strong>总览、核心 Agent 层、工具调用、在线知识库、可视化工作流、多模型集成、整体架构、写作标准。</p>
+        <p><strong>改写方向：</strong>全部去掉 Dify 命名依赖，改成更通用的 Agent 开发平台表达。</p>
+        <p><strong>新增要求：</strong>每篇都要补“业务流程 + 关键状态 + 具体实现 + 手搓路径”。</p>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">合并 / 降级处理</div>
+      <div class="mockup-body">
+        <p><strong>合并重写：</strong>LangChain 组件抽象、LangGraph 编排骨架，不再作为两篇偏框架介绍的独立主文，而是拆入底座、运行时、Workflow 三篇。</p>
+        <p><strong>附录化：</strong>现在的“准备文档”整体变成“实现附录”，作为主线证据库。</p>
+        <p><strong>归档化：</strong>历史备份继续留着，但不放在主导航的高权重位置。</p>
+      </div>
+    </div>
+  </div>
+</div>

@@ -18,7 +18,7 @@ sidebar_position: 2.1
 - LangGraph 负责状态和控制流编排
 - 平台自己的 service 和 runtime 再把两者包成真正可运行的产品能力
 
-## 我会把它拆成六个部分
+## 可以把它拆成六个部分
 
 ### 1. 模型接口
 
@@ -93,15 +93,15 @@ sidebar_position: 2.1
 
 项目没有把所有问题都交给高级封装，而是只复用真正稳定的标准组件。
 
-## 如果你刚开始学这一块
+## 建议阅读路径
 
 建议按这条线看：
 
-- 先看 [一站式 AI Agent 开发平台项目总览](./one-stop-agent-platform-overview.md)，知道 LangChain 在整个平台里只是其中一层
-- 再看 [平台的工具调用设计](./tool-calling.md) 和 [平台的 RAG 与会话记忆设计](./online-knowledge-base.md)，因为 `BaseTool` 和 RAG 组件链最能体现 LangChain 的价值
-- 最后再接 [平台的核心 Agent 层](./core-agent-layer.md)，你会更容易理解为什么平台没有把执行层完全交给 LangChain
+- 先看 [平台定义与总览](./platform-definition-and-overview.md)，明确 LangChain 在整个平台里只是其中一层
+- 再看 [工具与外部能力平台](./tools-and-external-capabilities.md) 和 [知识库与检索链路](./knowledge-base-and-retrieval-pipeline.md)，因为 `BaseTool` 和 RAG 组件链最能体现 LangChain 的价值
+- 最后再接 [Agent 运行时与记忆机制](./agent-runtime-and-memory.md)，更容易理解为什么平台没有把执行层完全交给 LangChain
 
-## 我现在的判断
+## 这一层的关键判断
 
 这个项目里 LangChain 最重要的价值，不是“帮你快速搭一个 Agent demo”，而是提供了一整套稳定的组件协议。
 

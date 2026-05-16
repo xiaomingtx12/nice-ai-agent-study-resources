@@ -19,8 +19,8 @@ sidebar_position: 1
 
 ## 先看什么
 
-- [Dify 型平台拆解](./dify-type-application/)：这一组先从一个类 Dify 的 Agent 开发平台开始，重点拆工程模块、实现路径和复盘
-- [怎么把一篇 AI 应用文档写得真正有用](./what-i-want-to-write-here.md)：这是我给自己定的写法标准，后面每篇工程笔记都可以按它校验
+- [Agent 开发平台](./agent-development-platform/)：这一组把平台拆成一条更适合手搓实现的主线，按“底座、运行时、外部能力、Workflow、治理、场景”往下展开
+- [怎么把一篇 AI 应用文档写得真正有用](./what-i-want-to-write-here.md)：这是这一栏总的写法标准，帮助我避免只列功能、不碰系统问题
 
 ## 这里不放什么
 
