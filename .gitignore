@@ -19,6 +19,7 @@ build/
 build-*/
 build-verify/
 .docusaurus/
+.worktrees/
 
 # npm
 npm-debug.log*
