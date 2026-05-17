@@ -119,6 +119,10 @@ const config: Config = {
           position: 'right',
         },
         {
+          type: 'custom-siteThemePreset',
+          position: 'right',
+        },
+        {
           href: 'https://github.com/xiaomingtx12/nice-ai-agent-study-resources',
           label: 'GitHub',
           position: 'right',

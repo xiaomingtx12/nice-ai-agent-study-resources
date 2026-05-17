@@ -33,6 +33,17 @@ const requiredMarkers = {
     'SITE_THEME_STORAGE_KEY',
     'DEFAULT_SITE_THEME',
     'SITE_THEME_PRESETS',
+    "type: 'custom-siteThemePreset'",
+    "position: 'right'",
+  ],
+  'src/theme/NavbarItem/ComponentTypes.js': [
+    'custom-siteThemePreset',
+    'ThemePresetToggle',
+  ],
+  'src/components/ThemePresetToggle/index.tsx': [
+    'useSiteTheme',
+    'SITE_THEME_PRESETS',
+    'setTheme',
   ],
 };
 
