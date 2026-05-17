@@ -8,6 +8,20 @@ sidebar_position: 7
 
 这里要先把位置摆正。Workflow 不是 Agent 页面里的一个附属功能，它本身就是平台的第二条正式执行内核。
 
+> 适合谁读：已经知道 Workflow 是什么，但还没把它放到“平台第二条正式执行内核”这个位置上看的人。
+>
+> 读前建议：先看 [平台定义与总览](./platform-definition-and-overview.md) 里的“双执行内核”部分，再看这一篇。
+
+## 先建立阅读坐标
+
+- 这篇在主线里的位置：第六篇，用来回答“Workflow 怎样从前端 DSL 变成正式运行内核”。
+- 带着这三个问题读：
+  1. 为什么前端维护的是平台 DSL，而不是底层图对象。
+  2. 为什么草稿保存、严格编译、发布冻结必须拆成不同阶段。
+  3. 为什么已发布 Workflow 最后还要重新变成 Tool。
+- 先记住的对象：`Workflow.draft_graph`、`Workflow.graph`、`WorkflowConfig`、`WorkflowState`、`WorkflowResult`。
+- 如果时间有限，优先看：先看闭环、第 1 节、第 4 节、第 7 节、第 11 节和第 14 节。
+
 ## 先看闭环
 
 ```mermaid
@@ -602,3 +616,13 @@ name=f"wf_{workflow_record.tool_call_name}"
 7. 已发布工作流最好还能重新挂回工具体系。
 
 这份 Workflow 实现的核心不在“可视化画布”，而在“把一份 DSL 稳定编译成可运行 DAG，再把这张 DAG 重新纳入平台能力层”。这一层立住了，前端拖拽页面才有意义。
+
+## 15. 这一篇先记住什么
+
+1. Workflow 在平台里不是附属功能，而是一条独立执行内核。
+2. 平台真正维护的是一套 DSL -> 校验 -> 编译 -> 发布 -> Tool 化的完整链路，而不是一张前端流程图。
+3. Workflow 能重新回到 Tool 体系，平台的能力层才算真正闭环。
+
+## 下一篇建议读什么
+
+- [平台的 LangChain 组件抽象](./langchain-component-abstractions.md) 或 [平台的 LangGraph 编排骨架](./langgraph-orchestration-kernel.md)：回看框架层在主线里的角色。

@@ -138,7 +138,11 @@ const sidebars: SidebarsConfig = {
       ],
     },
   ],
-  notesSidebar: ['notes/index', 'notes/how-to-learn-agent-with-judgment'],
+  notesSidebar: [
+    'notes/index',
+    'notes/how-to-learn-agent-with-judgment',
+    'notes/ai-coding-learning-method-stage-review',
+  ],
   applicationNotesSidebar: [
     'application-notes/index',
     {
@@ -147,6 +151,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         'application-notes/agent-development-platform/index',
+        'application-notes/agent-development-platform/reading-map-and-key-terms',
         'application-notes/agent-development-platform/platform-definition-and-overview',
         'application-notes/agent-development-platform/configuration-assets-and-platform-foundation',
         'application-notes/agent-development-platform/agent-runtime-and-memory',

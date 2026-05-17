@@ -8,6 +8,16 @@ sidebar_position: 2.1
 
 它不直接决定整个平台怎么编排，但模型接入、提示词模板、输出解析、工具协议、消息对象、RAG 文本链路，几乎都靠 LangChain 这一层收口。
 
+> 这是一篇补充理解文档，不是主线入口。更适合在读完总览、运行时、工具层和知识库之后回看。
+
+## 先建立阅读坐标
+
+- 这篇在主线里的位置：补充篇，用来解释 LangChain 在平台里承担的“组件协议层”角色。
+- 带着这两个问题读：
+  1. 平台为什么大量复用 LangChain，但没有把整条执行控制完全交给它。
+  2. LangChain 到底在哪些地方提供了可复用的标准零件。
+- 先记住的对象：`BaseLanguageModel`、`ChatPromptTemplate`、`BaseTool`、`Retriever`、`Runnable`。
+
 ## LangChain 在这里不是一个大一统 Agent 框架
 
 这类项目里最容易混淆的一点，是把 LangChain 和 LangGraph 当成一回事。
@@ -106,3 +116,9 @@ sidebar_position: 2.1
 这个项目里 LangChain 最重要的价值，不是“帮你快速搭一个 Agent demo”，而是提供了一整套稳定的组件协议。
 
 模型、Prompt、Parser、Tool、Message、Retriever 这些零件一旦标准化，平台后面的编排、治理和复用才有可靠底座。
+
+## 回到主线时先带走什么
+
+1. LangChain 在这套平台里主要负责协议和可组合零件，不是整个系统的执行总控。
+2. 统一的模型、消息、工具、检索协议，是平台后面做编排和治理的基础。
+3. 真正理解这一篇之后，再回看 Agent、Tool、RAG 三篇，会更容易看清哪些部分是平台补的，哪些部分是框架给的。
