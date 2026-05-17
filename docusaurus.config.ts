@@ -1,11 +1,34 @@
 import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
+import {
+  DEFAULT_SITE_THEME,
+  SITE_THEME_PRESETS,
+  SITE_THEME_STORAGE_KEY,
+} from './src/lib/siteTheme';
+
+const siteThemeIds = SITE_THEME_PRESETS.map((preset) => preset.id);
+const siteThemeBootstrapScript = `(function(){try{var storageKey=${JSON.stringify(
+  SITE_THEME_STORAGE_KEY,
+)};var defaultTheme=${JSON.stringify(
+  DEFAULT_SITE_THEME,
+)};var theme=window.localStorage.getItem(storageKey);if(!${JSON.stringify(
+  siteThemeIds,
+)}.includes(theme)){theme=defaultTheme;}document.documentElement.setAttribute('data-site-theme',theme);}catch(error){document.documentElement.setAttribute('data-site-theme',${JSON.stringify(
+  DEFAULT_SITE_THEME,
+)});}})()`;
 
 const config: Config = {
   title: 'Nice AI 资源库',
   tagline: '资源导航、锐评与个人学习沉淀',
   url: 'https://xiaomingtx12.github.io',
   baseUrl: '/nice-ai-agent-study-resources/',
+  headTags: [
+    {
+      tagName: 'script',
+      attributes: {},
+      innerHTML: siteThemeBootstrapScript,
+    },
+  ],
 
   markdown: {
     mermaid: true,

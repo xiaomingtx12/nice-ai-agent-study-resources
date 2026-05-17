@@ -15,6 +15,25 @@ const requiredMarkers = {
     'isSiteThemeId',
     'getInitialSiteTheme',
   ],
+  'src/components/SiteThemeProvider/index.tsx': [
+    'createContext',
+    'useSiteTheme',
+    'document.documentElement.setAttribute',
+    'SITE_THEME_STORAGE_KEY',
+    'try',
+    'catch',
+  ],
+  'src/theme/Root.tsx': [
+    'SiteThemeProvider',
+    'children',
+  ],
+  'docusaurus.config.ts': [
+    'headTags',
+    'data-site-theme',
+    'SITE_THEME_STORAGE_KEY',
+    'DEFAULT_SITE_THEME',
+    'SITE_THEME_PRESETS',
+  ],
 };
 
 const missingFiles = [];
