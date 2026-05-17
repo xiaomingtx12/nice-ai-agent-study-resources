@@ -1,3 +1,8 @@
+.desktopItem {
+  display: flex;
+  align-items: center;
+}
+
 .wrapper {
   display: flex;
   flex-wrap: wrap;
@@ -50,8 +55,12 @@
   border-radius: 0.9rem;
 }
 
+.mobileItem {
+  display: block;
+  padding: 0.5rem 0;
+}
+
 .mobile .button {
   flex: 1 1 0;
-  justify-content: center;
   text-align: center;
 }
