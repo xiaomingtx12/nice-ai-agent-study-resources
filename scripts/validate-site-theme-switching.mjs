@@ -45,6 +45,19 @@ const requiredMarkers = {
     'SITE_THEME_PRESETS',
     'setTheme',
   ],
+  'src/css/custom.css': [
+    '--site-bg',
+    '--site-surface',
+    '--site-text',
+    '--site-border',
+    '--site-accent',
+    "html[data-site-theme='editorial']",
+    "html[data-site-theme='signal']",
+    "html[data-site-theme='archive']",
+    "html[data-theme='dark']",
+    '--ifm-background-color',
+    '--ifm-color-primary',
+  ],
 };
 
 const missingFiles = [];

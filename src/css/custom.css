@@ -1,3 +1,104 @@
+:root {
+  --site-bg: #f7f1e8;
+  --site-surface: #fffaf2;
+  --site-surface-strong: #f2e7d9;
+  --site-text: #2b241f;
+  --site-text-muted: #6a5f56;
+  --site-border: #d3c3b0;
+  --site-border-strong: #bda88f;
+  --site-accent: #8a5a38;
+  --site-accent-soft: #b8825c;
+  --site-accent-strong: #6f4528;
+  --site-code-bg: #f3eadf;
+}
+
+html[data-site-theme='editorial'] {
+  --site-bg: #f7f1e8;
+  --site-surface: #fffaf2;
+  --site-surface-strong: #f2e7d9;
+  --site-text: #2b241f;
+  --site-text-muted: #6a5f56;
+  --site-border: #d3c3b0;
+  --site-border-strong: #bda88f;
+  --site-accent: #8a5a38;
+  --site-accent-soft: #b8825c;
+  --site-accent-strong: #6f4528;
+  --site-code-bg: #f3eadf;
+}
+
+html[data-site-theme='signal'] {
+  --site-bg: #eef5fb;
+  --site-surface: #f9fcfe;
+  --site-surface-strong: #dceaf3;
+  --site-text: #20303a;
+  --site-text-muted: #58717f;
+  --site-border: #c2d7e5;
+  --site-border-strong: #98b8cb;
+  --site-accent: #1b6e94;
+  --site-accent-soft: #4e90b1;
+  --site-accent-strong: #145777;
+  --site-code-bg: #e4f0f7;
+}
+
+html[data-site-theme='archive'] {
+  --site-bg: #f2f0eb;
+  --site-surface: #fbfaf7;
+  --site-surface-strong: #e6e2d8;
+  --site-text: #2c2a26;
+  --site-text-muted: #636058;
+  --site-border: #ccc6b8;
+  --site-border-strong: #ada492;
+  --site-accent: #5e6c57;
+  --site-accent-soft: #7b8975;
+  --site-accent-strong: #4a5643;
+  --site-code-bg: #ebe7de;
+}
+
+html[data-theme='dark'] {
+  --site-bg: #10161d;
+  --site-surface: #161f28;
+  --site-surface-strong: #1d2934;
+  --site-text: #e5ebf2;
+  --site-text-muted: #a3b0bc;
+  --site-border: #334150;
+  --site-border-strong: #445466;
+  --site-accent: #7fb0c7;
+  --site-accent-soft: #9fc4d6;
+  --site-accent-strong: #6597ae;
+  --site-code-bg: #18222c;
+}
+
+:root {
+  --ifm-background-color: var(--site-bg);
+  --ifm-background-surface-color: var(--site-surface);
+  --ifm-font-color-base: var(--site-text);
+  --ifm-heading-color: var(--site-text);
+  --ifm-color-primary: var(--site-accent);
+  --ifm-color-primary-dark: var(--site-accent-strong);
+  --ifm-color-primary-darker: var(--site-accent-strong);
+  --ifm-color-primary-darkest: var(--site-accent-strong);
+  --ifm-color-primary-light: var(--site-accent-soft);
+  --ifm-color-primary-lighter: var(--site-accent-soft);
+  --ifm-color-primary-lightest: var(--site-accent-soft);
+  --ifm-color-emphasis-100: var(--site-surface-strong);
+  --ifm-color-emphasis-200: var(--site-border);
+  --ifm-color-emphasis-300: var(--site-border);
+  --ifm-color-emphasis-700: var(--site-text-muted);
+  --ifm-color-emphasis-800: var(--site-text);
+  --ifm-code-background: var(--site-code-bg);
+  --ifm-link-color: var(--site-accent);
+  --ifm-navbar-background-color: var(--site-surface);
+  --ifm-footer-background-color: var(--site-surface);
+  --ifm-toc-border-color: var(--site-border);
+  --ifm-hr-background-color: var(--site-border);
+}
+
+html,
+body {
+  background: var(--ifm-background-color);
+  color: var(--ifm-font-color-base);
+}
+
 @media (min-width: 997px) {
   html[class~='docs-doc-id-index'] main[class*='docMainContainer'],
   html[class~='docs-doc-id-about/index'] main[class*='docMainContainer'] {
@@ -61,7 +162,7 @@ html[class~='docs-doc-id-index'] .home-lead {
 
 html[class~='docs-doc-id-index'] .home-lead p {
   margin: 0;
-  color: var(--ifm-color-emphasis-800);
+  color: var(--ifm-color-emphasis-700);
   font-size: 1.05rem;
   line-height: 1.85;
 }
