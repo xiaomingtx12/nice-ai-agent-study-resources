@@ -35,6 +35,8 @@ jobs:
         run: npm install
 
       - name: Build site
+        env:
+          SITE_BASE_URL: /nice-ai-agent-study-resources/
         run: npm run build
 
       - name: Upload artifact

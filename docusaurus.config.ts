@@ -6,6 +6,7 @@ import {
   SITE_THEME_STORAGE_KEY,
 } from './src/lib/siteTheme';
 
+const siteBaseUrl = process.env.SITE_BASE_URL ?? '/';
 const siteThemeIds = SITE_THEME_PRESETS.map((preset) => preset.id);
 const siteThemeBootstrapScript = `(function(){try{var storageKey=${JSON.stringify(
   SITE_THEME_STORAGE_KEY,
@@ -21,7 +22,7 @@ const config: Config = {
   title: 'Nice AI 资源库',
   tagline: '资源导航、锐评与个人学习沉淀',
   url: 'https://xiaomingtx12.github.io',
-  baseUrl: '/nice-ai-agent-study-resources/',
+  baseUrl: siteBaseUrl,
   headTags: [
     {
       tagName: 'script',
@@ -73,6 +74,7 @@ const config: Config = {
         hashed: true,
         language: ['zh', 'en'],
         indexBlog: false,
+        docsRouteBasePath: ['/'],
       },
     ],
   ],

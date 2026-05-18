@@ -20,6 +20,7 @@ build-*/
 build-verify/
 .docusaurus/
 .worktrees/
+static/search-index*.json
 
 # npm
 npm-debug.log*

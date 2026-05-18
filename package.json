@@ -4,8 +4,10 @@
   "version": "0.1.0",
   "description": "Nice AI 应用开发教程整理与学习总结（Docusaurus）",
   "scripts": {
+    "prestart": "npm run build",
     "start": "docusaurus start",
     "build": "docusaurus build",
+    "postbuild": "node scripts/sync-dev-search-index.mjs --strict",
     "serve": "docusaurus serve",
     "clear": "docusaurus clear"
   },
