@@ -1,9 +1,13 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {useLocation} from '@docusaurus/router';
 import styles from './styles.module.css';
-
-const ARTICLE_IMAGE_SELECTOR = 'article img';
-const MERMAID_SVG_SELECTOR = 'article .docusaurus-mermaid-container svg';
+import {
+  ARTICLE_IMAGE_SELECTOR,
+  ARTICLE_MERMAID_SVG_SELECTOR,
+  ARTICLE_SELECTOR,
+  collectMutationDecorationRoots,
+  decorateContentMediaSubtree,
+} from './dom';
 
 type LightboxState =
   | {
@@ -17,24 +21,6 @@ type LightboxState =
       markup: string;
     }
   | null;
-
-function isQualifyingContentImage(image: HTMLImageElement): boolean {
-  if (image.closest('a')) {
-    return false;
-  }
-
-  const src = image.currentSrc || image.src;
-
-  if (!src) {
-    return false;
-  }
-
-  const rect = image.getBoundingClientRect();
-  const intrinsicWidth = image.naturalWidth || rect.width;
-  const intrinsicHeight = image.naturalHeight || rect.height;
-
-  return intrinsicWidth >= 96 || intrinsicHeight >= 96;
-}
 
 function getPreviewLabel(image: HTMLImageElement): string {
   const alt = image.alt.trim();
@@ -66,70 +52,95 @@ export function ContentMediaLightbox() {
   const location = useLocation();
   const [lightbox, setLightbox] = useState<LightboxState>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const pendingImageListenersRef = useRef(new WeakSet<HTMLImageElement>());
+  const decorationStyles = useRef({
+    triggerImage: styles.triggerImage,
+    triggerMermaid: styles.triggerMermaid,
+  });
 
-  const decorateContentMedia = useCallback(() => {
-    const contentImages = document.querySelectorAll(ARTICLE_IMAGE_SELECTOR);
+  const handlePendingImageLoad = useCallback((event: Event) => {
+    const image = event.currentTarget;
 
-    contentImages.forEach((node) => {
-      if (!(node instanceof HTMLImageElement)) {
-        return;
-      }
+    if (!(image instanceof HTMLImageElement)) {
+      return;
+    }
 
-      const isEligible = isQualifyingContentImage(node);
-
-      node.classList.toggle(styles.triggerImage, isEligible);
-      node.toggleAttribute('data-content-lightbox-trigger', isEligible);
-    });
-
-    const mermaidSvgs = document.querySelectorAll(MERMAID_SVG_SELECTOR);
-
-    mermaidSvgs.forEach((node) => {
-      if (!(node instanceof SVGSVGElement)) {
-        return;
-      }
-
-      node.classList.add(styles.triggerMermaid);
-      node.setAttribute('data-content-lightbox-trigger', 'true');
-    });
+    pendingImageListenersRef.current.delete(image);
+    decorateContentMediaSubtree(image, decorationStyles.current);
   }, []);
 
   useEffect(() => {
     setLightbox(null);
   }, [location.pathname]);
 
-  useEffect(() => {
-    let frame = 0;
+  const decorateSubtree = useCallback(
+    (root: ParentNode) => {
+      const pendingLoadImages = decorateContentMediaSubtree(root, decorationStyles.current);
 
-    const scheduleDecoration = () => {
+      pendingLoadImages.forEach((image) => {
+        if (pendingImageListenersRef.current.has(image)) {
+          return;
+        }
+
+        pendingImageListenersRef.current.add(image);
+        image.addEventListener('load', handlePendingImageLoad, {once: true});
+      });
+    },
+    [handlePendingImageLoad],
+  );
+
+  useEffect(() => {
+    const observerRoot = document.querySelector(ARTICLE_SELECTOR) ?? document.querySelector('main');
+
+    if (!observerRoot) {
+      return;
+    }
+
+    let frame = 0;
+    const pendingRoots = new Set<Element>();
+
+    const flushDecorations = () => {
+      frame = 0;
+
+      pendingRoots.forEach((root) => {
+        decorateSubtree(root);
+      });
+
+      pendingRoots.clear();
+    };
+
+    const scheduleDecoration = (root: Element) => {
+      pendingRoots.add(root);
+
       if (frame !== 0) {
         return;
       }
 
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        decorateContentMedia();
-      });
+      frame = window.requestAnimationFrame(flushDecorations);
     };
 
-    decorateContentMedia();
+    decorateSubtree(observerRoot);
 
-    const observer = new MutationObserver(() => {
-      scheduleDecoration();
+    const observer = new MutationObserver((mutations) => {
+      collectMutationDecorationRoots(mutations).forEach((root) => {
+        scheduleDecoration(root);
+      });
     });
 
-    observer.observe(document.body, {
+    observer.observe(observerRoot, {
       childList: true,
       subtree: true,
     });
 
     return () => {
       observer.disconnect();
+      pendingRoots.clear();
 
       if (frame !== 0) {
         window.cancelAnimationFrame(frame);
       }
     };
-  }, [decorateContentMedia, location.pathname]);
+  }, [decorateSubtree, location.pathname]);
 
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
@@ -153,7 +164,7 @@ export function ContentMediaLightbox() {
         return;
       }
 
-      const mermaidSvg = event.target.closest(MERMAID_SVG_SELECTOR);
+      const mermaidSvg = event.target.closest(ARTICLE_MERMAID_SVG_SELECTOR);
 
       if (mermaidSvg instanceof SVGSVGElement) {
         event.preventDefault();
