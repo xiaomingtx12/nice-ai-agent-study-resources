@@ -1,42 +1,46 @@
 .desktopItem {
   display: flex;
   align-items: center;
+  gap: 0.55rem;
+}
+
+.desktopTitle {
+  color: var(--ifm-color-emphasis-700);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .wrapper {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.2rem;
-  padding: 0.2rem;
   border: 1px solid var(--ifm-color-emphasis-200);
+  background: color-mix(in srgb, var(--ifm-background-surface-color) 88%, white 12%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18);
+}
+
+.desktopWrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.38rem;
+  padding: 0.34rem 0.42rem;
   border-radius: 999px;
-  background: var(--ifm-background-surface-color);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);
 }
 
 .button {
   appearance: none;
   border: 0;
-  border-radius: 999px;
-  background: transparent;
   color: var(--ifm-color-emphasis-800);
   cursor: pointer;
   font: inherit;
-  font-size: 0.75rem;
-  font-weight: 600;
-  line-height: 1.1;
-  padding: 0.44rem 0.72rem;
   transition:
+    transform 160ms ease,
+    border-color 160ms ease,
     background-color 160ms ease,
-    color 160ms ease,
     box-shadow 160ms ease;
-  white-space: nowrap;
 }
 
 .button:hover {
-  background: var(--ifm-color-emphasis-100);
-  color: var(--ifm-heading-color);
+  transform: translateY(-1px);
 }
 
 .button:focus-visible {
@@ -44,26 +48,135 @@
   outline-offset: 2px;
 }
 
-.buttonActive {
-  background: var(--ifm-background-color);
-  box-shadow:
-    inset 0 0 0 1px var(--ifm-color-primary),
-    0 1px 2px rgb(0 0 0 / 0.08);
-  color: var(--ifm-color-primary);
-}
-
-.mobile {
-  width: 100%;
-  justify-content: space-between;
+.buttonDesktop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.45rem;
+  height: 2.45rem;
+  padding: 0.34rem;
+  border: 1px solid transparent;
   border-radius: 0.9rem;
+  background: transparent;
 }
 
-.mobileItem {
+.buttonDesktop .buttonLabel {
+  display: none;
+}
+
+.buttonMobile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.58rem;
+  min-height: 5.4rem;
+  padding: 0.72rem 0.7rem 0.78rem;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 1rem;
+  background: var(--ifm-background-surface-color);
+  text-align: left;
+}
+
+.buttonMobile .buttonLabel {
   display: block;
-  padding: 0.5rem 0;
+  color: var(--ifm-color-emphasis-800);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
-.mobile .button {
-  flex: 1 1 0;
-  text-align: center;
+.buttonActive {
+  border-color: color-mix(in srgb, var(--ifm-color-primary) 48%, var(--ifm-color-emphasis-200) 52%);
+  background: color-mix(in srgb, var(--ifm-color-primary) 8%, var(--ifm-background-surface-color) 92%);
+  box-shadow:
+    0 8px 18px rgb(0 0 0 / 0.06),
+    inset 0 0 0 1px rgb(255 255 255 / 0.2);
+}
+
+.preview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.16rem;
+  width: 100%;
+}
+
+.buttonDesktop .preview {
+  width: 1.54rem;
+}
+
+.previewSwatch {
+  min-height: 1.05rem;
+  border-radius: 999px;
+  border: 1px solid rgb(0 0 0 / 0.06);
+}
+
+.buttonMobile .previewSwatch {
+  min-height: 1.3rem;
+}
+
+.button[data-preset='editorial'] .previewSwatch:nth-child(1) {
+  background: #fff9f0;
+}
+
+.button[data-preset='editorial'] .previewSwatch:nth-child(2) {
+  background: #d4bea6;
+}
+
+.button[data-preset='editorial'] .previewSwatch:nth-child(3) {
+  background: #8a5a38;
+}
+
+.button[data-preset='signal'] .previewSwatch:nth-child(1) {
+  background: #f7fbff;
+}
+
+.button[data-preset='signal'] .previewSwatch:nth-child(2) {
+  background: #b9d0de;
+}
+
+.button[data-preset='signal'] .previewSwatch:nth-child(3) {
+  background: #1b6e94;
+}
+
+.button[data-preset='archive'] .previewSwatch:nth-child(1) {
+  background: #faf8f1;
+}
+
+.button[data-preset='archive'] .previewSwatch:nth-child(2) {
+  background: #c5c0b0;
+}
+
+.button[data-preset='archive'] .previewSwatch:nth-child(3) {
+  background: #5e6c57;
+}
+
+.mobilePanel {
+  margin-top: 1.15rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.mobileTitle {
+  margin: 0 0 0.72rem;
+  color: var(--ifm-color-emphasis-700);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mobileWrapper {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(98px, 1fr));
+  gap: 0.7rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+@media (max-width: 996px) {
+  .desktopItem {
+    display: none;
+  }
 }

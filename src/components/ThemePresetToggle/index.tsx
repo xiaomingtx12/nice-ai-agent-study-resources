@@ -25,7 +25,7 @@ export default function ThemePresetToggle({
   const controls = (
     <div
       aria-label="Site theme preset"
-      className={clsx(styles.wrapper, mobile && styles.mobile)}
+      className={clsx(styles.wrapper, mobile ? styles.mobileWrapper : styles.desktopWrapper)}
       role="group">
       {SITE_THEME_PRESETS.map((preset) => {
         const isActive = preset.id === theme;
@@ -35,9 +35,20 @@ export default function ThemePresetToggle({
             key={preset.id}
             type="button"
             aria-pressed={isActive}
-            className={clsx(styles.button, isActive && styles.buttonActive)}
+            aria-label={preset.label}
+            className={clsx(
+              styles.button,
+              mobile ? styles.buttonMobile : styles.buttonDesktop,
+              isActive && styles.buttonActive,
+            )}
+            data-preset={preset.id}
             onClick={() => handleSelect(preset.id)}>
-            {preset.label}
+            <span aria-hidden="true" className={styles.preview}>
+              <span className={styles.previewSwatch} />
+              <span className={styles.previewSwatch} />
+              <span className={styles.previewSwatch} />
+            </span>
+            <span className={styles.buttonLabel}>{preset.label}</span>
           </button>
         );
       })}
@@ -47,7 +58,8 @@ export default function ThemePresetToggle({
   if (mobile) {
     return (
       <li className={clsx('menu__list-item', className)}>
-        <div className={clsx('menu__link', styles.mobileItem)}>
+        <div className={styles.mobilePanel}>
+          <p className={styles.mobileTitle}>主题样式</p>
           {controls}
         </div>
       </li>
@@ -55,6 +67,9 @@ export default function ThemePresetToggle({
   }
 
   return (
-    <div className={clsx(styles.desktopItem, className)}>{controls}</div>
+    <div className={clsx(styles.desktopItem, className)}>
+      <span className={styles.desktopTitle}>Styles</span>
+      {controls}
+    </div>
   );
 }
