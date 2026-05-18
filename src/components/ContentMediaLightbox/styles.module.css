@@ -1,0 +1,132 @@
+.triggerImage,
+.triggerMermaid {
+  cursor: zoom-in;
+}
+
+.triggerMermaid {
+  transform-origin: center;
+}
+
+@media (hover: hover) {
+  .triggerImage,
+  .triggerMermaid {
+    transition:
+      box-shadow 160ms ease,
+      transform 160ms ease,
+      opacity 160ms ease;
+  }
+
+  .triggerImage:hover,
+  .triggerMermaid:hover {
+    opacity: 0.96;
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--site-accent) 18%, transparent 82%);
+  }
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(0.9rem, 2vw, 1.6rem);
+  background: rgb(18 15 12 / 0.76);
+  backdrop-filter: blur(10px);
+}
+
+.dialog {
+  position: relative;
+  width: min(96vw, 96rem);
+  max-height: 92vh;
+  outline: none;
+}
+
+.surface {
+  overflow: auto;
+  max-height: 92vh;
+  padding: clamp(0.9rem, 1.8vw, 1.4rem);
+  border: 1px solid color-mix(in srgb, var(--site-border-strong) 82%, white 18%);
+  border-radius: 1.2rem;
+  background: color-mix(in srgb, var(--site-surface) 94%, black 6%);
+  box-shadow:
+    0 24px 70px rgb(0 0 0 / 0.32),
+    inset 0 1px 0 rgb(255 255 255 / 0.16);
+}
+
+.closeButton {
+  position: absolute;
+  top: 0.2rem;
+  right: 0.2rem;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 1px solid color-mix(in srgb, var(--site-border-strong) 86%, white 14%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--site-surface) 88%, black 12%);
+  color: var(--site-text);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.closeButton:hover {
+  background: color-mix(in srgb, var(--site-surface) 76%, black 24%);
+}
+
+.contentImage {
+  display: block;
+  max-width: min(92vw, 90rem);
+  max-height: calc(92vh - 3rem);
+  margin: 0 auto;
+  object-fit: contain;
+  border-radius: 0.7rem;
+}
+
+.contentMermaid {
+  width: 100%;
+  overflow: auto;
+}
+
+.contentMermaid :global(svg) {
+  display: block;
+  min-width: min(90vw, 42rem);
+  margin: 0 auto;
+}
+
+@media (max-width: 996px) {
+  .overlay {
+    padding: 0.75rem;
+  }
+
+  .dialog {
+    width: 100%;
+    max-height: 100%;
+  }
+
+  .surface {
+    max-height: calc(100vh - 1.5rem);
+    padding: 0.8rem;
+    border-radius: 1rem;
+  }
+
+  .closeButton {
+    top: 0.1rem;
+    right: 0.1rem;
+    width: 2.2rem;
+    height: 2.2rem;
+  }
+
+  .contentImage {
+    max-width: 100%;
+    max-height: calc(100vh - 5rem);
+  }
+
+  .contentMermaid :global(svg) {
+    min-width: 38rem;
+  }
+}
