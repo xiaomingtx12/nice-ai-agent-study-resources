@@ -1,7 +1,7 @@
 export const SITE_THEME_PRESETS = [
-  {id: 'editorial', label: '静雅编选'},
-  {id: 'signal', label: '信号案台'},
-  {id: 'archive', label: '暖藏归档'},
+  {id: 'editorial', label: '米白主题'},
+  {id: 'signal', label: '蓝灰主题'},
+  {id: 'archive', label: '灰绿主题'},
 ] as const;
 
 export type SiteThemeId = (typeof SITE_THEME_PRESETS)[number]['id'];
