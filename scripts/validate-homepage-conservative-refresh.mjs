@@ -9,14 +9,16 @@ const homepage = readFileSync(homepagePath, 'utf8');
 const css = readFileSync(cssPath, 'utf8');
 
 const homepageMarkers = [
-  'class="home-lead"',
-  'class="home-route-list"',
-  'class="home-library-groups"',
-  'class="home-principles"',
+  'className="home-lead"',
+  'className="home-route-list"',
+  'className="home-library-groups"',
+  'className="home-principles"',
   '## 你现在该去哪',
   '## 当前收录怎么分',
   '## 这个站怎么写',
 ];
+
+const forbiddenHomepageMarkers = ['class="'];
 
 const cssMarkers = [
   ".home-lead",
@@ -27,8 +29,15 @@ const cssMarkers = [
 
 const missingHomepageMarkers = homepageMarkers.filter((marker) => !homepage.includes(marker));
 const missingCssMarkers = cssMarkers.filter((marker) => !css.includes(marker));
+const presentForbiddenHomepageMarkers = forbiddenHomepageMarkers.filter((marker) =>
+  homepage.includes(marker),
+);
 
-if (missingHomepageMarkers.length > 0 || missingCssMarkers.length > 0) {
+if (
+  missingHomepageMarkers.length > 0 ||
+  missingCssMarkers.length > 0 ||
+  presentForbiddenHomepageMarkers.length > 0
+) {
   console.error('Homepage conservative refresh contract failed.');
 
   if (missingHomepageMarkers.length > 0) {
@@ -37,6 +46,12 @@ if (missingHomepageMarkers.length > 0 || missingCssMarkers.length > 0) {
 
   if (missingCssMarkers.length > 0) {
     console.error(`Missing CSS markers: ${missingCssMarkers.join(', ')}`);
+  }
+
+  if (presentForbiddenHomepageMarkers.length > 0) {
+    console.error(
+      `Forbidden homepage markers present: ${presentForbiddenHomepageMarkers.join(', ')}`,
+    );
   }
 
   process.exit(1);
