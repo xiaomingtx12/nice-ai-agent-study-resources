@@ -65,6 +65,15 @@ const sidebars: SidebarsConfig = {
             'resources/easy-vibe/notes/how-i-distinguish-it-from-other-agent-resources',
           ],
         ),
+        resourceEntry(
+          'CodexGuide',
+          'resources/codex-guide/index',
+          'resources/codex-guide/review',
+          'resources/codex-guide/notes/index',
+          [
+            'resources/codex-guide/notes/why-i-see-it-as-a-codex-practice-guide',
+          ],
+        ),
       ],
     },
     {

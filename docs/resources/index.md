@@ -15,7 +15,7 @@ sidebar_position: 1
 
 | | 入门路径 | 架构治理 | 源码系统 |
 | --- | --- | --- | --- |
-| 教学型 | `HelloAgents` `AI Agents From Zero` `Easy-Vibe` | `Learn Claude Code` |  |
+| 教学型 | `HelloAgents` `AI Agents From Zero` `Easy-Vibe` `CodexGuide` | `Learn Claude Code` |  |
 | 产品 / 系统型 |  | `Agentic Design Patterns` `AI Agent Book` `Claude Code Architecture（CCB）` | `OpenClaw 源码解析` |
 
 ## 常见阅读路线
@@ -25,6 +25,7 @@ flowchart LR
   H["HelloAgents<br/>先搭主线地图"]
   Z["AI Agents From Zero<br/>开始做项目"]
   E["Easy-Vibe<br/>从 AI 编程入口切入"]
+  G["CodexGuide<br/>学 Codex 实战"]
   L["Learn Claude Code<br/>拆 harness"]
   C["CCB<br/>看产品级架构"]
   A["Agentic Design Patterns<br/>补模式语言"]
@@ -32,8 +33,10 @@ flowchart LR
   O["OpenClaw<br/>读真实系统源码"]
 
   H --> Z
-  H --> L
   E --> Z
+  H --> G
+  E --> G
+  G --> L
   L --> C
   Z --> A
   A --> B
@@ -49,6 +52,7 @@ flowchart LR
 | 我缺一张 Agent 主线地图           | [HelloAgents](https://datawhalechina.github.io/hello-agents/) | 因为它更适合搭模块全景，不会一上来把你拖进架构深水区 |
 | 我想边做项目边学 Agent            | [AI Agents From Zero](https://didilili.github.io/ai-agents-from-zero/#/) | 因为它更像项目驱动路径，不像 `HelloAgents` 那么偏地图 |
 | 我想从 AI 编程入口真正做出东西         | [Easy-Vibe](https://datawhalechina.github.io/easy-vibe/zh-cn/) | 因为它在设计“怎么把人带进来”，不是先拆底层系统 |
+| 我想先学怎么把 Codex 用进真实工作流    | [CodexGuide](https://codexguide.ai/) | 因为它更像从上手到落地的路线图，不像单纯的命令速查表 |
 | 我想知道 coding agent 是怎么工作   | [Learn Claude Code](https://learn.shareai.run/zh/s01/) | 因为它先拆 harness，不像 `CCB` 那样先给你白皮书式结构 |
 | 我想系统补 Agent 设计模式和模式语言      | [Agentic Design Patterns](https://adp.xindoo.xyz/) | 因为它更适合整理模式判断，不像项目教程那样负责带你从零跑通 |
 | 我想补生产架构、预算、安全、治理          | [AI Agent Book](https://www.waylandz.com/ai-agent-book/) | 因为它直接讨论这些问题，不像 `OpenClaw` 那样更依赖真实源码背景 |
@@ -61,6 +65,20 @@ flowchart LR
 
 这一组主要解决“我该怎么上路”。  
 它们更适合帮你定阅读顺序、项目切口和学习节奏，不适合指望靠一条资源直接吃透所有工程深水区。
+
+#### CodexGuide
+
+| 槽位 | 内容 |
+| --- | --- |
+| 一句定位 | Codex 使用路径 |
+| 最适合现在的谁 | 想把 Codex 作为编码工具真正用进真实工作流的人 |
+| 如果你只想拿走 1 个东西 | Codex 不是只靠命令列表用起来的，而是要把入口、配置、实践和沉淀串成一条路 |
+| 最容易读错的地方 | 把它当成命令速查表，而不是使用路径设计 |
+| 建议进入方式 | 先看学习路线和入口地图，再补配置专题和实践方法 |
+| 30 分钟起步动作 | 先读 [为什么我把它看成 Codex 的实战入口](./codex-guide/notes/why-i-see-it-as-a-codex-practice-guide.md)，确认自己该从哪个入口开始 |
+| 先看这 2 条沉淀 | [为什么我把它看成 Codex 的实战入口](./codex-guide/notes/why-i-see-it-as-a-codex-practice-guide.md) · 后续补 `AGENTS.md`、沙盒与审批的真实判断 |
+
+入口：[资源页](./codex-guide/) · [锐评](./codex-guide/review.md) · [学习沉淀](./codex-guide/notes/) · [官方入口](https://codexguide.ai/) · [GitHub 仓库](https://github.com/freestylefly/CodexGuide)
 
 #### HelloAgents
 
