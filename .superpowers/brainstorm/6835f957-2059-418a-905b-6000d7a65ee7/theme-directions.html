@@ -1,0 +1,278 @@
+<style>
+  .cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .card {
+    cursor: pointer;
+  }
+
+  .theme-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    min-height: 17rem;
+    padding: 1rem;
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .theme-topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .theme-pill {
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+  }
+
+  .theme-hero {
+    display: grid;
+    gap: 0.45rem;
+  }
+
+  .theme-hero h4 {
+    margin: 0;
+    font-size: 1.15rem;
+  }
+
+  .theme-hero p,
+  .theme-meta,
+  .theme-lines span {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.5;
+  }
+
+  .theme-lines {
+    display: grid;
+    gap: 0.42rem;
+  }
+
+  .theme-lines span {
+    display: block;
+    height: 0.6rem;
+    border-radius: 999px;
+  }
+
+  .theme-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+    margin-top: auto;
+  }
+
+  .theme-grid div {
+    min-height: 3.1rem;
+    border-radius: 0.8rem;
+  }
+
+  .theme-editorial {
+    background: linear-gradient(180deg, #f6f0e8 0%, #ede3d4 100%);
+    color: #2a241e;
+  }
+
+  .theme-editorial .theme-pill {
+    background: rgba(58, 44, 28, 0.1);
+    color: #5f4732;
+  }
+
+  .theme-editorial .theme-lines span:nth-child(1) {
+    width: 88%;
+    background: rgba(46, 36, 29, 0.82);
+  }
+
+  .theme-editorial .theme-lines span:nth-child(2) {
+    width: 72%;
+    background: rgba(91, 74, 61, 0.5);
+  }
+
+  .theme-editorial .theme-lines span:nth-child(3) {
+    width: 93%;
+    background: rgba(91, 74, 61, 0.28);
+  }
+
+  .theme-editorial .theme-grid div:nth-child(1) {
+    background: #d5b89b;
+  }
+
+  .theme-editorial .theme-grid div:nth-child(2) {
+    background: #e8d7c2;
+  }
+
+  .theme-editorial .theme-grid div:nth-child(3) {
+    background: #c59f6e;
+  }
+
+  .theme-signal {
+    background: linear-gradient(180deg, #12202c 0%, #0b151f 100%);
+    color: #e8f3ff;
+  }
+
+  .theme-signal .theme-pill {
+    background: rgba(111, 204, 255, 0.14);
+    color: #7ed5ff;
+  }
+
+  .theme-signal .theme-lines span:nth-child(1) {
+    width: 84%;
+    background: rgba(232, 243, 255, 0.9);
+  }
+
+  .theme-signal .theme-lines span:nth-child(2) {
+    width: 63%;
+    background: rgba(126, 213, 255, 0.65);
+  }
+
+  .theme-signal .theme-lines span:nth-child(3) {
+    width: 94%;
+    background: rgba(126, 213, 255, 0.22);
+  }
+
+  .theme-signal .theme-grid div:nth-child(1) {
+    background: #1f4c63;
+  }
+
+  .theme-signal .theme-grid div:nth-child(2) {
+    background: #142f40;
+  }
+
+  .theme-signal .theme-grid div:nth-child(3) {
+    background: #5dd6ff;
+  }
+
+  .theme-archive {
+    background: linear-gradient(180deg, #fcf6e8 0%, #efe5ce 100%);
+    color: #342d23;
+  }
+
+  .theme-archive .theme-pill {
+    background: rgba(103, 87, 52, 0.1);
+    color: #6e5e39;
+  }
+
+  .theme-archive .theme-lines span:nth-child(1) {
+    width: 86%;
+    background: rgba(52, 45, 35, 0.86);
+  }
+
+  .theme-archive .theme-lines span:nth-child(2) {
+    width: 68%;
+    background: rgba(129, 113, 81, 0.56);
+  }
+
+  .theme-archive .theme-lines span:nth-child(3) {
+    width: 90%;
+    background: rgba(129, 113, 81, 0.24);
+  }
+
+  .theme-archive .theme-grid div:nth-child(1) {
+    background: #9a8d62;
+  }
+
+  .theme-archive .theme-grid div:nth-child(2) {
+    background: #d3c3a1;
+  }
+
+  .theme-archive .theme-grid div:nth-child(3) {
+    background: #6a7850;
+  }
+
+  @media (max-width: 980px) {
+    .cards {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<h2>先定默认主题气质</h2>
+<p class="subtitle">全站都会支持多主题切换，但默认主题最好先选一种主导性格。看哪一套最像这个站该有的底色。</p>
+
+<div class="cards">
+  <div class="card" data-choice="editorial" onclick="toggleSelect(this)">
+    <div class="theme-preview theme-editorial">
+      <div class="theme-topbar">
+        <span>Quiet Editorial</span>
+        <span class="theme-pill">推荐阅读感</span>
+      </div>
+      <div class="theme-hero">
+        <h4>像一本写满批注的纸质研究手册</h4>
+        <p>偏米白、褐金、墨色。适合强调判断、批注和长期阅读，不像产品官网，更像研究型笔记库。</p>
+      </div>
+      <div class="theme-lines">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <div class="theme-grid">
+        <div></div>
+        <div></div>
+        <div></div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Quiet Editorial</h3>
+      <p>更克制、更耐读，默认就把站点拉向“判断型资源库”。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="signal" onclick="toggleSelect(this)">
+    <div class="theme-preview theme-signal">
+      <div class="theme-topbar">
+        <span>Signal Desk</span>
+        <span class="theme-pill">推荐工具感</span>
+      </div>
+      <div class="theme-hero">
+        <h4>像一块技术分析台，而不是纸质目录</h4>
+        <p>偏深蓝、青色、高对比。更接近 AI / 系统拆解 / coding agent 站点的技术氛围，识别度会更强。</p>
+      </div>
+      <div class="theme-lines">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <div class="theme-grid">
+        <div></div>
+        <div></div>
+        <div></div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Signal Desk</h3>
+      <p>更有“AI 工程现场”气味，适合把站点往技术入口和拆解台方向推。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="archive" onclick="toggleSelect(this)">
+    <div class="theme-preview theme-archive">
+      <div class="theme-topbar">
+        <span>Warm Archive</span>
+        <span class="theme-pill">推荐收藏感</span>
+      </div>
+      <div class="theme-hero">
+        <h4>像经过筛选整理的长期收藏与索引档案</h4>
+        <p>偏暖黄、橄榄、旧纸色。既保留阅读感，也比纯编辑风更有“资料馆”气质。</p>
+      </div>
+      <div class="theme-lines">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <div class="theme-grid">
+        <div></div>
+        <div></div>
+        <div></div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. Warm Archive</h3>
+      <p>更像有温度的索引馆，适合“资源导航 + 个人沉淀”这种混合定位。</p>
+    </div>
+  </div>
+</div>

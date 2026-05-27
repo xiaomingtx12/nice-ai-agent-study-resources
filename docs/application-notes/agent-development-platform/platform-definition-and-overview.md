@@ -24,12 +24,12 @@ sidebar_position: 2
 
 ## 先给平台下一个工程定义
 
-如果只看代码，不看产品文案，这个平台至少同时做了五件事：
+这个平台至少同时做了五件事：
 
 1. 承载一个应用对象 `App`
 2. 维护这份应用的草稿配置、发布配置和发布历史
 3. 把模型、工具、知识库、工作流装配成统一运行时
-4. 提供调试、WebApp、OpenAPI、WeChat 多个消费入口
+4. 提供调试、WebApp、OpenAPI、多个消费入口
 5. 持续沉淀会话、消息、推理轨迹、摘要和工作流结果
 
 所以更准确的定义应该是：
@@ -40,32 +40,20 @@ sidebar_position: 2
 
 - `App`
 - 配置资产
-- 双执行内核
+- 执行内核
 - 多入口复用
 
 ## 1. 平台边界先看产品对象，不先看功能页
-
-这个项目最容易被低估的地方，是很多能力都已经围绕 `App` 收束了。
 
 ### 1.1 `App` 不是 prompt 容器，而是产品壳
 
 `App` 本身并不保存完整运行配置，但它挂着：
 
-- `draft_app_config`
-- `app_config`
-- `debug_conversation`
-- `token_with_default`
-- `wechat_config`
-
-这意味着一个应用对象同时承担了：
-
 - 编辑入口
 - 调试入口
 - 发布入口
-- WebApp 发布面
-- WeChat 发布面
 
-所以平台的一号产品对象不是 Conversation，也不是 Message，而是 `App`。
+所以平台的一号产品对象不是 Conversation（创建的某个会话），而是 `App`。
 
 ### 1.2 其他资产都挂在 `App` 周围
 
@@ -73,8 +61,8 @@ sidebar_position: 2
 
 ```mermaid
 flowchart TD
-    A["App"] --> B["AppConfigVersion(DRAFT)"]
-    A --> C["AppConfig(PUBLISHED)"]
+    A["App"] --> B["AppConfigVersion(DRAFT)"]草稿态
+    A --> C["AppConfig(PUBLISHED)"]发布态
     A --> D["Conversation / Message / MessageAgentThought"]
     A --> E["AppDatasetJoin"]
     A --> F["WebApp Token"]
@@ -90,12 +78,12 @@ flowchart TD
 
 - `App` 负责把资产和运行面挂起来
 - `AppConfigVersion / AppConfig` 才是配置事实来源
-- Conversation / Message 是运行数据，不是应用定义
+- Conversation / Message 是运行数据
 - Workflow 可以独立存在，但最终还能回流到 `App` 运行时
 
 ## 2. 平台有三条主线，但它们最后会汇到同一个 `App`
 
-如果按工程实现来拆，这个平台至少有三条主线。
+如果按工程实现来拆，这个平台有三条主线。
 
 ### 2.1 配置资产主线
 

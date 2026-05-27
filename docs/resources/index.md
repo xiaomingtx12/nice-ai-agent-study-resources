@@ -16,7 +16,7 @@ sidebar_position: 1
 | | 入门路径 | 架构治理 | 源码系统 |
 | --- | --- | --- | --- |
 | 教学型 | `HelloAgents` `AI Agents From Zero` `Easy-Vibe` | `Learn Claude Code` |  |
-| 产品 / 系统型 |  | `AI Agent Book` `Claude Code Architecture（CCB）` | `OpenClaw 源码解析` |
+| 产品 / 系统型 |  | `Agentic Design Patterns` `AI Agent Book` `Claude Code Architecture（CCB）` | `OpenClaw 源码解析` |
 
 ## 常见阅读路线
 
@@ -27,6 +27,7 @@ flowchart LR
   E["Easy-Vibe<br/>从 AI 编程入口切入"]
   L["Learn Claude Code<br/>拆 harness"]
   C["CCB<br/>看产品级架构"]
+  A["Agentic Design Patterns<br/>补模式语言"]
   B["AI Agent Book<br/>补生产治理"]
   O["OpenClaw<br/>读真实系统源码"]
 
@@ -34,6 +35,8 @@ flowchart LR
   H --> L
   E --> Z
   L --> C
+  Z --> A
+  A --> B
   Z --> B
   B --> O
   C --> O
@@ -47,6 +50,7 @@ flowchart LR
 | 我想边做项目边学 Agent            | [AI Agents From Zero](https://didilili.github.io/ai-agents-from-zero/#/) | 因为它更像项目驱动路径，不像 `HelloAgents` 那么偏地图 |
 | 我想从 AI 编程入口真正做出东西         | [Easy-Vibe](https://datawhalechina.github.io/easy-vibe/zh-cn/) | 因为它在设计“怎么把人带进来”，不是先拆底层系统 |
 | 我想知道 coding agent 是怎么工作   | [Learn Claude Code](https://learn.shareai.run/zh/s01/) | 因为它先拆 harness，不像 `CCB` 那样先给你白皮书式结构 |
+| 我想系统补 Agent 设计模式和模式语言      | [Agentic Design Patterns](https://adp.xindoo.xyz/) | 因为它更适合整理模式判断，不像项目教程那样负责带你从零跑通 |
 | 我想补生产架构、预算、安全、治理          | [AI Agent Book](https://www.waylandz.com/ai-agent-book/) | 因为它直接讨论这些问题，不像 `OpenClaw` 那样更依赖真实源码背景 |
 | 我想拆成熟 coding agent 的产品级边界 | [Claude Code Architecture（CCB）](https://ccb.agent-aura.top/docs/introduction/what-is-claude-code) | 因为它更像逆向架构白皮书，不像 `Learn Claude Code` 那样偏教学 |
 | 我想看真实大型系统怎么把这些概念落地        | [OpenClaw 源码解析](https://openclaw-book.myhubs.dev/) | 因为它面对的是完整系统，不再只是教学材料或架构总结 |
@@ -137,6 +141,20 @@ flowchart LR
 
 这一组解决“系统为什么会在编排、预算、安全、治理上长出复杂度”。  
 它更适合已经做过一些 Agent 原型、开始关心上线和长期维护的人。
+
+#### Agentic Design Patterns
+
+| 槽位 | 内容 |
+| --- | --- |
+| 一句定位 | Agent 模式语言索引 |
+| 最适合现在的谁 | 已经做过几个 Agent 原型，想把工具、规划、反思、多 Agent 等能力整理成模式判断的人 |
+| 如果你只想拿走 1 个东西 | 模式不是能力清单，而是用来判断“什么时候该复杂化、什么时候不该复杂化”的语言 |
+| 最容易读错的地方 | 把它当成模式背诵表，而不是带着项目问题去查的设计索引 |
+| 建议进入方式 | 先浏览目录建立模式地图，再按当前项目里的具体问题回头细读 |
+| 30 分钟起步动作 | 先读 [为什么我把它看成 Agent 模式语言补课](./agentic-design-patterns/notes/why-i-see-it-as-agent-pattern-language.md)，判断自己该从哪个模式问题切入 |
+| 先看这 2 条沉淀 | [为什么我把它看成 Agent 模式语言补课](./agentic-design-patterns/notes/why-i-see-it-as-agent-pattern-language.md) · 后续补“规划、反思、工具调用和多 Agent 的边界对照” |
+
+入口：[资源页](./agentic-design-patterns/) · [锐评](./agentic-design-patterns/review.md) · [学习沉淀](./agentic-design-patterns/notes/) · [官方入口](https://adp.xindoo.xyz/)
 
 #### AI Agent Book
 

@@ -18,7 +18,6 @@ sidebar_position: 6
   2. 为什么建库要拆成文档资产、异步流水线和双索引维护。
   3. 为什么检索最终必须回到统一运行时，而不是停留在后台服务。
 - 先记住的对象：`Dataset`、`Document`、`Segment`、`KeywordTable`、`DatasetQuery`。
-- 如果时间有限，优先看：先看主链、第 1 节、第 3 节、第 7 节、第 9 节和第 11 节。
 
 先给结论：
 

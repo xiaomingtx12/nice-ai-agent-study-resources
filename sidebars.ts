@@ -104,6 +104,15 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         resourceEntry(
+          'Agentic Design Patterns',
+          'resources/agentic-design-patterns/index',
+          'resources/agentic-design-patterns/review',
+          'resources/agentic-design-patterns/notes/index',
+          [
+            'resources/agentic-design-patterns/notes/why-i-see-it-as-agent-pattern-language',
+          ],
+        ),
+        resourceEntry(
           'AI Agent Book',
           'resources/ai-agent-book/index',
           'resources/ai-agent-book/review',

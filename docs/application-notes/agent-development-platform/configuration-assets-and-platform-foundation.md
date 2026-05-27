@@ -20,7 +20,6 @@ sidebar_position: 3
   2. 为什么草稿态和发布态必须分开。
   3. 为什么 `AppConfigService` 会成为真正的运行时翻译器。
 - 先记住的对象：`App`、`AppConfigVersion`、`AppConfig`、`Workflow.draft_graph / graph`。
-- 如果时间有限，优先看：资产闭环、第 1 节、第 3 节、第 7 节和第 8 节。
 
 ## 先看资产闭环
 

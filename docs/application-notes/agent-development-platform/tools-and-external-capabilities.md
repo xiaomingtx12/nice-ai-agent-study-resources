@@ -4,9 +4,7 @@ sidebar_position: 5
 
 # 工具与外部能力
 
-这一篇只看工具层和外部能力接入层。
-
-这里真正要解决的不是“支持多少种插件”，而是几种完全不同来源的能力，怎样被压成同一批运行时对象，再被 Agent、Workflow、WebApp、OpenAPI 和微信入口一起复用。
+这里要解决的核心问题是：如何将内置工具、外部 API、远端 MCP 服务以及已发布的工作流这四种来源完全不同的能力，压成同一批运行时对象（BaseTool），再被 Agent、Workflow、WebApp 等多个上层入口统一装配与复用。
 
 > 适合谁读：已经看过 Agent 主链，接下来想知道运行时里的 Tool、API、MCP、Workflow 能力到底怎样汇到一起的人。
 >
@@ -19,8 +17,6 @@ sidebar_position: 5
   1. 为什么平台统一的是运行时接口，而不是存储结构。
   2. Builtin Tool、API Tool、MCP Tool、Workflow Tool 为什么可以并存。
   3. 为什么同一套工具装配链必须被 Agent、Workflow 和多入口一起复用。
-- 先记住的对象：`BaseTool`、`StructuredTool`、`MCPManagedTool`、`WorkflowTool`。
-- 如果时间有限，优先看：整条闭环、第 1 节、第 5 节、第 7 节和第 9 节。
 
 ## 先看整条闭环
 
@@ -44,14 +40,14 @@ flowchart LR
 
 ## 1. 先把能力来源拆开
 
-这个仓库里，工具和外部能力至少有四种来源：
+这个仓库里，工具和外部能力有四种来源：
 
-| 来源 | 资产形态 | 存储位置 | 运行时落点 |
-| --- | --- | --- | --- |
-| Builtin Tool | YAML + Python 实现 | 仓库文件 | `BaseTool` |
-| API Tool | 自定义 OpenAPI JSON + 拆分后的接口记录 | `ApiToolProvider / ApiTool` | `StructuredTool` |
-| MCP Tool | MCP 服务配置 + discovery 后的工具目录 | `MCPServer / MCPTool` | `MCPManagedTool` |
-| Workflow Tool | 已发布工作流图 | `Workflow.graph` | `WorkflowTool` |
+| 来源                | 资产形态 | 存储位置 | 运行时落点 |
+|-------------------| --- | --- | --- |
+| Builtin Tool（系统内置工具） | YAML + Python 实现 | 仓库文件 | `BaseTool` |
+| API Tool （外部api工具） | 自定义 OpenAPI JSON + 拆分后的接口记录 | `ApiToolProvider / ApiTool` | `StructuredTool` |
+| MCP Tool （外部MCP工具）| MCP 服务配置 + discovery 后的工具目录 | `MCPServer / MCPTool` | `MCPManagedTool` |
+| Workflow Tool     | 已发布工作流图 | `Workflow.graph` | `WorkflowTool` |
 
 真正写入应用配置的，不是这些工具的完整定义，而是一组轻量引用：
 
@@ -69,9 +65,43 @@ flowchart LR
 
 也就是说，运行时工具永远是“临时装配出来”的，不是直接把数据库或 YAML 原样当执行对象。
 
-## 2. Builtin Tool 的核心不是 YAML，而是 YAML + dynamic_import + 工厂函数
+## 2. Builtin Tool 平台中系统内置工具的实现形式
 
-内置工具这层最值得抄的地方，是它没有把“工具定义”和“工具实例化”揉在一起。
+Builtin Tool 的核心是 YAML 声明式描述 + Python动态导入实现工具的解耦与按需装配。
+
+内置工具这层最值得抄的地方，是没有把“工具定义”和“工具实例化”揉在一起。
+
+内置工具的集成并非依赖硬编码的 if/else，而是通过两层映射表（provider_map -> tool_func_map）和动态导入机制，在运行时将 YAML 元数据与 Python 执行逻辑组装在一起。
+
+BuiltinProviderManager内置工具管理器核心代码：
+
+```python
+def _get_provider_tool_map(self):
+    """项目初始化的时候获取服务提供商、工具的映射关系并填充provider_tool_map"""
+    # 1.检测provider_tool_map是否为空
+    if self.provider_map:
+        return
+    # 2.获取当前文件/类所在的文件夹路径
+    current_path = os.path.abspath(__file__)
+    providers_path = os.path.dirname(current_path)
+    providers_yaml_path = os.path.join(providers_path, "providers.yaml")
+ 
+    # 3.读取providers.yaml的数据
+    with open(providers_yaml_path, encoding="utf-8") as f:
+        providers_yaml_data = yaml.safe_load(f)
+        
+    # 4.循环遍历providers.yaml的数据
+    for idx, provider_data in enumerate(providers_yaml_data):
+        provider_entity = ProviderEntity(**provider_data)
+        self.provider_map[provider_entity.name] = Provider(
+            name=provider_entity.name,
+            position=idx + 1,
+            provider_entity=provider_entity,
+        )
+```
+- 职责：系统启动时，BuiltinProviderManager 作为单例首先读取根目录的 providers.yaml，完成全局提供商的注册。
+- 映射构建：将 YAML 中声明的提供商数据转化为 ProviderEntity（纯元数据），并与 Provider（运行时容器）组合，存入 provider_map 字典中。
+- 关键点：此阶段仅处理到“提供商”级别，尚未深入加载具体工具，实现了延迟加载的初步控制。
 
 ### 2.1 注册入口是 `providers.yaml`
 
@@ -219,7 +249,7 @@ Builtin Tool 的分类没有写死在前端，而是走 `categories.yaml + icons
 
 所以 Builtin Tool 这层不是零散 hardcode，而是一套比较完整的文件资产系统。
 
-## 3. API Tool 接的不是完整 OpenAPI，而是项目自己的窄协议
+## 3. API Tool 将外部接口接入平台中的能力
 
 你提到“自定义简化的 OpenAPI 规范”，这块在代码里非常明确。
 
