@@ -40,6 +40,7 @@ sidebar_position: 1
       <li><a href="./resources/hello-agents/">HelloAgents</a>：更像 Agent 主线地图，先把模块和关系串起来。</li>
       <li><a href="./resources/ai-agents-from-zero/">AI Agents From Zero</a>：更像项目驱动的实战路径，适合边做边学 workflow、MCP、RAG 和项目落地。</li>
       <li><a href="./resources/easy-vibe/">Easy-Vibe</a>：更像 AI 编程入口设计，适合看“怎么把人带进来并开始做东西”。</li>
+      <li><a href="./resources/codex-guide/">CodexGuide</a>：更像 Codex 使用路径，适合先把入口、配置、实践和沉淀串起来。</li>
     </ul>
   </div>
   <div className="home-group">
@@ -54,6 +55,7 @@ sidebar_position: 1
     <h3>架构、治理与真实系统</h3>
     <p>这一组更适合已经做过一些原型、开始关心生产化复杂度和真实大型系统怎么落地的人。</p>
     <ul>
+      <li><a href="./resources/agentic-design-patterns/">Agentic Design Patterns</a>：更像 Agent 模式语言索引，适合先补设计判断，再看复杂系统怎么组织。</li>
       <li><a href="./resources/ai-agent-book/">AI Agent Book</a>：更像继续往架构、预算、安全和治理推进的一本手册。</li>
       <li><a href="./resources/openclaw-book/">OpenClaw 源码解析</a>：更像 control plane 源码导读，适合从真实系统里看消息网关、运行时、扩展和安全怎么揉在一起。</li>
     </ul>

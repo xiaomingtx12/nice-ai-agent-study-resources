@@ -16,6 +16,8 @@ const homepageMarkers = [
   '## 你现在该去哪',
   '## 当前收录怎么分',
   '## 这个站怎么写',
+  'CodexGuide',
+  'Agentic Design Patterns',
 ];
 
 const forbiddenHomepageMarkers = ['class="'];
