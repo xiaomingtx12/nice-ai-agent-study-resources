@@ -158,7 +158,7 @@ const sidebars: SidebarsConfig = {
   ],
   notesSidebar: [
     'notes/index',
-    'notes/how-to-learn-agent-with-judgment',
+      'notes/how-to-learn-agent-with-judgment',
     'notes/ai-coding-learning-method-stage-review',
   ],
   applicationNotesSidebar: [
