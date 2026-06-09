@@ -20,7 +20,6 @@ sidebar_position: 1
 
 - [AI Coding 学习方式的阶段复盘](./ai-coding-learning-method-stage-review.md)
 - [怎么学 Agent，才不会一直停在 demo 和概念感](./how-to-learn-agent-with-judgment.md)
-- [建立Agent设计模式元认知](./agent-coding-strategy-state-reflect.md)
 
 ## 这一节该看什么
 
