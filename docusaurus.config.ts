@@ -91,6 +91,20 @@ const config: Config = {
         },
       };
     },
+    function stubKatexPlugin() {
+      return {
+        name: 'stub-katex',
+        configureWebpack() {
+          return {
+            resolve: {
+              alias: {
+                katex: require.resolve('./src/lib/katexStub'),
+              },
+            },
+          };
+        },
+      };
+    },
   ],
 
   themes: ['@docusaurus/theme-mermaid'],
