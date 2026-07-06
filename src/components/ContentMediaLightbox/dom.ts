@@ -3,6 +3,24 @@ const DOCUMENT_NODE = 9;
 const LIGHTBOX_IMAGE_SELECTOR = 'img';
 const LIGHTBOX_MERMAID_SELECTOR = '.docusaurus-mermaid-container svg';
 
+// Inline formatting / wrapper nodes that Prism and similar processors inject
+// in bulk. They can never contain a qualifying image or mermaid SVG, so
+// skipping them avoids a querySelectorAll sweep per added node.
+const SKIPPED_NODE_NAMES = new Set([
+  'SPAN',
+  'BR',
+  'CODE',
+  'MARK',
+  'KBD',
+  'SUP',
+  'SUB',
+  'EM',
+  'STRONG',
+  'I',
+  'B',
+  'WBR',
+]);
+
 export const ARTICLE_SELECTOR = 'article';
 export const ARTICLE_IMAGE_SELECTOR = `${ARTICLE_SELECTOR} ${LIGHTBOX_IMAGE_SELECTOR}`;
 export const ARTICLE_MERMAID_SVG_SELECTOR = `${ARTICLE_SELECTOR} ${LIGHTBOX_MERMAID_SELECTOR}`;
@@ -36,6 +54,8 @@ function getElementConstructors(root: ParentNode) {
   };
 }
 
+const MIN_QUALIFYING_DIMENSION = 96;
+
 function isQualifyingContentImage(image: HTMLImageElement): boolean {
   if (image.closest('a')) {
     return false;
@@ -47,11 +67,17 @@ function isQualifyingContentImage(image: HTMLImageElement): boolean {
     return false;
   }
 
-  const rect = image.getBoundingClientRect();
-  const intrinsicWidth = image.naturalWidth || rect.width;
-  const intrinsicHeight = image.naturalHeight || rect.height;
+  // Avoid a forced synchronous layout (getBoundingClientRect) during decoration.
+  // For unloaded images we can't read naturalWidth yet, so we optimistically
+  // assume eligibility and re-evaluate after the image finishes loading.
+  if (!image.complete) {
+    return true;
+  }
 
-  return intrinsicWidth >= 96 || intrinsicHeight >= 96;
+  return (
+    image.naturalWidth >= MIN_QUALIFYING_DIMENSION ||
+    image.naturalHeight >= MIN_QUALIFYING_DIMENSION
+  );
 }
 
 function collectSubtreeElements<T extends Element>(
@@ -83,6 +109,16 @@ function decorateContentImage(image: HTMLImageElement, styles: DecorationStyles)
   return !image.complete;
 }
 
+// Re-evaluate eligibility after the image finishes loading. Unloaded images are
+// excluded by isQualifyingContentImage so callers can safely retry decoration
+// without forcing a layout read.
+export function redecorateContentImage(
+  image: HTMLImageElement,
+  styles: DecorationStyles,
+): void {
+  decorateContentImage(image, styles);
+}
+
 function decorateMermaidSvg(svg: SVGSVGElement, styles: DecorationStyles): void {
   svg.classList.add(styles.triggerMermaid);
   svg.setAttribute(LIGHTBOX_TRIGGER_ATTRIBUTE, 'true');
@@ -97,6 +133,10 @@ export function collectMutationDecorationRoots(
   for (const mutation of mutations) {
     mutation.addedNodes.forEach((node) => {
       if (!isElementNode(node) || seen.has(node)) {
+        return;
+      }
+
+      if (SKIPPED_NODE_NAMES.has(node.nodeName)) {
         return;
       }
 

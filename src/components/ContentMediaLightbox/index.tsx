@@ -7,6 +7,7 @@ import {
   ARTICLE_SELECTOR,
   collectMutationDecorationRoots,
   decorateContentMediaSubtree,
+  redecorateContentImage,
 } from './dom';
 
 type LightboxState =
@@ -22,9 +23,39 @@ type LightboxState =
     }
   | null;
 
+type IdleHandle = number;
+
 function getPreviewLabel(image: HTMLImageElement): string {
   const alt = image.alt.trim();
   return alt || '图片预览';
+}
+
+function requestIdleCallbackPolyfill(callback: IdleRequestCallback): IdleHandle {
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    return window.requestIdleCallback(callback);
+  }
+
+  return window.setTimeout(
+    () =>
+      callback({
+        didTimeout: false,
+        timeRemaining: () => 50,
+      }),
+    1,
+  ) as IdleHandle;
+}
+
+function cancelIdleCallbackPolyfill(handle: IdleHandle): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if ('cancelIdleCallback' in window) {
+    window.cancelIdleCallback(handle);
+    return;
+  }
+
+  window.clearTimeout(handle);
 }
 
 function cloneMermaidMarkup(svg: SVGSVGElement): string {
@@ -66,7 +97,7 @@ export function ContentMediaLightbox() {
     }
 
     pendingImageListenersRef.current.delete(image);
-    decorateContentMediaSubtree(image, decorationStyles.current);
+    redecorateContentImage(image, decorationStyles.current);
   }, []);
 
   useEffect(() => {
@@ -96,11 +127,11 @@ export function ContentMediaLightbox() {
       return;
     }
 
-    let frame = 0;
+    let idleHandle: IdleHandle | null = null;
     const pendingRoots = new Set<Element>();
 
     const flushDecorations = () => {
-      frame = 0;
+      idleHandle = null;
 
       pendingRoots.forEach((root) => {
         decorateSubtree(root);
@@ -112,11 +143,11 @@ export function ContentMediaLightbox() {
     const scheduleDecoration = (root: Element) => {
       pendingRoots.add(root);
 
-      if (frame !== 0) {
+      if (idleHandle !== null) {
         return;
       }
 
-      frame = window.requestAnimationFrame(flushDecorations);
+      idleHandle = requestIdleCallbackPolyfill(flushDecorations);
     };
 
     decorateSubtree(observerRoot);
@@ -136,8 +167,9 @@ export function ContentMediaLightbox() {
       observer.disconnect();
       pendingRoots.clear();
 
-      if (frame !== 0) {
-        window.cancelAnimationFrame(frame);
+      if (idleHandle !== null) {
+        cancelIdleCallbackPolyfill(idleHandle);
+        idleHandle = null;
       }
     };
   }, [decorateSubtree, location.pathname]);
