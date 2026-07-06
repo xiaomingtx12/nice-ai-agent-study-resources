@@ -77,6 +77,20 @@ const config: Config = {
         docsRouteBasePath: ['/'],
       },
     ],
+    function stubLayoutElkPlugin() {
+      return {
+        name: 'stub-layout-elk',
+        configureWebpack() {
+          return {
+            resolve: {
+              alias: {
+                '@mermaid-js/layout-elk': require.resolve('./src/lib/layoutElkStub'),
+              },
+            },
+          };
+        },
+      };
+    },
   ],
 
   themes: ['@docusaurus/theme-mermaid'],

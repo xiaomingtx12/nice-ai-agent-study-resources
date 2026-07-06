@@ -1,0 +1,37 @@
+.bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 100%;
+  background: var(--ifm-color-primary, #1976d2);
+  opacity: 0.85;
+  z-index: 9999;
+  transform-origin: left center;
+  animation: route-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes route-progress {
+  0% {
+    transform: scaleX(0);
+    transform-origin: left center;
+  }
+  50% {
+    transform: scaleX(0.7);
+    transform-origin: left center;
+  }
+  51% {
+    transform-origin: right center;
+  }
+  100% {
+    transform: scaleX(0);
+    transform-origin: right center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    animation: none;
+    transform: scaleX(0.5);
+  }
+}

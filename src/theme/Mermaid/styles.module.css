@@ -1,0 +1,4 @@
+.lazyWrapper {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
