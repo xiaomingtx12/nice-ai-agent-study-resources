@@ -30,3 +30,6 @@ pnpm-debug.log*
 
 # Misc
 *.log
+
+/docs/ref
+/.claude
