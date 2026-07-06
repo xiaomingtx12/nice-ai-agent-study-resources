@@ -1,3 +1,11 @@
+.container {
+  max-width: 100%;
+}
+
+.container > svg {
+  max-width: 100%;
+}
+
 .lazyWrapper {
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
