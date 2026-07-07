@@ -14,7 +14,7 @@
 - `docs/about/index.md`：关于我
 - `docs/resources/`：资源导航
 - `docs/notes/`：方法与复盘
-- `docs/application-notes/`：应用沉淀
+- `docs/application-notes/`：应用拆解
 - `docs/templates/`：共建与模板
 
 你新增一篇文档，第一步永远是先把 `.md` 文件放到 `docs/` 下面对应的位置。
@@ -71,7 +71,7 @@
 - 首页
 - 资源导航
 - 方法与复盘
-- 应用沉淀
+- 应用拆解
 - 共建与模板
 - 关于我
 
@@ -113,7 +113,7 @@
 - `notes/index`
 - `notes/how-to-learn-agent-with-judgment`
 
-#### 应用沉淀
+#### 应用拆解
 
 最上方先放介绍页：
 
@@ -140,7 +140,7 @@
 
 ### 场景 A：给现有栏目新增一篇普通文档
 
-例如你想给 `应用沉淀 -> Agent开放平台` 再加一篇文档。
+例如你想给 `应用拆解 -> Agent开放平台` 再加一篇文档。
 
 步骤：
 
@@ -206,7 +206,7 @@ resourceEntry(
 
 ### 场景 C：新增一个新的栏目分组
 
-例如你想在 `应用沉淀` 下再加一组 `MCP 实践`。
+例如你想在 `应用拆解` 下再加一组 `MCP 实践`。
 
 做法：
 
@@ -317,7 +317,7 @@ EPERM: operation not permitted, unlink ... server.bundle.js
 - 不使用整目录自动展开
 - 每条资源都显式写在 `sidebars.ts` 里
 
-### 应用沉淀
+### 应用拆解
 
 - 介绍页永远放在最上面
 - 后面再按主题分组
@@ -332,7 +332,7 @@ EPERM: operation not permitted, unlink ... server.bundle.js
 4. 跑 `node scripts/validate-page-redesign.mjs`
 5. 跑 `npm run start` 本地看实际效果
 
-如果你改的是资源导航或应用沉淀，优先盯左侧栏是否出现这三类问题：
+如果你改的是资源导航或应用拆解，优先盯左侧栏是否出现这三类问题：
 
 - 文档没显示
 - 文档顺序不对
