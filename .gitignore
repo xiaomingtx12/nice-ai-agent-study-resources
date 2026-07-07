@@ -37,3 +37,6 @@ pnpm-debug.log*
 
 /docs/ref
 /.claude
+
+# Generated Claude Code onboarding template
+/ONBOARDING.md
