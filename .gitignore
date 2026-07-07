@@ -31,5 +31,9 @@ pnpm-debug.log*
 # Misc
 *.log
 
+# Temp / scratch dirs from local theme checks
+.tmp-site-theme-head-check-*/
+.edge-headless/
+
 /docs/ref
 /.claude
