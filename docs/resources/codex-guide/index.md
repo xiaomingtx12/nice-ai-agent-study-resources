@@ -45,13 +45,6 @@ CodexGuide 的重点不是讲抽象概念，而是把 Codex 从第一次上手�
 2. 再看配置专题，尤其是 `AGENTS.md`、沙盒、审批、`config.toml`、MCP、Skills、Subagents 这些会影响真实工作的部分。
 3. 最后看实践方法和实战案例，把一次成功任务整理成团队里能复用的规则和模板。
 
-## 这条资源的三个入口
-
-- [锐评](./review.md)
-- [学习沉淀](./notes/index.md)
-- 官方入口：[CodexGuide 官网](https://codexguide.ai/)
-- 项目仓库：[CodexGuide GitHub](https://github.com/freestylefly/CodexGuide)
-
 ## 版权说明
 
 这里记录的是我自己的笔记和判断，不搬运原站点或仓库内容。使用时以原项目说明为准。

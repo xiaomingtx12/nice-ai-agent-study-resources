@@ -48,12 +48,6 @@ sidebar_position: 1
 2. 如果你已经决定动手，优先围绕项目篇回看前面的知识点，不必每个专题都平均用力。
 3. 每做完一个专题，强迫自己分清两件事：哪些是可迁移的 Agent 模式，哪些只是某个平台或框架的具体操作。
 
-## 这条资源的三个入口
-
-- [锐评](./review.md)
-- [学习沉淀](./notes/index.md)
-- 官方入口：[AI Agents From Zero 官网](https://didilili.github.io/ai-agents-from-zero/#/)
-
 ## 版权说明
 
 这里记录的是我自己的笔记和判断，不搬运原站点或仓库内容。使用时以原项目说明为准。

@@ -48,12 +48,6 @@ sidebar_position: 1
 2. 如果你正在关心更完整的运行时和协作问题，再继续看权限、任务、后台任务、Agent 团队和隔离执行。
 3. 每看一节，都问自己一句：这里讲的是 Claude Code 特有实现，还是以后换产品也成立的 harness 模式。
 
-## 这条资源的三个入口
-
-- [锐评](./review.md)
-- [学习沉淀](./notes/index.md)
-- 官方入口：[Learn Claude Code 官网](https://learn.shareai.run/zh/s01/)
-
 ## 版权说明
 
 这里记录的是我自己的笔记和判断，不搬运原站点或仓库内容。使用时以原项目说明为准。

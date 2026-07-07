@@ -41,12 +41,6 @@ sidebar_position: 1
 2. 遇到自己当前最缺的模块，就先啃那一块，比如工具调用、记忆、上下文工程。
 3. 每看完一段，强迫自己留下一个能复用的东西，比如一段最小示例、一份 checklist，或者一条清晰判断。
 
-## 这条资源的三个入口
-
-- [锐评](./review.md)
-- [学习沉淀](./notes/index.md)
-- 官方入口：[HelloAgents 官网](https://datawhalechina.github.io/hello-agents/)
-
 ## 版权说明
 
 这里记录的是我自己的笔记和判断，不搬运原教程全文。使用时以原项目与原站点说明为准。

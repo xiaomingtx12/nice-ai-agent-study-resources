@@ -50,12 +50,6 @@ sidebar_position: 1
 3. 等有了全局图，再进入 Pi 引擎、上下文、记忆、工具、Sandbox、Browser、Skills、Sub-agent、ACP 这些运行时主题。
 4. 最后按需补扩展体系和安全模型，不要一上来就平均用力。
 
-## 这条资源的三个入口
-
-- [锐评](./review.md)
-- [学习沉淀](./notes/index.md)
-- 官方入口：[OpenClaw 源码解析官网](https://openclaw-book.myhubs.dev/)
-
 ## 版权说明
 
 这里记录的是我自己的笔记和判断，不搬运原书或原项目源码内容。使用时以原站点和仓库说明为准。

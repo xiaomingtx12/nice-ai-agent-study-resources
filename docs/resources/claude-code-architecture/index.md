@@ -52,12 +52,6 @@ sidebar_position: 1
 2. 再看 QueryEngine、核心 loop、工具层和 API 通信层，理解一条主数据流怎么跑完。
 3. 最后再按需补权限模型、压缩链路、Telemetry 和远程配置这些更偏治理和基础设施的问题。
 
-## 这条资源的三个入口
-
-- [锐评](./review.md)
-- [学习沉淀](./notes/index.md)
-- 官方入口：[CCB 官网](https://ccb.agent-aura.top/docs/introduction/what-is-claude-code)
-
 ## 版权说明
 
 这里记录的是我自己的笔记和判断，不搬运原站点或仓库内容。使用时以原项目说明为准。
