@@ -40,7 +40,7 @@
 
 ### Reference Spec
 
-- `docs/superpowers/specs/2026-05-17-site-theme-switching-design.md`
+- `superpowers/specs/2026-05-17-site-theme-switching-design.md`
 
 ### Task 1: Shared theme constants and baseline contract
 

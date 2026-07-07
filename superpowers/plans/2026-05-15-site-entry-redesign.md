@@ -13,7 +13,7 @@
 ### Task 1: Create the plan artifact and red-state content contract
 
 **Files:**
-- Create: `docs/superpowers/plans/2026-05-15-site-entry-redesign.md`
+- Create: `superpowers/plans/2026-05-15-site-entry-redesign.md`
 - Create: `scripts/validate-page-redesign.mjs`
 
 - [ ] **Step 1: Write the failing content-contract script**

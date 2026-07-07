@@ -149,6 +149,6 @@ Expected: changes are limited to the new category, landing page, and sidebar rew
 - [ ] **Step 4: Commit**
 
 ```bash
-git add docs/application-notes docs/superpowers/plans/2026-05-16-agent-platform-docs-restructure.md sidebars.ts
+git add docs/application-notes superpowers/plans/2026-05-16-agent-platform-docs-restructure.md sidebars.ts
 git commit -m "docs: restructure application notes as agent platform guide"
 ```
