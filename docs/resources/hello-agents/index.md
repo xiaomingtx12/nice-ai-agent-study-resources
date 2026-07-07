@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: HelloAgents 不只教你拼 demo，而是把工具、记忆、上下文、评估连成一张 Agent 系统地图。适合会 Python 和 API 调用、想从单一框架细节里跳出来补主线的人，不是零门槛入门教材。
 ---
 
 # HelloAgents

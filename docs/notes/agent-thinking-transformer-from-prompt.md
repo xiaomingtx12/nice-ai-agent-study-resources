@@ -1,5 +1,6 @@
 ---
 sidebar_position: 3
+description: "给 AI 应用开发者的 Transformer 理解手册：不讲数学推导，而是把提示词、上下文、驾驭工程技巧逐条对应到架构里的某一层，看为什么会起作用。"
 ---
 
 # 从AI应用开发者的角度去理解 Transformer 架构

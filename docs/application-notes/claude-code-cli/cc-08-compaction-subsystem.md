@@ -1,3 +1,7 @@
+---
+description: 长会话不爆 context window，靠嵌入在每轮迭代里的 5 阶段压缩栈：前 4 阶段免费原地缩减，Stage 5 才付一次 LLM 调用生成 summary。本篇拆触发顺序、cache-aware 压缩、压缩后状态恢复与预估式加响应式兜底。
+---
+
 # Compaction Subsystem — 5 阶段压缩栈
 
 > **本章目标**：深入理解 Claude Code 的会话压缩机制——从"为什么需要压缩"到"5 阶段如何协同工作"，最终掌握每个阶段的触发条件、数据变换、实现位置和工程权衡。

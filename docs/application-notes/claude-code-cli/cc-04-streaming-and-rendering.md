@@ -1,3 +1,7 @@
+---
+description: LLM 逐 token 输出和用户等不了之间的矛盾，靠 AsyncGenerator 串起的 5 层链路解决，没有事件总线。本篇拆 SSE 字节流解析、多 Block 交错分桶、Idle Stall 双层 Watchdog 与 useDeferredValue 渲染节流。
+---
+
 # 流式输出与渲染
 
 > **本章目标**：理解 Claude Code 流式输出的完整机制——LLM 逐 token 输出和用户等不了之间的矛盾如何被解决，5 层链路如何用 AsyncGenerator 串起来而不需要事件总线，状态机如何在 SSE 字节流和 React 渲染之间架起桥梁，Idle Stall 如何被双层 Watchdog 检测和兜底。

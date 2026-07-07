@@ -1,3 +1,7 @@
+---
+description: "子 Agent 不是简单的任务拆分，而是把「过程」隔离在独立上下文、只把「结论」回传父 Agent 的 fork-join 机制。本章拆 Regular / Fork / Teammate 三种 subagent 在工具集、上下文继承、持久化上的差异，以及 prompt cache byte-identical 和并发防递归的工程实现。"
+---
+
 # 子 Agent 上下文隔离
 
 > **本章目标**：理解子 Agent 如何通过独立上下文隔离"过程"与"结论"——为什么需要 fork-join 模式、三种 subagent 机制有何区别、Fork path 如何利用 prompt cache 优化、上下文继承如何在不同 Agent 类型间分配，以及结果回收与并发控制的工程实现。

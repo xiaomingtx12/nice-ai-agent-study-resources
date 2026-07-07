@@ -1,3 +1,7 @@
+---
+description: Claude Code 不是铁板一块，而是 UI、入口、上下文、循环、工具、API、基础设施七层切分，循环层是唯一中枢。本篇给全景图与层间通信模式，建立后续所有章节的坐标系。
+---
+
 # 分层架构总览
 
 > **配套阅读**：本文是整个系列的"地图"，建立全局坐标后便于深入各层。[02-entry-and-lifecycle](cc-02-entry-and-lifecycle.md) 详述入口层的快速路径与会话生命周期；[03-agent-loop](cc-03-agent-loop.md) 展开循环层的状态机与 ReAct 闭环；[05-tool-execution-pipeline](cc-05-tool-execution-pipeline.md) 深入工具层的执行链；[06-permission-security](cc-06-permission-security.md) 解析跨层的 5 层权限防御；[07-context-assembly](cc-07-context-assembly.md) 讲解上下文层的 prompt 组装。

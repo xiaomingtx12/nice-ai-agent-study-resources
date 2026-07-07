@@ -1,3 +1,7 @@
+---
+description: CLI 启动不是"加载全部再判断"，而是先用快速路径匹配 --version 等轻命令，匹配不到才走全量 REPL。本篇拆启动路由、多进程角色分离与会话 10 状态机，回答"按需加载如何压进 100ms 黄金窗口"。
+---
+
 # 入口与生命周期
 
 > **配套阅读**：本文承接 [01-layer-overview](cc-01-layer-overview.md) 的"入口层"一节，把它展开为完整的启动与生命周期叙事。默认路径加载的 `main.tsx` 最终进入 [03-agent-loop](cc-03-agent-loop.md) 描述的循环层；进程模型中的 daemon 与 bridge 分别在 `21-daemon-mode` 和 `22-bridge-and-remote-control` 详述（源系列第 21/22 篇，本站未收录）。本文聚焦"从敲下命令到 Agent 开始工作"这一段。

@@ -1,5 +1,6 @@
 ---
 sidebar_position: 9
+description: "可观测性让生产 Agent 像玻璃一样透明。本文拆 Metrics/Traces/Logs/Callbacks 四支柱，核心判断是选择观测什么比观测本身更重要，过度观测有真实代价。"
 ---
 
 # 可观测性篇

@@ -1,3 +1,7 @@
+---
+description: "Agent transcript 用 append-only JSONL 而非数据库，因为 parentUuid DAG 要保住推理链的可审计性。本章拆 fork 分支与死分支在 DAG 上如何表达、100ms 写缓冲为何够用、--resume 恢复时死分支剪枝如何砍掉 80-93% 加载时间，以及 Prompt Cache 与多层 memoize 如何协同省 token。"
+---
+
 # 持久化与会话管理
 
 > **本章目标**：理解 Claude Code 如何把 Agent 的对话"记住"——transcript 怎么落盘、消息之间如何组织、恢复时如何重建状态、写缓冲如何平衡 I/O 与延迟、Prompt Cache 如何省 token。

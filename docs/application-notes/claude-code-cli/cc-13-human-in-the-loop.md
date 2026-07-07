@@ -1,3 +1,7 @@
+---
+description: "HITL 不是独立子系统，而是寄生在 Agent 循环上的闸门——在安全性、可用性、可恢复性三个冲突目标间找平衡。本章拆四类权限模式如何定基调、hasPermissionsToUseTool 决策管线如何逐层放行或弹窗、always allow 如何持久化，以及 headless 模式如何降级兜底。"
+---
+
 # 人在环路（Human-in-the-Loop）
 
 > **本章目标**：理解 Claude Code 的 HITL 体系——Agent 如何在"该问什么、不该问什么"之间做权衡，权限管线如何决定每个工具调用是放行、拒绝还是弹窗，UI 弹窗如何按工具类型路由，以及 headless 环境下如何安全降级。

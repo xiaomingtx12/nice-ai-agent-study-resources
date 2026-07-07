@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: Agentic Design Patterns 不是从零教你调通 demo，而是把 Agent 系统里反复出现的设计模式拎出来，追问组合方式、边界与成本。适合做过原型后用来把零散经验整理成可复用的模式语言和工程判断。
 ---
 
 # Agentic Design Patterns

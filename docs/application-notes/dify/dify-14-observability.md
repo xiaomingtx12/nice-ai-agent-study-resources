@@ -1,3 +1,7 @@
+---
+description: LLM 应用链路深、成本不可归因、配额无人拦截。本章拆 Dify 双轨可观测——OTel 实时 span 树做基础设施级追踪，TraceQueueManager 异步队列把业务 trace 分发到 Langfuse 等平台，外加 LLM 配额层按 token 扣减拦截失控循环。
+---
+
 # 可观测性
 
 > **学习目标**：理解 Dify 中 OpenTelemetry 链路追踪、遥测数据、LLM 调用追踪、工作流执行监控的完整实现，以及多种追踪提供商的集成方式。

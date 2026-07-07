@@ -1,5 +1,6 @@
 ---
 sidebar_position: 7
+description: "工具从几个膨胀到上千个时怎么管。本文对照 Claude Code 源码讲清 MCP 让工具像 USB 即插即用、Skill 把 Prompt 经验封装成可复用 Markdown 的两层设计。"
 ---
 
 # MCP 与 Skill 设计篇

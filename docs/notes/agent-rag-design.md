@@ -1,5 +1,6 @@
 ---
 sidebar_position: 8
+description: "RAG 不是向量检索那么简单。本文从 R0 到 R3 建立演化谱系，再拆文档分块、混合检索、重排序与评估，看检索增强生成的每个环节怎么影响 Agent 的知识准确率。"
 ---
 
 # Agent RAG 设计篇

@@ -1,3 +1,7 @@
+---
+description: Dify 把五种来源的工具统一注册到 ToolManager，按租户隔离发现、动态生成 JSON Schema、运行时转成 LLM 可识别的 PromptMessageTool 再由 ToolEngine 执行。本章拆 Provider-Controller-Tool 三层架构和声明与执行分离的设计，看 Agent 怎么不动代码就能加新工具。
+---
+
 # 工具注册与发现机制
 
 > **学习目标**：理解 Dify 工具系统的三层架构（Provider → Controller → Tool）、六种 Provider 类型的注册与发现流程、ToolManager 核心注册表、参数 Schema 生成，以及完整的工具调用链路。

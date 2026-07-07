@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: 基于 Dify v1.15.0 源码的架构拆解索引，16 篇覆盖进程拓扑、配置层、Agent 运行时、推理策略、异步事件、工具与模型供给、RAG、Workflow 引擎。先读 01 拿六进程总图，再按主题深入。
 ---
 
 # Dify 架构拆解（v1.15.0）

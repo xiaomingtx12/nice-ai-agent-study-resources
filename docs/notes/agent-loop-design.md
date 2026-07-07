@@ -1,5 +1,6 @@
 ---
 sidebar_position: 4
+description: "Agent 的核心不是模型而是循环。本文从手写编排到框架实现拆 Observe-Think-Act 循环，重点讲退出条件体系和慢思考策略，这是循环设计里最易缺陷的部分。"
 ---
 
 # Agent Loop 循环设计篇

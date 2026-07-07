@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: OpenClaw 源码解析围绕一个真实的个人 AI 助手控制平面展开，把多渠道接入、模型路由、Agent 运行时、工具记忆、Sandbox、Skills、Sub-agent 和安全模型放进同一张系统图，是从真实项目倒推系统设计的源码导读。
 ---
 
 # OpenClaw 源码解析

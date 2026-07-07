@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: 逆向工程还原的 Claude Code CLI 18 篇架构拆解总入口。沿"生命周期→核心循环→上下文记忆→扩展能力→协作集成→基础设施"的认知路径组织，建立全局坐标后再深入各主题。
 ---
 
 # Claude Code CLI 架构拆解

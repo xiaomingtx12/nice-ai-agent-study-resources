@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: Learn Claude Code 不是通用 Agent 概论，而是把 Claude Code 这类产品回拆成 harness 机制，从 agent loop、工具、计划、技能、压缩到任务、团队、worktree 隔离一层层挂上去，看产品爽点背后的工程组成。
 ---
 
 # Learn Claude Code

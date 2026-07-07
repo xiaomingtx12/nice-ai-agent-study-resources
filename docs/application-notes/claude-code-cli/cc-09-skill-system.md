@@ -1,3 +1,7 @@
+---
+description: Skill 把领域指令从常驻 system prompt 解放成按需加载的模块，描述常驻、全文触发注入。本篇拆 TF-IDF 索引如何不调 Embedding 就定位 Skill、turn-zero 阻塞与 inter-turn 异步 prefetch 的权衡，以及中文 bigram 加 Haiku 翻译的跨语言匹配。
+---
+
 # Skill：Prompt 模块化封装
 
 > **本章目标**：理解 Skill 系统的完整设计——它如何把领域指令从"常驻 System Prompt"解放为"按需加载的模块"，TF-IDF 搜索如何在不调用 Embedding 模型的情况下定位 Skill，以及 Skill 描述与全文在上下文生命周期中的不同角色。

@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: 从前端入门、Java 后端扩展到全栈实习，再到 AI 应用与 Agent 系统，一份诚实的学习路径复盘，记录思维转变而非堆砌技术栈。
 ---
 
 # 关于我

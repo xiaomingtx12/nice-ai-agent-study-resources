@@ -1,5 +1,6 @@
 ---
 sidebar_position: 10
+description: "把 Claude Code 接到新项目里让 Claude 成为长期协作者。本文把集成分四层，核心判断是配置只是门槛，真正决定输出质量的是使用层的方法论和输入质量。"
 ---
 
 # Claude Code 项目级集成篇

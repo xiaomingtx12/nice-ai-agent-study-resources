@@ -1,3 +1,7 @@
+---
+description: "上下文隔离解决 token 爆炸，worktree 解决文件冲突——两者正交可叠加。本章拆 Git Worktree 如何给每个并行 Agent 一份独立文件副本绕开 TOCTOU 竞争、三入口六阶段的生命周期、.worktreeinclude 如何同步 gitignored 配置，以及崩溃残留的批量清理为何永不误删用户 worktree。"
+---
+
 # Worktree 文件隔离
 
 > **本章目标**：理解 Claude Code 如何通过 Git Worktree 为每个并行任务提供独立的文件系统副本——为什么这种隔离方式比进程级文件锁更彻底，worktree 的完整生命周期包含哪些阶段，如何应对崩溃残留、磁盘占用、gitignored 文件同步等工程挑战。

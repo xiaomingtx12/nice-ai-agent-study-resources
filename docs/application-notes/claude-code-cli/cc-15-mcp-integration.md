@@ -1,3 +1,7 @@
+---
+description: "MCP 把「接入外部工具」从 M×N 条集成线压成 M+N——任何实现协议的 server 都能被 Agent 即插即用。本章拆多种 transport 如何适配本地与远程、OAuth 与断连重连如何容错、server 返回的工具如何自动注册成 mcp__ 命名空间的 Agent 可调用工具。"
+---
+
 # MCP 外部工具集成
 
 > **本章目标**：理解 MCP（Model Context Protocol）在 Claude Code 中的完整实现机制——它如何把外部工具接入标准化为协议层，多种 transport 如何适配本地与远程场景，OAuth 认证、重连容错、工具自动注册等子系统如何协作。

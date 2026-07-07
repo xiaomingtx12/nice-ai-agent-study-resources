@@ -1,3 +1,7 @@
+---
+description: Dify 工具生态双向封闭——能调别人却不能被别人调。本章拆 MCP 协议两端实现：作为 Server 把应用暴露成可远程调用的工具，作为 Client 接入第三方服务，看 JSON-RPC 2.0、Streamable HTTP 与 OAuth 如何打通双向通道。
+---
+
 # MCP 协议深度解析
 
 > **学习目标**：理解 Dify 中 Model Context Protocol (MCP) 的完整实现 —— 作为 MCP Server 暴露应用为可远程调用的工具、作为 MCP Client 接入第三方工具、传输协议、OAuth 认证、Session 生命周期。

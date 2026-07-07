@@ -1,3 +1,7 @@
+---
+description: 多租户安全是一条从入站身份到出站流量的完整防线，任一环失守全链作废。本章拆 Workspace 模型、RBAC 五角色、tenant_id 行级过滤、三层 API Key 与 Squid SSRF 代理，看 Dify 如何同时守住"谁能进、看什么、能去哪儿"。
+---
+
 # 多租户、权限与数据隔离
 
 > **学习目标**：理解 Dify 的 SaaS 多租户架构，包括 Workspace 模型、RBAC 权限控制、数据隔离策略、认证体系和安全机制。

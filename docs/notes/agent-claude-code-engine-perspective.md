@@ -1,5 +1,6 @@
 ---
 sidebar_position: 13
+description: "Claude Code 每项用户功能背后都是 Agent Loop 与上下文管理的具体实现。本文把功能映射到 Reason/Act/Observe 循环和七层上下文，形成可复用的设计模式库。"
 ---
 
 # Claude Code 引擎透视篇：Agent 循环与上下文管理的内部机制

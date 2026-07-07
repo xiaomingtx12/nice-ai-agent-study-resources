@@ -1,3 +1,7 @@
+---
+description: Agent 每轮看到的 system prompt 不是全量塞进去，而是按稳定性分层、按需注入、按 cache 边界切块。本篇拆 CLAUDE.md 分层合并、Auto Memory 索引式记忆、静态段与动态段的 cache 设计，以及 ReAct + CoT 三层思维链。
+---
+
 # 上下文组装引擎
 
 > **本章目标**：理解 Claude Code 如何在每次 API 调用前决定"Agent 应该看到什么"——如何把文件系统中的 CLAUDE.md、Git 状态、MCP 工具 Schema、Skill 索引等海量信息，按稳定性分层、按需注入，组装成高效可缓存的 System Prompt；以及 System Prompt 的具体内容（6 个静态段 + 动态段）、设计技巧（9 个工程 pattern）、ReAct + CoT 思维链的 3 层机制。

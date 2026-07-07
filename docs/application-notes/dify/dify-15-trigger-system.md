@@ -1,3 +1,7 @@
+---
+description: 工作流只能被动等 API 调用，定时巡检与事件响应全靠外部调度器模拟。本章拆 Dify Trigger 系统的三类触发源——Webhook、Schedule、Plugin Event，看"多入口、单执行通道"如何让外部事件直接驱动工作流而不侵入引擎。
+---
+
 # 触发器 (Trigger) 系统
 
 > **学习目标**：理解 Dify 中事件驱动的 Trigger 系统 —— 三种触发方式（Webhook/Cron/Event Plugin）、Provider 插件模型、订阅生命周期、Debug Event Bus、Trigger 节点在 Workflow 中的集成。

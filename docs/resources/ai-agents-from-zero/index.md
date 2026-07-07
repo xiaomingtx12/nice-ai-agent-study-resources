@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: 这条资源按基础、提高、项目、加餐、知识库一路推到项目实战，覆盖 workflow、MCP、RAG、多 Agent 与 Coze、Dify、LangChain 等生态。它不是地图导览，而是边做边补认知的实战路径。
 ---
 
 # AI Agents From Zero

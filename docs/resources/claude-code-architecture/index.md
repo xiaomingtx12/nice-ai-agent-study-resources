@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: CCB 把 Claude Code 当作 terminal-native agentic coding system 来逆向拆解，交互、编排、核心循环、工具、通信五层配合，再下钻 QueryEngine、50+ 工具权限、Provider、遥测与远程配置，是架构白皮书不是入门课。
 ---
 
 # Claude Code Architecture（CCB）

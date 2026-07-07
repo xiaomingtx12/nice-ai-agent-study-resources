@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: Easy-Vibe 不先问 Agent 是什么，而问会描述需求的人怎么借助 AI 把产品做出来。三阶段从零基础原型到全栈部署、知识库、桌面应用和 Agent 团队，是更偏结果导向的 AI 编程学习路径。
 ---
 
 # Easy-Vibe

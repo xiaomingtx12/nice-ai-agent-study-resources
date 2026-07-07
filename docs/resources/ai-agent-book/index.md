@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: AI Agent Book 不止于 ReAct、工具调用、记忆，而是把问题推到多 Agent 编排、生产架构、Token 预算、安全执行、多租户这类工程决策。模式优先框架其次，是从单体原型走向生产环境的设计手册。
 ---
 
 # AI Agent Book

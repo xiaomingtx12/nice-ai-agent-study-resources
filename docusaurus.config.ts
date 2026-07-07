@@ -41,6 +41,8 @@ const config: Config = {
   organizationName: 'xiaomingtx12',
   projectName: 'nice-ai-agent-study-resources',
 
+  favicon: 'img/favicon.svg',
+
   onBrokenLinks: 'throw',
 
   i18n: {
@@ -58,6 +60,8 @@ const config: Config = {
           sidebarPath: './sidebars.ts',
           editUrl:
             'https://github.com/xiaomingtx12/nice-ai-agent-study-resources/edit/main/',
+          showLastUpdateAuthor: true,
+          showLastUpdateTime: true,
         },
         blog: false,
         theme: {
@@ -112,6 +116,13 @@ const config: Config = {
   themeConfig: {
     navbar: {
       title: 'Nice AI',
+      logo: {
+        alt: 'Nice AI',
+        src: 'img/logo.svg',
+        srcDark: 'img/logo-dark.svg',
+        width: 32,
+        height: 32,
+      },
       items: [
         {
           to: '/',

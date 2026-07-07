@@ -1,5 +1,6 @@
 ---
 sidebar_position: 8
+description: "从用户视角拆开 Claude Code：~/.claude/ 目录里有什么、各能力按用户层/配置层/引擎层怎么分，看到某项功能能立刻定位它属于哪个文件、哪一层。"
 ---
 
 # Claude Code 用户视角使用篇

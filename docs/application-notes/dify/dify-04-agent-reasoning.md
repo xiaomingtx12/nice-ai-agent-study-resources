@@ -1,3 +1,7 @@
+---
+description: Dify 用 CoT 状态机解析和 FC 原生函数调用两条路径，把 LLM 自然语言输出可靠翻译成工具调用，再经 ToolEngine 统一执行入口做参数适配与异常降级。本章拆两种推理策略的实现差异和工具调用生命周期，看 Agent 怎么从"会想"到"会做"。
+---
+
 # Agent 推理策略与工具调用
 
 > **学习目标**：深入理解 CoT（Chain of Thought）与 FC（Function Calling）两种推理策略的实现细节、`BaseAgentRunner` 公共底座、工具调用层 `ToolEngine.agent_invoke()`，以及如何开发自定义 Agent 工具。
