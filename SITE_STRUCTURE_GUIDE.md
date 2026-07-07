@@ -64,14 +64,16 @@
 
 ## 2. 当前信息架构
 
+站点正文的三栏闭环（资源导航 → 应用拆解 → 方法与复盘，方法层回灌下一轮）见 `docs/index.md` 和 `AGENTS.md` 的「三栏闭环」一节；本文件只讲结构怎么改。
+
 ### 顶栏
 
 当前顶栏在 `docusaurus.config.ts` 里是：
 
 - 首页
 - 资源导航
-- 方法与复盘
 - 应用拆解
+- 方法与复盘
 - 共建与模板
 - 关于我
 
@@ -99,32 +101,33 @@
 - 架构与生产化
 - 源码与真实系统
 
-每条资源都遵循同一个结构：
+每条资源都是一个单页 `index.md`，不再拆 review 和 notes 子页：
 
-1. 资源主页 `index.md`
-2. 锐评 `review.md`
-3. 学习沉淀入口 `notes/index.md`
-4. 学习沉淀下的若干笔记页
+- `resources/<slug>/index`（加 `_category_.json` 控制目录元数据）
 
 #### 方法与复盘
 
-当前保持简单扁平：
+介绍页下面按主题分组：
 
 - `notes/index`
-- `notes/how-to-learn-agent-with-judgment`
+- 架构理解与入门
+- Agent 系统设计
+- Claude Code 应用
+- 设计模式与元认知
+- 实践落地
+- 学习方法与复盘
 
 #### 应用拆解
 
-最上方先放介绍页：
+最上方先放介绍页和写作说明：
 
 - `application-notes/index`
+- `application-notes/what-i-want-to-write-here`
 
-下面按组组织：
+下面按拆解对象分组：
 
-- 写作说明
-- Dify 型应用
-- 准备文档
-- 历史备份
+- Dify 架构拆解（v1.15.0）：介绍页 + 16 篇正文
+- Claude Code CLI 架构拆解：介绍页 + 18 篇正文
 
 #### 共建与模板
 
@@ -140,7 +143,7 @@
 
 ### 场景 A：给现有栏目新增一篇普通文档
 
-例如你想给 `应用拆解 -> Agent开放平台` 再加一篇文档。
+例如你想给 `应用拆解 -> Dify 架构拆解` 再加一篇文档。
 
 步骤：
 
@@ -153,56 +156,40 @@
 比如你新增：
 
 ```text
-docs/application-notes/dify-type-application/deployment-and-release.md
+docs/application-notes/dify/dify-17-deployment-and-release.md
 ```
 
-那你要在 `applicationNotesSidebar` 的 `Dify 型应用` 分组里补上：
+那你要在 `applicationNotesSidebar` 的 `Dify 架构拆解（v1.15.0）` 分组里补上：
 
 ```ts
-'application-notes/dify-type-application/deployment-and-release'
+'application-notes/dify/dify-17-deployment-and-release'
 ```
 
 ### 场景 B：新增一条资源导航里的新资源
 
-资源导航不是简单加一个文件，而是加一组文档。
+资源导航现在每条资源就是一个单页 `index.md`。
 
 建议目录结构：
 
 ```text
 docs/resources/<resource-slug>/
 ├─ index.md
-├─ review.md
-└─ notes/
-   ├─ index.md
-   ├─ note-a.md
-   └─ note-b.md
+└─ _category_.json
 ```
 
-然后在 `sidebars.ts` 的 `resourcesSidebar` 里新增一个 `resourceEntry(...)`。
-
-示例：
+然后在 `sidebars.ts` 的 `resourcesSidebar` 对应分组里，新增一行引用：
 
 ```ts
-resourceEntry(
-  '新资源名称',
-  'resources/new-resource/index',
-  'resources/new-resource/review',
-  'resources/new-resource/notes/index',
-  [
-    'resources/new-resource/notes/note-a',
-    'resources/new-resource/notes/note-b',
-  ],
-)
+'resources/new-resource/index',
 ```
 
 重点：
 
-- `index.md` 是资源主页
-- `review.md` 是锐评页
-- `notes/index.md` 是学习沉淀入口
-- 下面的数组是具体学习笔记页
+- `index.md` 是资源单页，把定位、适合谁、为什么收录、怎么用都写在一页里
+- `_category_.json` 控制目录标签和折叠，可选
+- 四个分组（学习地图与路径 / Harness · Coding Agent / 架构与生产化 / 源码与真实系统）选一个放进去
 
-如果你只建了文件夹，却没在 `sidebars.ts` 里补 `resourceEntry`，左侧不会按你想要的层级显示。
+如果你只建了文件夹，却没在 `sidebars.ts` 里补这行，左侧不会显示这条资源。
 
 ### 场景 C：新增一个新的栏目分组
 
@@ -237,9 +224,9 @@ resourceEntry(
 
 比如：
 
-- `docs/application-notes/dify-type-application/_category_.json`
-- `docs/application-notes/dify准备文档/_category_.json`
-- `docs/application-notes/diyf-type-application-bac/_category_.json`
+- `docs/application-notes/_category_.json`：栏目标签、位置和折叠配置
+- `docs/about/_category_.json`：「关于我」分组的折叠配置
+- `docs/resources/<slug>/_category_.json`：单条资源目录自身的元数据
 
 但要注意：
 
