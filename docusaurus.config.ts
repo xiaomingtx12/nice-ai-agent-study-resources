@@ -19,8 +19,8 @@ const siteThemeBootstrapScript = `(function(){try{var storageKey=${JSON.stringif
 )});}})()`;
 
 const config: Config = {
-  title: 'Nice AI 资源库',
-  tagline: '资源导航、锐评与个人学习沉淀',
+  title: 'Nice AI 学习沉淀',
+  tagline: '资源导航、应用拆解与方法复盘',
   url: 'https://xiaomingtx12.github.io',
   baseUrl: siteBaseUrl,
   headTags: [
@@ -125,13 +125,13 @@ const config: Config = {
           position: 'left',
         },
         {
-          to: '/notes',
-          label: '方法与复盘',
+          to: '/application-notes',
+          label: '应用拆解',
           position: 'left',
         },
         {
-          to: '/application-notes',
-          label: '应用沉淀',
+          to: '/notes',
+          label: '方法与复盘',
           position: 'left',
         },
         {

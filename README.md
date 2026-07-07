@@ -1,4 +1,4 @@
-# Nice AI 资源库
+# Nice AI 学习沉淀
 
 得益于强大的开源社区，今天已经有非常多优秀的 AI、Agent 和 AI Coding 学习资源。这个仓库基于这些公开资料做了一次持续整理：不是简单把链接堆在一起，而是把资源放回学习路径里，再补上我的判断、取舍和学习沉淀。
 
@@ -7,7 +7,7 @@
 - 什么资源值得投入时间
 - 学完之后什么内容值得留下来反复回看
 
-在线阅读：[Nice AI 资源库](https://xiaomingtx12.github.io/nice-ai-agent-study-resources/)
+在线阅读：[Nice AI 学习沉淀](https://xiaomingtx12.github.io/nice-ai-agent-study-resources/)
 
 ## 这个仓库在做什么
 
@@ -28,7 +28,7 @@
 1. 如果你还没决定先学什么，先看 [资源导航](https://xiaomingtx12.github.io/nice-ai-agent-study-resources/resources/)。
 2. 如果你已经在学某个资源，想知道它值不值得继续投入，就去看对应资源下的总览、锐评和学习沉淀。
 3. 如果你更关心学习方法、阶段复盘和判断标准，直接看 [方法与复盘](https://xiaomingtx12.github.io/nice-ai-agent-study-resources/notes/)。
-4. 如果你更想看 AI 应用或 Agent 系统应该怎么拆，直接看 [应用沉淀](https://xiaomingtx12.github.io/nice-ai-agent-study-resources/application-notes/)。
+4. 如果你更想看 AI 应用或 Agent 系统应该怎么拆，直接看 [应用拆解](https://xiaomingtx12.github.io/nice-ai-agent-study-resources/application-notes/)。
 
 ## 主要内容
 

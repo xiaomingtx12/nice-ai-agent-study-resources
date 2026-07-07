@@ -2,67 +2,59 @@
 sidebar_position: 1
 ---
 
-# Nice AI 资源库
+# Nice AI 学习沉淀
 
 <section className="home-lead">
 
-  <p>整理收集优秀教程资源以及对应的AI应用解决方案 <br />
-   “从知识认知补充到应用实践沉淀”</p>
+  <p>把优秀学习资源和真实开源项目，变成自己能复用的工程判断。</p>
 
-  <p>Q：“有了这么多资源，这么多不错的解决方案，我还需要做什么呢？是不是可以直接拿来就用呢？从已有的知识认知资源中能提取出哪些信息？”</p>
-  <p>A：“现实需求问题中，多数遇到的实际需求问题中，需要去针对性的做方案取舍，做出合适的方案，这就是解决需求问题的难点。从这些优秀资源中补充知识认知，从中学习汲取知识、经验、方法，为自己的应用提供支持。”</p>
+  <p>这个站由三个专栏构成一个闭环：资源导航补知识认知，应用拆解带着真实会遇到的问题去开源项目里看人家怎么解决，方法与复盘提炼出能带到下一次的判断和模式。</p>
+
 </section>
 
-## 你现在该去哪
+## 三栏怎么构成一个闭环
+
+```mermaid
+flowchart LR
+  R["资源导航<br/>看优秀学习资源<br/>补知识认知"]
+  A["应用拆解<br/>带着真实问题<br/>看开源项目怎么解决"]
+  M["方法与复盘<br/>提炼可复用的<br/>判断·模式·检查点"]
+  R --> A
+  A --> M
+  M -. "带着检查点重读资源" .-> R
+  M -. "带着问题清单重拆项目" .-> A
+```
+
+<section className="home-loop-thesis">
+  <span className="home-loop-thesis-tag">Loop Engineer</span>
+  <p>不把资源、项目、方法堆成线性管道，而是让方法层的产出——检查点与问题清单——反过来改变下一轮怎么读资源、怎么拆项目。每跑一轮，下一轮的输入质量就高一截，所以是螺旋上升，不是原地转圈。</p>
+  <p>能螺旋上升的前提是回箭头真的在修正前两步：方法层不能只记录“又看了什么”，要能推翻上一轮的判断。回箭头一旦断掉，这个 loop 就退化成只进不出的堆料仓库。</p>
+</section>
+
+## 三个入口
 
 <section className="home-route-list">
   <div className="home-route-item">
-    <h3>想看看目前资源站有哪些资源可以参考学习</h3>
-    <p>如果你现在是想找资源，去学习补充知识或者从一些解决方案中找寻灵感，先去看 <a href="./resources/">资源导航</a>。那里先给学习地图、资源角色和起步顺序，再决定要不要投入时间。</p>
+    <h3>资源导航 — 知识认知补充</h3>
+    <p>看优秀学习资源，建立概念和模式认知。现在收录 9 条资源，分入门路径、Coding Agent、架构治理、源码系统四组。<br /><a href="./resources/">进入资源导航 →</a></p>
   </div>
   <div className="home-route-item">
-    <h3>方法与复盘栏（目前算是我自己的个人笔记）</h3>
-    <p><a href="./notes/">方法与复盘</a> 刚刚成立，会做一些思考记录，期待共建。</p>
+    <h3>应用拆解 — 带着真实问题看开源项目</h3>
+    <p>不是无目的拆解，是带着真实会遇到的问题，去真实开源项目里看人家怎么解决。现有 Dify v1.15.0（16 篇）和 Claude Code CLI（18 篇）两组源码拆解。<br /><a href="./application-notes/">进入应用拆解 →</a></p>
   </div>
   <div className="home-route-item">
-    <h3>这个栏目希望将一些AI应用系统去拆成文档</h3>
-    <p> <a href="./application-notes/">应用沉淀</a>，主要希望将一些AI应用系统进行拆解，形成知识文档，从理解这个项目的方案设计这第一步，到能够清楚的将项目抽象出来进行讲解这第二步。</p>
+    <h3>方法与复盘 — 提炼可复用</h3>
+    <p>从前两步沉淀出能带到下一次的判断、模式和检查点：跨项目的思考、踩坑复盘、学习路径的阶段判断。<br /><a href="./notes/">进入方法与复盘 →</a></p>
   </div>
 </section>
 
-<p className="home-route-meta">如果你想知道这个站是谁在写，可以看 <a href="./about/">关于我</a>；如果你想一起补资源或复用写作骨架，可以看 <a href="./templates/">共建与模板</a>。</p>
+## 怎么用这个站
 
-## 当前收录怎么分
+- 找资源学：从资源导航的地图按缺口选一条。
+- 看系统怎么拆：带着真实问题进应用拆解，对照 Dify 或 Claude Code 的实现。
+- 沉淀方法论：方法与复盘里的跨项目判断和学习路径复盘，可对照自己的实践。
 
-<section className="home-library-groups">
-  <div className="home-group">
-    <h3>入门与学习路径</h3>
-    <p>这一组先帮你搭主线、选项目、找到合适的上路方式，不急着一开始就把你推进系统深水区。</p>
-    <ul>
-      <li><a href="./resources/hello-agents/">HelloAgents</a>：更像 Agent 主线地图，先把模块和关系串起来。</li>
-      <li><a href="./resources/ai-agents-from-zero/">AI Agents From Zero</a>：更像项目驱动的实战路径，适合边做边学 workflow、MCP、RAG 和项目落地。</li>
-      <li><a href="./resources/easy-vibe/">Easy-Vibe</a>：更像 AI 编程入口设计，适合看“怎么把人带进来并开始做东西”。</li>
-      <li><a href="./resources/codex-guide/">CodexGuide</a>：更像 Codex 使用路径，适合先把入口、配置、实践和沉淀串起来。</li>
-    </ul>
-  </div>
-  <div className="home-group">
-    <h3>Coding Agent 与 Harness</h3>
-    <p>这一组主要解决“Claude Code、Codex、Cursor 这类东西是怎么工作的”，重点不在通用概念，而在内部基本运行机制和产品边界。</p>
-    <ul>
-      <li><a href="./resources/learn-claude-code/">Learn Claude Code</a>：更像一门 agent harness 拆解课，适合先理解 loop、tools、todo、compression 这些骨架。</li>
-      <li><a href="./resources/claude-code-architecture/">Claude Code Architecture（CCB）</a>：更像逆向架构白皮书，适合继续往权限、压缩、治理基础设施上看。</li>
-    </ul>
-  </div>
-  <div className="home-group">
-    <h3>架构、治理与真实系统</h3>
-    <p>这一组更适合已经做过一些原型、开始关心生产化复杂度和真实大型系统怎么落地的人。</p>
-    <ul>
-      <li><a href="./resources/agentic-design-patterns/">Agentic Design Patterns</a>：更像 Agent 模式语言索引，适合先补设计判断，再看复杂系统怎么组织。</li>
-      <li><a href="./resources/ai-agent-book/">AI Agent Book</a>：更像继续往架构、预算、安全和治理推进的一本手册。</li>
-      <li><a href="./resources/openclaw-book/">OpenClaw 源码解析</a>：更像 control plane 源码导读，适合从真实系统里看消息网关、运行时、扩展和安全怎么揉在一起。</li>
-    </ul>
-  </div>
-</section>
+<p className="home-route-meta">想知道这个站是谁在写，看 <a href="./about/">关于我</a>；想一起补资源或复用写作骨架，看 <a href="./templates/">共建与模板</a>。</p>
 
 ## 这个站怎么写
 

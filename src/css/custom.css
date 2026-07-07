@@ -261,6 +261,39 @@ html[class~='docs-doc-id-index'] .home-lead p:first-child {
   font-weight: 600;
 }
 
+html[class~='docs-doc-id-index'] .home-loop-thesis {
+  margin: 1.75rem 0 2.25rem;
+  padding: 1.1rem 1.3rem 1.2rem;
+  background: var(--site-surface-strong);
+  border-left: 3px solid var(--site-accent);
+  border-radius: 3px;
+}
+
+html[class~='docs-doc-id-index'] .home-loop-thesis-tag {
+  display: inline-block;
+  margin-bottom: 0.55rem;
+  padding: 0.12rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--site-accent-strong);
+  background: color-mix(in srgb, var(--site-accent) 14%, transparent 86%);
+  border-radius: 3px;
+}
+
+html[class~='docs-doc-id-index'] .home-loop-thesis p {
+  margin: 0;
+  color: var(--site-text);
+  font-size: 1rem;
+  line-height: 1.82;
+}
+
+html[class~='docs-doc-id-index'] .home-loop-thesis p + p {
+  margin-top: 0.65rem;
+  color: var(--ifm-color-emphasis-700);
+  font-size: 0.95rem;
+}
+
 html[class~='docs-doc-id-index'] .home-route-list {
   display: grid;
   gap: 0.95rem;
@@ -271,15 +304,13 @@ html[class~='docs-doc-id-index'] .home-route-item {
   border-left: 3px solid var(--ifm-color-emphasis-300);
 }
 
-html[class~='docs-doc-id-index'] .home-route-item h3,
-html[class~='docs-doc-id-index'] .home-group h3 {
+html[class~='docs-doc-id-index'] .home-route-item h3 {
   margin: 0 0 0.35rem;
   font-size: 1.05rem;
   letter-spacing: -0.01em;
 }
 
 html[class~='docs-doc-id-index'] .home-route-item p,
-html[class~='docs-doc-id-index'] .home-group p,
 html[class~='docs-doc-id-index'] .home-route-meta {
   margin: 0;
   color: var(--ifm-color-emphasis-700);
@@ -287,8 +318,7 @@ html[class~='docs-doc-id-index'] .home-route-meta {
 }
 
 html[class~='docs-doc-id-index'] .home-route-item a,
-html[class~='docs-doc-id-index'] .home-route-meta a,
-html[class~='docs-doc-id-index'] .home-group a {
+html[class~='docs-doc-id-index'] .home-route-meta a {
   font-weight: 600;
 }
 
@@ -297,42 +327,13 @@ html[class~='docs-doc-id-index'] .home-route-meta {
   font-size: 0.96rem;
 }
 
-html[class~='docs-doc-id-index'] .home-library-groups {
-  display: grid;
-  gap: 1.25rem;
-  margin-top: 1.25rem;
-}
-
-html[class~='docs-doc-id-index'] .home-group {
-  padding-top: 1rem;
-  border-top: 1px solid var(--ifm-color-emphasis-300);
-}
-
-html[class~='docs-doc-id-index'] .home-group:first-child {
-  padding-top: 0;
-  border-top: 0;
-}
-
-html[class~='docs-doc-id-index'] .home-group ul,
 html[class~='docs-doc-id-index'] .home-principles ul {
   margin: 0.8rem 0 0;
   padding-left: 1.2rem;
 }
 
-html[class~='docs-doc-id-index'] .home-group li + li,
 html[class~='docs-doc-id-index'] .home-principles li + li {
   margin-top: 0.45rem;
-}
-
-@media (min-width: 997px) {
-  html[class~='docs-doc-id-index'] .home-library-groups {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: 2rem;
-  }
-
-  html[class~='docs-doc-id-index'] .home-group:last-child {
-    grid-column: 1 / -1;
-  }
 }
 
 @media (max-width: 996px) {
