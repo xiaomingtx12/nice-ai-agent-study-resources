@@ -1,5 +1,5 @@
 ---
-sidebar_position: 13
+sidebar_position: 3
 description: "Claude Code 每项用户功能背后都是 Agent Loop 与上下文管理的具体实现。本文把功能映射到 Reason/Act/Observe 循环和七层上下文，形成可复用的设计模式库。"
 ---
 
@@ -939,7 +939,7 @@ Claude Code 不是炫技,是把 Agent 理论的所有关键问题(上下文爆�
 ## 相关阅读
 
 - [Claude Code 用户视角使用篇](./agent-claude-code-user-perspective.md) —— 本篇的姊妹篇,从用户能看到什么出发
-- [Agent Loop 循环设计篇](./agent-loop-design.md) —— 循环的理论框架与原始代码实现
-- [上下文管理篇](./agent-context-management.md) —— 上下文的理论框架与分层管理
-- [工具调用篇](./agent-tool-calling.md) —— 工具的本质与可靠性设计
-- [MCP 与 Skill 设计篇](./agent-mcp-skill-design.md) —— Skill 与 MCP 的设计原理
+- [Agent Loop 循环设计篇](../agent-system-design/agent-loop-design.md) —— 循环的理论框架与原始代码实现
+- [上下文管理篇](../agent-system-design/agent-context-management.md) —— 上下文的理论框架与分层管理
+- [工具调用篇](../agent-system-design/agent-tool-calling.md) —— 工具的本质与可靠性设计
+- [MCP 与 Skill 设计篇](../agent-system-design/agent-mcp-skill-design.md) —— Skill 与 MCP 的设计原理

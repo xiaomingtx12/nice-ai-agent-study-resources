@@ -1,5 +1,5 @@
 ---
-sidebar_position: 3
+sidebar_position: 4
 description: "从手搓、脚手架、注释驱动到 AI IDE 再到 Agent Coding 工具的五阶段复盘。真正变的不是工具而是使用顺序，重心从代码怎么写前移到想让它做什么。"
 ---
 

@@ -1,5 +1,5 @@
 ---
-sidebar_position: 8
+sidebar_position: 1
 description: "从用户视角拆开 Claude Code：~/.claude/ 目录里有什么、各能力按用户层/配置层/引擎层怎么分，看到某项功能能立刻定位它属于哪个文件、哪一层。"
 ---
 
@@ -2761,7 +2761,7 @@ mindmap
 
 ## 相关阅读
 
-- [MCP 与 Skill 设计篇](./agent-mcp-skill-design.md) —— 本文的上游，更深入讲 Skill 的设计原理
-- [Agent Loop 循环设计篇](./agent-loop-design.md) —— 主循环的内部机制
-- [工具调用篇](./agent-tool-calling.md) —— 工具的本质与设计
-- [上下文管理篇](./agent-context-management.md) —— 上下文压缩与隔离
+- [MCP 与 Skill 设计篇](../agent-system-design/agent-mcp-skill-design.md) —— 本文的上游，更深入讲 Skill 的设计原理
+- [Agent Loop 循环设计篇](../agent-system-design/agent-loop-design.md) —— 主循环的内部机制
+- [工具调用篇](../agent-system-design/agent-tool-calling.md) —— 工具的本质与设计
+- [上下文管理篇](../agent-system-design/agent-context-management.md) —— 上下文压缩与隔离

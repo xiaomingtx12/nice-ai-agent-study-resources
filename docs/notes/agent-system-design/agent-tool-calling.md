@@ -1,5 +1,5 @@
 ---
-sidebar_position: 5
+sidebar_position: 4
 description: "工具是 Agent 影响世界的唯一途径。本文从工具三层结构出发，讲清 description 为什么是设计命门，再覆盖原始代码与框架两套管理方式及人在环路的介入时机。"
 ---
 

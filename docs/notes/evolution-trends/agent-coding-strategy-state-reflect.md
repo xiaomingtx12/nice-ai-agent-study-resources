@@ -1,5 +1,5 @@
 ---
-sidebar_position: 3
+sidebar_position: 2
 description: "Agent 设计模式真正变化的不是新名词，而是决策权从代码转移到运行时。本文做元认知整理，落到 coding agent 上看 Harness 如何约束模型动态决策使其稳定可控可复盘。"
 ---
 
