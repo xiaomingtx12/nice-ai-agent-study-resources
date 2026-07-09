@@ -12,14 +12,12 @@ const requiredMarkers = {
     '源码与真实系统',
     'Dify 架构拆解（v1.15.0）',
     'Claude Code CLI 架构拆解',
-    '模板',
     "'resources/hello-agents/index'",
     "'resources/learn-claude-code/index'",
     "'application-notes/dify/index'",
     "'application-notes/claude-code-cli/index'",
     "'notes/index'",
     "'templates/index'",
-    "'templates/resource-note-template'",
   ],
 };
 

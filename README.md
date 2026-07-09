@@ -39,7 +39,7 @@
 - `docs/application-notes/`
   带着真实问题拆开源项目源码与架构，现有 Dify v1.15.0（16 篇）和 Claude Code CLI（18 篇）两组系统级沉淀。
 - `docs/templates/`
-  共建说明和写作模板，适合之后继续扩展资源或复用写法。
+  共建说明和写法，适合之后继续扩展资源或复用写法。
 - `docs/about/`
   站点作者和写作背景说明。
 

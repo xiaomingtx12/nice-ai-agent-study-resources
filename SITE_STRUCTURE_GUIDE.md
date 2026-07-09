@@ -28,7 +28,7 @@
 - `resourcesSidebar`：手写分组和资源层级
 - `notesSidebar`：手写扁平结构
 - `applicationNotesSidebar`：手写分组
-- `templatesSidebar`：手写流程文档和模板分组
+- `templatesSidebar`：手写流程文档和写法指南
 
 如果你发现“文档文件已经存在，但左侧没显示出来”，优先检查这里。
 
@@ -131,13 +131,12 @@
 
 #### 共建与模板
 
-前面是流程文档，后面是模板分组：
+介绍页先讲三栏的理念和迭代方向，后面是记录流程和写法：
 
 - `templates/index`
 - `templates/how-to-add-resource`
 - `templates/human-first-contribution`
 - `templates/ai-assisted-contribution`
-- 模板
 
 ## 3. 以后怎么新增文档
 

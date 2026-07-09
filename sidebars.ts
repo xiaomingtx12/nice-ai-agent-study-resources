@@ -106,15 +106,6 @@ const sidebars: SidebarsConfig = {
     'templates/how-to-add-resource',
     'templates/human-first-contribution',
     'templates/ai-assisted-contribution',
-    {
-      type: 'category',
-      label: '模板',
-      collapsed: false,
-      items: [
-        'templates/resource-note-template',
-        'templates/note-template',
-      ],
-    },
   ],
 };
 

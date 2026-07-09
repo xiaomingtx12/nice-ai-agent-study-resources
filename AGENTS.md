@@ -32,7 +32,7 @@
 - `docs/resources/`：资源导航区，9 条资源分四组（学习地图与路径 / Harness · Coding Agent / 架构与生产化 / 源码与真实系统）
 - `docs/application-notes/`：带着真实问题拆开源项目源码与架构，现有 Dify v1.15.0（16 篇）和 Claude Code CLI（18 篇）两组
 - `docs/notes/`：闭环的回箭头——跨资源、跨项目还能复用的判断、模式和检查点
-- `docs/templates/`：共建说明和写作模板
+- `docs/templates/`：共建说明和写法指南
 - `docs/about/`：站点作者和写作背景说明
 - `src/`：站点主题、搜索页、样式和少量交互组件
 - `scripts/`：结构校验和构建辅助脚本
