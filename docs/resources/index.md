@@ -16,7 +16,7 @@ description: 站内资源不是书单而是学习地图，按教学型与产品�
 
 | | 入门路径 | 架构治理 | 源码系统 |
 | --- | --- | --- | --- |
-| 教学型 | `HelloAgents` `AI Agents From Zero` `Easy-Vibe` `CodexGuide` | `Learn Claude Code` |  |
+| 教学型 | `HelloAgents` `AI Agents From Zero` `Easy-Vibe` `CodexGuide` | `Learn Claude Code` `Claude Certified Architect`（社区，非官方） |  |
 | 产品 / 系统型 |  | `Agentic Design Patterns` `AI Agent Book` `Claude Code Architecture（CCB）` | `OpenClaw 源码解析` |
 
 ## 常见阅读路线
@@ -28,6 +28,7 @@ flowchart LR
   E["Easy-Vibe<br/>从 AI 编程入口切入"]
   G["CodexGuide<br/>学 Codex 实战"]
   L["Learn Claude Code<br/>拆 harness"]
+  CA["Claude Certified Architect（社区）<br/>补知识体系 + 自测"]
   C["CCB<br/>看产品级架构"]
   A["Agentic Design Patterns<br/>补模式语言"]
   B["AI Agent Book<br/>补生产治理"]
@@ -38,6 +39,8 @@ flowchart LR
   H --> G
   E --> G
   G --> L
+  L --> CA
+  CA --> C
   L --> C
   Z --> A
   A --> B
@@ -55,6 +58,7 @@ flowchart LR
 | 我想从 AI 编程入口真正做出东西         | [Easy-Vibe](https://datawhalechina.github.io/easy-vibe/zh-cn/) | 因为它在设计“怎么把人带进来”，不是先拆底层系统 |
 | 我想先学怎么把 Codex 用进真实工作流    | [CodexGuide](https://codexguide.ai/) | 因为它更像从上手到落地的路线图，不像单纯的命令速查表 |
 | 我想知道 coding agent 是怎么工作   | [Learn Claude Code](https://learn.shareai.run/zh/s01/) | 因为它先拆 harness，不像 `CCB` 那样先给你白皮书式结构 |
+| 我想把 harness 知识串成体系 + 场景自测 | [Claude Certified Architect（社区）](https://github.com/paullarionov/claude-certified-architect) | 因为它做的是知识体系梳理和题库自测，不像 `Learn Claude Code` 那样讲新机制 |
 | 我想系统补 Agent 设计模式和模式语言      | [Agentic Design Patterns](https://adp.xindoo.xyz/) | 因为它更适合整理模式判断，不像项目教程那样负责带你从零跑通 |
 | 我想补生产架构、预算、安全、治理          | [AI Agent Book](https://www.waylandz.com/ai-agent-book/) | 因为它直接讨论这些问题，不像 `OpenClaw` 那样更依赖真实源码背景 |
 | 我想拆成熟 coding agent 的产品级边界 | [Claude Code Architecture（CCB）](https://ccb.agent-aura.top/docs/introduction/what-is-claude-code) | 因为它更像逆向架构白皮书，不像 `Learn Claude Code` 那样偏教学 |
@@ -131,6 +135,18 @@ flowchart LR
 | 建议进入方式 | 先看 `s01-s06`，把 loop、tool、todo、compact 这条主线立起来 |
 
 入口：[资源页](./learn-claude-code/) · [官方入口](https://learn.shareai.run/zh/s01/)
+
+#### Claude Certified Architect（社区，非官方）
+
+| 槽位 | 内容 |
+| --- | --- |
+| 一句定位 | 认证知识体系 + 场景自测（非官方社区资料） |
+| 最适合现在的谁 | 已经在用 coding agent，想把零散机制点串成自测用的知识体系的人 |
+| 如果你只想拿走 1 个东西 | 它不是新机制，而是把 harness 拆解课的零散点按认证结构重新组织，配场景题做自检 |
+| 最容易读错的地方 | 把它当成新的机制课或入门路径，从而跳过 `Learn Claude Code` / `CCB` 直接看它 |
+| 建议进入方式 | 先用 `Learn Claude Code` 和 `CCB` 立直觉，再来这一条做知识体系梳理和盲点自测 |
+
+入口：[资源页](./claude-certified-architect/) · [官方入口](https://github.com/paullarionov/claude-certified-architect)
 
 #### Claude Code Architecture（CCB）
 

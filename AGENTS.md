@@ -102,6 +102,7 @@ Claude Code CLI 是闭源商业工具，正文里的 `src/...` 是逆向恢复�
 
 - `sidebars.ts` 是侧栏真相源，别只新建文件不改这里
 - 资源导航使用手写分组，不靠整目录自动展开
+- 新加资源条目后如果侧栏没出现，几乎一定是忘了在 `sidebars.ts` 的 `resourcesSidebar` 里手动加一行——`_category_.json` 在这条路径上不生效
 - `_category_.json` 只在需要目录元数据时用，不是主要导航机制
 - 首页和关于页是纯文档页，不挂 sidebar
 

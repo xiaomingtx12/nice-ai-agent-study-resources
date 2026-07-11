@@ -20,6 +20,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         'resources/learn-claude-code/index',
+        'resources/claude-certified-architect/index',
         'resources/claude-code-architecture/index',
       ],
     },
