@@ -27,7 +27,6 @@ flowchart LR
 ```
 
 <section className="home-loop-thesis">
-  <span className="home-loop-thesis-tag">Loop Engineer</span>
   <p>不把资源、项目、方法堆成线性管道，而是让方法层的产出——检查点与问题清单——反过来改变下一轮怎么读资源、怎么拆项目。每跑一轮，下一轮的输入质量就高一截，所以是螺旋上升，不是原地转圈。</p>
   <p>能螺旋上升的前提是回箭头真的在修正前两步：方法层不能只记录“又看了什么”，要能推翻上一轮的判断。回箭头一旦断掉，这个 loop 就退化成只进不出的堆料仓库。</p>
 </section>
@@ -37,7 +36,7 @@ flowchart LR
 <section className="home-route-list">
   <div className="home-route-item">
     <h3>资源导航 — 知识认知补充</h3>
-    <p>看优秀学习资源，建立概念和模式认知。现在收录 9 条资源，分入门路径、Coding Agent、架构治理、源码系统四组。<br /><a href="./resources/">进入资源导航 →</a></p>
+    <p>看优秀学习资源，建立概念和模式认知。现在收录 11 条资源，按"拿它干什么"分通用系统教程、模式与生产参考、AI 编程上手、Coding Agent 机制拆解、真实系统源码五组。<br /><a href="./resources/">进入资源导航 →</a></p>
   </div>
   <div className="home-route-item">
     <h3>应用拆解 — 带着真实问题看开源项目</h3>

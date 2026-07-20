@@ -5,18 +5,35 @@ const sidebars: SidebarsConfig = {
     'resources/index',
     {
       type: 'category',
-      label: '学习地图与路径',
+      label: '通用 Agent 系统教程',
       collapsed: false,
       items: [
+        'resources/agentbook-bojie/index',
         'resources/hello-agents/index',
         'resources/ai-agents-from-zero/index',
+      ],
+    },
+    {
+      type: 'category',
+      label: '模式与生产参考',
+      collapsed: false,
+      items: [
+        'resources/agentic-design-patterns/index',
+        'resources/ai-agent-book/index',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'AI 编程上手',
+      collapsed: false,
+      items: [
         'resources/easy-vibe/index',
         'resources/codex-guide/index',
       ],
     },
     {
       type: 'category',
-      label: 'Harness / Coding Agent',
+      label: 'Coding Agent 机制拆解',
       collapsed: false,
       items: [
         'resources/learn-claude-code/index',
@@ -26,16 +43,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: '架构与生产化',
-      collapsed: false,
-      items: [
-        'resources/agentic-design-patterns/index',
-        'resources/ai-agent-book/index',
-      ],
-    },
-    {
-      type: 'category',
-      label: '源码与真实系统',
+      label: '真实系统源码',
       collapsed: false,
       items: [
         'resources/openclaw-book/index',
