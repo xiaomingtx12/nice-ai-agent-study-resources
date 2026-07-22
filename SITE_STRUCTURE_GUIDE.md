@@ -119,10 +119,9 @@
 
 #### 应用拆解
 
-最上方先放介绍页和写作说明：
+最上方是介绍页（已并入拆解方法论：人先判断价值点 → 按类型走骨架 → 三条底线）：
 
 - `application-notes/index`
-- `application-notes/what-i-want-to-write-here`
 
 下面按拆解对象分组：
 
