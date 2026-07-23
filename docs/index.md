@@ -35,8 +35,8 @@ flowchart LR
 
 <section className="home-route-list">
   <div className="home-route-item">
-    <h3>资源导航 — AI 可读的语料，人来筛</h3>
-    <p>优秀学习资源，人筛出值得反复回看的进库，作为后续拆解和复盘的认知底座。现收录 11 条，按"拿它干什么"分通用系统教程、模式与生产参考、AI 编程上手、Coding Agent 机制拆解、真实系统源码五组。<br /><a href="./resources/">进入资源导航 →</a></p>
+    <h3>资源导航 — 值得反复回看的，人来筛</h3>
+    <p>值得反复回看的学习资源，人筛出值得进库的，作为后续拆解和复盘的参考底座。现收录 11 条，按"拿它干什么"分通用系统教程、模式与生产参考、AI 编程上手、Coding Agent 机制拆解、真实系统源码五组。<br /><a href="./resources/">进入资源导航 →</a></p>
   </div>
   <div className="home-route-item">
     <h3>应用拆解 — 人先判断值得拆哪一点，再让 AI 沿方向深挖</h3>
