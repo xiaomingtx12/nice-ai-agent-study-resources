@@ -8,7 +8,7 @@
   --site-border-strong: #b3a07c;
   --site-accent: #b8924a;
   --site-accent-soft: #d3b57c;
-  --site-accent-strong: #8f6e32;
+  --site-accent-strong: #7a5c28;
   --site-code-bg: #eadfcc;
 }
 
@@ -22,8 +22,22 @@ html[data-site-theme='editorial'] {
   --site-border-strong: #b3a07c;
   --site-accent: #b8924a;
   --site-accent-soft: #d3b57c;
-  --site-accent-strong: #8f6e32;
+  --site-accent-strong: #7a5c28;
   --site-code-bg: #eadfcc;
+}
+
+html[data-site-theme='ivory'] {
+  --site-bg: #faf6ee;
+  --site-surface: #fdfbf7;
+  --site-surface-strong: #f1ebdb;
+  --site-text: #2c1810;
+  --site-text-muted: #5a4530;
+  --site-border: #d9cfb8;
+  --site-border-strong: #b3a07c;
+  --site-accent: #b8924a;
+  --site-accent-soft: #d3b57c;
+  --site-accent-strong: #7a5c28;
+  --site-code-bg: #f1ebdb;
 }
 
 html[data-site-theme='signal'] {
@@ -94,6 +108,20 @@ html[data-site-theme='editorial'][data-theme='dark'] {
   --site-accent-soft: #ddbc7e;
   --site-accent-strong: #a8843f;
   --site-code-bg: #261e19;
+}
+
+html[data-site-theme='ivory'][data-theme='dark'] {
+  --site-bg: #171410;
+  --site-surface: #201c16;
+  --site-surface-strong: #2a251d;
+  --site-text: #f2ece2;
+  --site-text-muted: #c8bcaa;
+  --site-border: #54483a;
+  --site-border-strong: #6e5f4c;
+  --site-accent: #c9a35c;
+  --site-accent-soft: #ddbc7e;
+  --site-accent-strong: #b08a45;
+  --site-code-bg: #241f18;
 }
 
 html[data-site-theme='signal'][data-theme='dark'] {
@@ -437,7 +465,11 @@ html[class~='docs-doc-id-index'] .home-principles li::marker {
 }
 
 html {
-  scroll-behavior: smooth;
+  /* 不能全局 smooth：Docusaurus 每次切换文章都会程序化把窗口滚回顶部，
+     全局 smooth 会把这次滚动变成动画——旧文章读得越深、新文章越长，
+     动画越久，滚动途中还会触发 mermaid 懒渲染占主线程，
+     表现为"侧栏文章多了就卡"。锚点跳转改为瞬时，代价可接受。 */
+  scroll-behavior: auto;
 }
 
 .navbar,

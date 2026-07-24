@@ -38,7 +38,8 @@ jobs:
 
       - name: Build site
         env:
-          SITE_BASE_URL: /nice-ai-agent-study-resources/
+          # 从 configure-pages 输出推导：项目页为 /<repo>/，将来绑自定义域名自动变 /
+          SITE_BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: npm run build
 
       - name: Upload artifact

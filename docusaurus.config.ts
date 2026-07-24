@@ -59,34 +59,15 @@ const config: Config = {
       attributes: {},
       innerHTML: siteThemeBootstrapScript,
     },
-    {
-      tagName: 'link',
-      attributes: {
-        rel: 'preconnect',
-        href: 'https://fonts.googleapis.com',
-      },
-    },
-    {
-      tagName: 'link',
-      attributes: {
-        rel: 'preconnect',
-        href: 'https://fonts.gstatic.com',
-        crossorigin: 'anonymous',
-      },
-    },
-    {
-      tagName: 'link',
-      attributes: {
-        rel: 'stylesheet',
-        href: 'https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap',
-      },
-    },
   ],
+
+  // 字体走本地打包（见 src/lib/siteFonts.js），不再依赖 fonts.googleapis.com
+  clientModules: [require.resolve('./src/lib/siteFonts.js')],
 
   markdown: {
     mermaid: true,
     hooks: {
-      onBrokenMarkdownLinks: 'warn',
+      onBrokenMarkdownLinks: 'throw',
     },
   },
 
@@ -96,6 +77,7 @@ const config: Config = {
   favicon: 'img/favicon.svg',
 
   onBrokenLinks: 'throw',
+  onBrokenAnchors: 'throw',
 
   i18n: {
     defaultLocale: 'zh-Hans',
