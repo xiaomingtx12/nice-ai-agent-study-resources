@@ -40,3 +40,9 @@ pnpm-debug.log*
 
 # Generated Claude Code onboarding template
 /ONBOARDING.md
+
+# WorkBuddy 工作区数据
+.workbuddy/
+
+# 旧构建产物
+build_old_*/

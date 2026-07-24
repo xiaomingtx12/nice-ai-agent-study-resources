@@ -1,69 +1,52 @@
 ---
 sidebar_position: 1
-description: 资源导航补认知、应用拆解带真实问题看开源项目、方法复盘提炼可复用判断，三栏构成一个螺旋上升的闭环，不是只进不出的堆料仓库。
+title: Nice AI 学习沉淀
+hide_title: true
+description: 把优秀学习资源和真实开源项目，变成人能复用、AI 能调用的工程判断。能交给 AI 做的交给 AI，方向和判断留在人手里。
 ---
 
-# Nice AI 学习沉淀
-
-<section className="home-lead">
-
-  <p>把优秀学习资源和真实开源项目，变成自己能复用的工程判断。</p>
-
-  <p>这个站由三个专栏构成一个闭环：资源导航补知识认知，应用拆解带着真实会遇到的问题去开源项目里看人家怎么解决，方法与复盘提炼出能带到下一次的判断和模式。</p>
-
+<section className="home-hero">
+  <p className="home-hero-kicker">NICE AI · 学习沉淀档案</p>
+  <h1>把优秀学习资源和真实开源项目，变成可复用的工程判断。</h1>
+  <p className="home-hero-lead">AI 当杠杆，不当替身：人定方向、人验真伪，中间的广度劳动交给 AI；验过的判断沉成经验，回喂给 AI，杠杆越用越长。</p>
+  <p className="home-hero-meta">11 条收录资源 · 34 篇源码拆解 · 9 篇方法复盘 · 更新至 2026-07</p>
 </section>
 
-## 三栏怎么构成一个闭环
+## 三栏各做什么，从哪进
 
-```mermaid
-flowchart LR
-  R["资源导航<br/>看优秀学习资源<br/>补知识认知"]
-  A["应用拆解<br/>带着真实问题<br/>看开源项目怎么解决"]
-  M["方法与复盘<br/>提炼可复用的<br/>判断·模式·检查点"]
-  R --> A
-  A --> M
-  M -. "带着检查点重读资源" .-> R
-  M -. "带着问题清单重拆项目" .-> A
-```
-
-<section className="home-loop-thesis">
-  <span className="home-loop-thesis-tag">Loop Engineer</span>
-  <p>不把资源、项目、方法堆成线性管道，而是让方法层的产出——检查点与问题清单——反过来改变下一轮怎么读资源、怎么拆项目。每跑一轮，下一轮的输入质量就高一截，所以是螺旋上升，不是原地转圈。</p>
-  <p>能螺旋上升的前提是回箭头真的在修正前两步：方法层不能只记录“又看了什么”，要能推翻上一轮的判断。回箭头一旦断掉，这个 loop 就退化成只进不出的堆料仓库。</p>
-</section>
-
-## 三个入口
-
-<section className="home-route-list">
-  <div className="home-route-item">
-    <h3>资源导航 — 知识认知补充</h3>
-    <p>看优秀学习资源，建立概念和模式认知。现在收录 9 条资源，分入门路径、Coding Agent、架构治理、源码系统四组。<br /><a href="./resources/">进入资源导航 →</a></p>
+<section className="home-flow">
+  <div className="home-flow-node">
+    <h3><span className="home-flow-no">R</span>资源导航</h3>
+    <p>值得反复回看的学习资源，人来筛；拆解或复盘卡住时，按需回来补认知。</p>
+    <p className="home-flow-meta"><a href="./resources/">11 条收录 · 进入 →</a></p>
+    <p className="home-flow-tag">—— 按需调用</p>
   </div>
-  <div className="home-route-item">
-    <h3>应用拆解 — 带着真实问题看开源项目</h3>
-    <p>不是无目的拆解，是带着真实会遇到的问题，去真实开源项目里看人家怎么解决。现有 Dify v1.15.0（16 篇）和 Claude Code CLI（18 篇）两组源码拆解。<br /><a href="./application-notes/">进入应用拆解 →</a></p>
+  <div className="home-flow-arrow"><span>────→</span><em>卡住时补认知</em></div>
+  <div className="home-flow-node">
+    <h3><span className="home-flow-no">A</span>应用拆解</h3>
+    <p>先由人判断值得拆哪一点——工程实现、功能交互还是商业模式——AI 沿方向完成检索、通读和初稿，人验真伪定稿。</p>
+    <p className="home-flow-meta"><a href="./application-notes/">34 篇拆解 · 进入 →</a></p>
+    <p className="home-flow-tag">—— 人定方向 · 广度归 AI</p>
   </div>
-  <div className="home-route-item">
-    <h3>方法与复盘 — 提炼可复用</h3>
-    <p>从前两步沉淀出能带到下一次的判断、模式和检查点：跨项目的思考、踩坑复盘、学习路径的阶段判断。<br /><a href="./notes/">进入方法与复盘 →</a></p>
+  <div className="home-flow-arrow"><span>────→</span><em>拆完抽技巧</em></div>
+  <div className="home-flow-node">
+    <h3><span className="home-flow-no">M</span>方法与复盘</h3>
+    <p>从应用拆解里提炼能带到下一次的判断和 agent 工程技巧——人能复用，AI 能调用。</p>
+    <p className="home-flow-meta"><a href="./notes/">9 篇复盘 · 进入 →</a></p>
+    <p className="home-flow-tag home-flow-tag-pending">—— 目标：沉成 skill（未通）</p>
   </div>
 </section>
 
-## 怎么用这个站
+<p className="home-flow-note">为什么这么分工：AI 能把一个领域的广度在几分钟内铺开，但它按概率输出，越流畅越可能在自信地出错；人慢，却能对着真实实现判断真伪。所以检索、通读、初稿这些广度劳动交给 AI，定方向和验真伪留在人手里——人的学习时间只花在判断上。验过的经验再沉回站上、变成 AI 下一轮能调用的输入，杠杆因此越用越长。这个站理解的 AI Native 就这一件事：<strong>AI 放大学习的效率，沉淀的经验放大 AI 的能力</strong>。</p>
 
-- 找资源学：从资源导航的地图按缺口选一条。
-- 看系统怎么拆：带着真实问题进应用拆解，对照 Dify 或 Claude Code 的实现。
-- 沉淀方法论：方法与复盘里的跨项目判断和学习路径复盘，可对照自己的实践。
-
-<p className="home-route-meta">想知道这个站是谁在写，看 <a href="./about/">关于我</a>；想一起补资源或复用写作骨架，看 <a href="./templates/">共建与模板</a>。</p>
+<p className="home-flow-note">回灌这条现在还没落地：skill 未封、工作流未搭，「未通」就是这个意思。等最小这条回线（人定方向 → AI 沿方向拆 → 抽 skill → 下一轮真调用它）跑通一圈，再把 skill 那一步从方向升级成事实。想知道这个站是谁在写，看 <a href="./about/">关于我</a>。</p>
 
 ## 这个站怎么写
 
 <section className="home-principles">
   <ul>
-    <li>不追求全，收录认为值得反复回看的东西。</li>
-    <li>不写平均用力的总结，每篇都尽量给出明确判断。</li>
-    <li>不搬运原文，优先留下对应的理解、取舍和以后还会回看的笔记。</li>
-    <li>在这些学习的资源基础上，完善对应知识缺口的同时，在实践中还能留下一些自己的理解。</li>
+    <li><strong>人定方向、AI 做广度、人验真伪。</strong>AI 是学习的杠杆：检索、通读、初稿交给它，方向和判断留在人手里；每个项目先判断值得拆哪一点，不套万能模板。</li>
+    <li><strong>判断必须落到行动。</strong>哪些照搬、哪些换实现、哪些别碰、什么时候不适用；每篇至少给出三处 README 里读不到的东西，不把源码翻成大白话。</li>
+    <li><strong>产物为复用而结构化。</strong>人能读懂，AI 能抽取、能调用；沉淀的判断和技巧回喂 AI，让下一轮拆解更准——skill 和工作流这条回线还在建。</li>
   </ul>
 </section>

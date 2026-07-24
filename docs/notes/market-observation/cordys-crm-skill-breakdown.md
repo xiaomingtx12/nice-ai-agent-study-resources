@@ -5,7 +5,7 @@ description: "拆解 CordysCRM-skills 这个样本——一套存量 CRM 不改�
 
 # 拆解 CordysCRM-skills：把企业系统装成 Skill 的一个样本
 
-> 这篇是 [MCP 与 Skill 设计篇](../agent-system-design/agent-mcp-skill-design.md) 的真实样本，也是 [构建 Agent Harness 系统](./agent-harness-engine-comparison.md) 里"软件驱动 + AI——嵌入现有业务系统"形态的一个落地案例。那两篇讲 Skill 是什么、企业落地有哪几条路；这篇拆一个具体项目，看把一套存量 CRM 装成 Skill 到底做了什么、怎么做的。
+> 这篇是 [Skill 经验封装篇](../agent-system-design/agent-skill-design.md) 的真实样本，也是 [构建 Agent Harness 系统](./agent-harness-engine-comparison.md) 里"软件驱动 + AI——嵌入现有业务系统"形态的一个落地案例。那两篇讲 Skill 是什么、企业落地有哪几条路；这篇拆一个具体项目，看把一套存量 CRM 装成 Skill 到底做了什么、怎么做的。
 
 CordysCRM-skills 是"把企业系统装成 Skill"这条路径的一个完整样本：一套存量 CRM 不改业务代码，被重新组织成通用 AI 能读懂、会调用的"说明书 + 工具箱"，从而获得智能。本文拆解它做了什么、怎么做的，并从中提取能带到其他企业系统的判断。
 
@@ -546,7 +546,7 @@ flowchart LR
 
 ## 四、如何遵循 Skill 规范
 
-这个 Skill 之所以能被任何 Agent 加载，是因为它按 [Skill 规范](../agent-system-design/agent-mcp-skill-design.md) 写成了一个标准工件：
+这个 Skill 之所以能被任何 Agent 加载，是因为它按 [Skill 规范](../agent-system-design/agent-skill-design.md) 写成了一个标准工件：
 
 - **入口契约**——SKILL.md frontmatter 声明 name/触发词/environment/security（内容见第二节），宿主读它决定何时唤醒、配什么环境。
 - **清单（registry.json）**——声明 version、dependencies（curl/python3）、`capabilities: ["exec","network"]`、tags。宿主据此判断能否承载、怎么沙箱化。
