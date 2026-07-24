@@ -1,71 +1,52 @@
 ---
 sidebar_position: 1
+title: Nice AI 学习沉淀
+hide_title: true
 description: 把优秀学习资源和真实开源项目，变成人能复用、AI 能调用的工程判断。能交给 AI 做的交给 AI，方向和判断留在人手里。
 ---
 
-# Nice AI 学习沉淀
-
-<section className="home-lead">
-
-  <p>把优秀学习资源和真实开源项目，变成人能复用、AI 能调用的工程判断。</p>
-
-  <p>能交给 AI 做的交给 AI，方向和判断留在人手里：人先判断这个项目值得拆哪一点，AI 沿方向把广度铺满，人验真伪再入库。</p>
-
+<section className="home-hero">
+  <p className="home-hero-kicker">NICE AI · 学习沉淀档案</p>
+  <h1>把优秀学习资源和真实开源项目，变成可复用的工程判断。</h1>
+  <p className="home-hero-lead">能交给 AI 做的交给 AI，方向和判断留在人手里：人先判断这个项目值得拆哪一点，AI 沿方向把广度铺满，人验真伪再入库。</p>
+  <p className="home-hero-meta">11 条收录资源 · 34 篇源码拆解 · 9 篇方法复盘 · 更新至 2026-07</p>
 </section>
 
-## 三栏各做什么
+## 三栏各做什么，从哪进
 
-```mermaid
-flowchart LR
-  R["资源导航<br/>随时可查的参考底座"]
-  A["应用拆解<br/>人先判断值得拆哪一点<br/>AI 再沿方向深挖"]
-  M["方法与复盘<br/>抽 agent 工程技巧<br/>攒出可复用的工程判断"]
-  R -. "卡住时补认知（按需）" .-> A
-  R -. "卡住时补认知（按需）" .-> M
-  A == "拆完抽技巧" ==> M
-  M -. "目标：技巧沉成 skill 回喂下一轮（未通）" .-> A
-```
-
-<section className="home-loop-thesis">
-  <p>为什么这么分工：AI 存着海量专业知识、能预测能梳理，但要人给特定输入才激活对应那部分，而且它按概率把最像的东西铺出来，越顺越可能在自信地出错；人反过来能判断真伪却知识有限。两者缺口互补，所以是<strong>人定方向、AI 铺广度、人验真伪</strong>——判断的入口和出口都在人手里，AI 把中间那段做得又快又全。</p>
-  <p>方法与复盘里产出的技巧，按目标要逐步封成被下一轮调用的 skill，让工程判断越攒越准。这条回灌现在还没落地：skill 还没封、工作流还没搭，图里标成「未通」就是这个意思。</p>
-</section>
-
-## 三个入口
-
-<section className="home-route-list">
-  <div className="home-route-item">
-    <h3>资源导航 — 值得反复回看的，人来筛</h3>
-    <p>值得反复回看的学习资源，人筛出值得进库的，作为后续拆解和复盘的参考底座。现收录 11 条，按"拿它干什么"分通用系统教程、模式与生产参考、AI 编程上手、Coding Agent 机制拆解、真实系统源码五组。<br /><a href="./resources/">进入资源导航 →</a></p>
+<section className="home-flow">
+  <div className="home-flow-node">
+    <h3><span className="home-flow-no">R</span>资源导航</h3>
+    <p>值得反复回看的学习资源，人来筛；拆解或复盘卡住时，按需回来补认知。</p>
+    <p className="home-flow-meta"><a href="./resources/">11 条收录 · 进入 →</a></p>
+    <p className="home-flow-tag">—— 按需调用</p>
   </div>
-  <div className="home-route-item">
-    <h3>应用拆解 — 人先判断值得拆哪一点，再让 AI 沿方向深挖</h3>
-    <p>不套一个万能模板：先由人判断这个项目的价值点在哪——是工程实现做得好，是某个功能做得绝，还是商业模式、AI 在业务里的落点——定下这次拆的方向，AI 再沿方向把广度铺满、人验真伪。现有 Dify v1.15.0（16 篇）和 Claude Code CLI（18 篇）两组源码拆解，商业项目线在建。<br /><a href="./application-notes/">进入应用拆解 →</a></p>
+  <div className="home-flow-arrow"><span>────→</span><em>卡住时补认知</em></div>
+  <div className="home-flow-node">
+    <h3><span className="home-flow-no">A</span>应用拆解</h3>
+    <p>先由人判断值得拆哪一点——工程实现、功能交互还是商业模式——AI 沿方向铺满广度，人验真伪。</p>
+    <p className="home-flow-meta"><a href="./application-notes/">34 篇拆解 · 进入 →</a></p>
+    <p className="home-flow-tag">—— 人定方向 · AI 铺广度</p>
   </div>
-  <div className="home-route-item">
-    <h3>方法与复盘 — 抽技巧、沉 skill</h3>
-    <p>从应用拆解里提炼能带到下一次的判断、模式和 agent 工程技巧，目标是逐步封成能被下一轮调用的 skill，让工程判断越攒越准。skill 那一步现在还没落地。<br /><a href="./notes/">进入方法与复盘 →</a></p>
+  <div className="home-flow-arrow"><span>────→</span><em>拆完抽技巧</em></div>
+  <div className="home-flow-node">
+    <h3><span className="home-flow-no">M</span>方法与复盘</h3>
+    <p>从应用拆解里提炼能带到下一次的判断和 agent 工程技巧，攒出可复用的方法论。</p>
+    <p className="home-flow-meta"><a href="./notes/">9 篇复盘 · 进入 →</a></p>
+    <p className="home-flow-tag home-flow-tag-pending">—— 目标：沉成 skill（未通）</p>
   </div>
 </section>
 
-## 怎么用这个站
+<p className="home-flow-note">为什么这么分工：AI 存着海量专业知识、能预测能梳理，但要人给特定输入才激活对应那部分，而且它按概率把最像的东西铺出来，越顺越可能在自信地出错；人反过来能判断真伪却知识有限。两者缺口互补，所以是<strong>人定方向、AI 铺广度、人验真伪</strong>——判断的入口和出口都在人手里，AI 把中间那段做得又快又全。</p>
 
-- 找资源学：从资源导航的地图按缺口选一条。
-- 看系统怎么拆：进应用拆解，对照 Dify 或 Claude Code 的实现，看它为什么这样拆。
-- 沉淀方法论：方法与复盘里的跨项目判断和 agent 工程技巧，可对照自己的实践。
-
-<p className="home-route-meta">内容在，商业项目线刚起步，skill 和工作流还没落地。首页写的是这个站要长成的样子和为什么这么建，等最小这条回线（人定方向 → AI 沿方向拆 → 抽 skill → 下一轮真调用它）跑通一圈，再把 skill 那一步从方向升级成事实。</p>
-
-<p className="home-route-meta">想知道这个站是谁在写，看 <a href="./about/">关于我</a>。</p>
+<p className="home-flow-note">回灌这条现在还没落地：skill 未封、工作流未搭，「未通」就是这个意思。等最小这条回线（人定方向 → AI 沿方向拆 → 抽 skill → 下一轮真调用它）跑通一圈，再把 skill 那一步从方向升级成事实。想知道这个站是谁在写，看 <a href="./about/">关于我</a>。</p>
 
 ## 这个站怎么写
 
 <section className="home-principles">
   <ul>
-    <li>能交给 AI 做的交给 AI，方向和判断留给人；AI 铺出来的东西，人要验真伪再入库。</li>
-    <li>产物为复用而结构化：人能读懂，AI 能抽取、能调用，同一份东西两种读法。</li>
-    <li>不追求全，收录认为值得反复回看的东西。</li>
-    <li>不写平均用力的总结，每篇都尽量给出明确判断。</li>
-    <li>不搬运原文，优先留下对应的理解、取舍和以后还会回看的笔记。</li>
+    <li><strong>人定方向、AI 铺广度、人验真伪。</strong>能交给 AI 做的交给 AI，判断的入口和出口留在人手里；每个项目先判断值得拆哪一点，不套万能模板。</li>
+    <li><strong>判断必须落到行动。</strong>哪些照搬、哪些换实现、哪些别碰、什么时候不适用；每篇至少给出三处 README 里读不到的东西，不把源码翻成大白话。</li>
+    <li><strong>产物为复用而结构化。</strong>人能读懂，AI 能抽取、能调用；提炼出的技巧目标是沉成 skill 回喂下一轮拆解——这条还在建。</li>
   </ul>
 </section>
