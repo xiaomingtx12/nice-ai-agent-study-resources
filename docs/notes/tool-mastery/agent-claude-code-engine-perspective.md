@@ -942,4 +942,4 @@ Claude Code 不是炫技,是把 Agent 理论的所有关键问题(上下文爆�
 - [Agent Loop 循环设计篇](../agent-system-design/agent-loop-design.md) —— 循环的理论框架与原始代码实现
 - [上下文管理篇](../agent-system-design/agent-context-management.md) —— 上下文的理论框架与分层管理
 - [工具调用篇](../agent-system-design/agent-tool-calling.md) —— 工具的本质与可靠性设计
-- [MCP 与 Skill 设计篇](../agent-system-design/agent-mcp-skill-design.md) —— Skill 与 MCP 的设计原理
+- [Skill 经验封装篇](../agent-system-design/agent-skill-design.md) —— Skill 的设计原理
