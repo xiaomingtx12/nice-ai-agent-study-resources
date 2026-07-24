@@ -18,13 +18,23 @@ description: "方法与复盘栏的定位：从应用拆解里提炼能带到下
 - [生产级 Agent 应该是什么样的](./evolution-trends/how-to-learn-agent-with-judgment.md)
 - [AI 工具使用方式的阶段复盘与经验沉淀](./evolution-trends/ai-coding-learning-method-stage-review.md)
 
+## Agent 产品思维
+
+判断 Agent 产品的场景、形态和人机分工。产品层先回答任务应该怎么完成，再进入具体工程实现。
+
+- [理解 + AI 与 AI Native](./agent-product-method/plus-ai-and-ai-native.md)
+- [AI Native 产品怎么设计：执行杠杆、人的决策与不确定性管理](./agent-product-method/ai-native-product-design.md)
+- [Agent 产品功能形态图谱：从理解输入到持续推进任务](./agent-product-method/agent-product-functional-form-atlas.md)
+- [Agent 自进化：让使用经验进入下一轮](./agent-product-method/agent-self-evolution.md)
+
 ## Agent 系统设计
 
-提炼 agent 系统会用到的元组件，抽象出每个组件的方法论。Transformer 架构作为理解模型本身的前置项。本栏按依赖链排列：前置 → 中枢（Loop）→ 数据/工具层 → 编排/横切。
+提炼 Agent 系统会用到的工程技巧，先从产品任务与模型不确定性建立第一性原理，再进入具体组件。工程图谱持续总结完整，单个产品按真实问题选择必要部分。Transformer 架构作为理解模型本身的前置项。
 
 - [元组件谱系总览](./agent-system-design/index.md)
 - [从 AI 应用开发者的角度理解 Transformer 架构](./agent-system-design/agent-thinking-transformer-from-prompt.md)
 - [工程技巧 -> 架构层：提示词、上下文、驾驭为什么起作用](./agent-system-design/agent-engineering-to-architecture.md)
+- [Agent 工程的第一性原理：用确定性外框管理不确定性模型](./agent-system-design/agent-engineering-first-principles.md)
 - [Agent 大脑篇](./agent-system-design/agent-brain.md)
 - [意图识别篇](./agent-system-design/agent-intent-recognition.md)
 - [工具调用篇](./agent-system-design/agent-tool-calling.md)
@@ -59,6 +69,7 @@ description: "方法与复盘栏的定位：从应用拆解里提炼能带到下
 ## 这一节该看什么
 
 - 想看演变趋势和脉络判断：演变趋势观察
+- 想看 Agent 产品的场景、形态和人机分工：Agent 产品思维
 - 想看 agent 系统的元组件和方法论：Agent 系统设计
 - 想看工具驾驭方法：工具应用与驾驭
 - 想看市面 AI 应用的实现形态：市场观察
