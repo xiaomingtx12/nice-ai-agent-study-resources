@@ -5,7 +5,7 @@ description: "梳理 prompt、context、harness、loop 四层工程的演变：�
 
 # 从 Prompt 到 Loop：四层工程的演变脉络
 
-这个站里已经有几篇深拆：[循环设计](../agent-system-design/agent-loop-design.md)、[上下文管理](../agent-system-design/agent-context-management.md)、[MCP 与 Skill](../agent-system-design/agent-mcp-skill-design.md)、[可观测性](../agent-system-design/agent-observability.md)。也有一篇把提示词/上下文/驾驭工程技巧逐条对应到 Transformer 架构层、解释"为什么起作用"的[文章](../agent-system-design/agent-thinking-transformer-from-prompt.md)，还有一篇做 [Agent 设计模式元认知](./agent-coding-strategy-state-reflect.md)的文章。
+这个站里已经有几篇深拆：[Agent 大脑](../agent-system-design/agent-brain.md)、[上下文管理](../agent-system-design/agent-context-management.md)、[Skill 经验封装](../agent-system-design/agent-skill-design.md)、[可观测性](../agent-system-design/agent-observability.md)。也有一篇把提示词/上下文/驾驭工程技巧逐条对应到 Transformer 架构层、解释"为什么起作用"的[文章](../agent-system-design/agent-thinking-transformer-from-prompt.md)，还有一篇做 [Agent 设计模式元认知](./agent-coding-strategy-state-reflect.md)的文章。
 
 这篇不重复它们。这篇回答一个更靠前的问题：
 
@@ -205,7 +205,7 @@ Prompt 阶段，"每轮该塞什么、怎么写"全靠人现场判断、现场�
 - 想深拆内层 loop（OTA 循环）的设计与退出条件：[Agent Loop 循环设计篇](../agent-system-design/agent-loop-design.md)。
 - 想看 Harness 作为元认知框架怎么落到 coding agent：[建立 Agent 设计模式元认知](./agent-coding-strategy-state-reflect.md)。
 - 想看四层在真实任务里怎么被用上、踩什么坑：[实操落地篇](../tool-mastery/agent-from-paradigm-to-practice.md)。
-- 想看工具 / Skill / 可观测性这些 Harness 手段的具体设计：[工具调用篇](../agent-system-design/agent-tool-calling.md)、[MCP 与 Skill 设计篇](../agent-system-design/agent-mcp-skill-design.md)、[可观测性篇](../agent-system-design/agent-observability.md)。
+- 想看工具 / Skill / 可观测性这些 Harness 手段的具体设计：[工具调用篇](../agent-system-design/agent-tool-calling.md)、[Skill 经验封装篇](../agent-system-design/agent-skill-design.md)、[可观测性篇](../agent-system-design/agent-observability.md)。
 
 ## 用这个坐标系自检
 
