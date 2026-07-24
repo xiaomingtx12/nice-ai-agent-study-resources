@@ -1,25 +1,45 @@
 ---
 sidebar_position: 1
-description: "给 AI 应用开发者的 Transformer 架构理解手册：从 QKV/Attention/FFN/自回归核心概念，到 KV Cache、DeepSeek-V3 真实实现、工具调用机制，不写数学推导，看懂模型怎么读/处理/写。"
+description: "Transformer 架构概念地基：不是科普，是下一篇《工程技巧→架构层》的前置知识。读完本文你知道 QKV/FFN/自回归/KV Cache/工具调用这些零件长什么样，下一篇逐条告诉你哪个工程技巧动了哪个零件、为什么起作用。"
 ---
 
 # 从AI应用开发者的角度去理解 Transformer 架构
 
 如果你已经在做 AI 应用开发（提示词工程、上下文工程、驾驭工程），你大概率不需要从数学推导去理解 Transformer——你需要的是**理解那些工程技巧为什么会起作用**。
 
-但有个前提：你需要先懂几个核心概念。QKV 是什么、Attention 在干什么、FFN 在干什么、自回归是什么意思、结构化提示词为什么有用
+但大多数讲 Transformer 的文章要么是论文重述（对你没用），要么只有概念缩写（看了等于没看）。这篇另起炉灶：**本文替你建立概念地基，本文和下一篇共同组成"从盲试到理解"的两步。**
 
-本文（上半篇）的写法：
+## 读这篇文章之前，先看清它和下一篇怎么分工
 
-- **核心概念**：把 QKV / Attention / FFN / 自回归从零讲明白，不写数学推导
-- **架构串联**：把所有部件组装成完整 Transformer 架构
-- **KV Cache + DeepSeek-V3 真实模型对照**：理解性能瓶颈和真实模型的工程优化
-- **工具调用机制**：理解大模型怎么"调用工具"
-- **不深究的部分**：明确标注哪些数学可以跳过
+```mermaid
+flowchart LR
+    subgraph 本文["本文：概念地基"]
+        P1["Part 1 核心概念<br/>QKV / FFN / 自回归"]
+        P2["Part 2 KV Cache<br/>瓶颈在哪"]
+        P3["Part 3 DeepSeek-V3<br/>真模型长什么样"]
+        P4["Part 4 工具调用<br/>模型怎么跟外部交互"]
+    end
 
-每一种提示词/上下文/驾驭工程技巧对应到架构的哪一层、为什么起作用，放在下半篇 [《工程技巧 -> 架构层》](./agent-engineering-to-architecture.md)。
+    subgraph 下篇["下一篇：工程技巧 → 架构层"]
+        E1["第五部分：提示词工程<br/>角色设定/Few-shot/CoT"]
+        E2["第六部分：上下文工程<br/>截断/压缩/注意力分配"]
+        E3["第七部分：驾驭工程<br/>两阶段循环/工具设计/死循环"]
+    end
 
-这不是一篇科普 Transformer 全貌的文章，而是**给 AI 应用开发者用的"理解架构"手册**。
+    style 本文 fill:#e1f5fe,stroke:#0288d1
+    style 下篇 fill:#fff3e0,stroke:#f57c00
+```
+
+没有连线，因为不是一一对应。真实关系是：
+
+| 本文建立的概念 | 被下一篇的哪些部分用到 |
+|---|---|
+| Part 1（QKV/FFN/自回归） | 第五、六、七部分全部——是最底层的基础，提示词工程靠它、上下文工程靠它、驾驭工程也靠它 |
+| Part 2（KV Cache） | 第六部分（上下文工程）——截断、压缩、注意力分配这些技巧的物理约束都来自 KV Cache |
+| Part 3（DeepSeek-V3） | 不直接对应某个工程技巧，是拓展——让你知道真实模型怎么改造教科书架构、MLA 为什么让长上下文变便宜、MoE 为什么让 API 性价比高 |
+| Part 4（工具调用） | 第七部分（驾驭工程）中跟工具设计相关的部分——模型只是输出 JSON 而非真的调用，这个事实是理解中间件拦截和 Recovery Hints 的前置条件 |
+
+> 每种工程技巧对应到架构的哪一层、为什么起作用，放在 [《工程技巧 → 架构层》](./agent-engineering-to-architecture.md)。
 
 ---
 
@@ -39,26 +59,78 @@ description: "给 AI 应用开发者的 Transformer 架构理解手册：从 QKV
 
 在讲"工程技巧对应哪一层"之前，必须先弄清楚几个核心概念。这部分用最朴素的方式解释，不写数学。
 
+### 先定调：本文讲的是哪一类 Transformer
+
+Transformer 不是只有一种"长相"。按"编码"（把输入变成模型能算的表示）和"解码"（从表示生成文本）怎么分工，主流有三类：
+
+- **编码器 Encoder**：只编码、不生成。把输入文本变成向量表示。代表：BERT、各类 text-embedding 模型。用途：分类、检索、RAG 的向量化——下一篇讲 RAG 时会专门用到这一类
+- **解码器 Decoder**：只解码、自回归生成。从已有文本一个接一个"解码"出后续 token。代表：GPT、DeepSeek、Claude。用途：聊天、Agent、工具调用——**本文通篇讲的就是这一类**
+- **编码-解码器 Encoder-Decoder**：先编码输入、再解码输出，适合"输入→输出"映射明确的任务。代表：T5、翻译 / 摘要模型
+
+"编码"和"解码"在本文数据管道里的位置：**主题一（怎么读）= 编码**，把字符串变成"聚合了上下文的向量表示"；**主题三（怎么写）= 解码**，从这个表示里生成下一个 token。
+
+一句话定调：**本文聊的是 Decoder-Only 自回归模型**。你后面看到的 Causal Mask、自回归、LM Head 都是它特有的。遇到"Encoder 类模型"（比如 RAG 里的 embedding 模型）别混淆——它只编码、不生成，是另一类东西。
+
 按数据在模型里的"流动顺序"组织——**怎么读 → 怎么处理 → 怎么写**：
 
-1. **怎么读（输入端）**：Token → Embedding → Positional Encoding → Self-Attention（QKV）
+1. **怎么读（输入端，即编码）**：Token → Embedding → Positional Encoding → Self-Attention（QKV）
 2. **怎么处理（模型内部）**：Transformer Block（Multi-Head + FFN）× N 层
-3. **怎么写（输出端）**：自回归 + Softmax + Sampling
-4. **现代 LLM 为什么都是 Decoder-Only**
+3. **怎么写（输出端，即解码）**：自回归 + Softmax + Sampling
 
 这跟实际数据流向一致，比按概念分类更符合"应用开发者的工程直觉"。
+
+> **先记住两条贯穿全局的约束（细节在主题一展开）**：
+> - **上下文窗口**——模型一次能处理的最大 token 数，prompt 和输出共享（主题一第 1 步）
+> - **有效上下文 ≠ 标称窗口**——窗口里不是所有位置都被平等使用，中间易被忽略（主题一第 3 步）
 
 ---
 
 ### 主题一：模型怎么"读"输入
 
-> **这一节回答的问题**：你的 prompt 进来后，模型怎么把它变成能"理解"的内部表示？
+> 你的 prompt 是一段字符串。"苹果很甜"——四个汉字。模型不认识汉字，只认识数字。这一节跟着数据走完整条流水线：从字符串到 token，到向量，到聚合了上下文的内部表示。每一步，数据长什么样？在做什么？
 
-数据流：Token → Embedding → Positional Encoding → Self-Attention
+```mermaid
+flowchart LR
+    A["文本<br/>'苹果很甜'"] -->|"第 1 步：分词"| B["Token ID<br/>(苹果)(很)(甜)"]
+    B -->|"第 2 步：向量化"| C["向量<br/>[0.2, -0.5, ...] ×3"]
+    C -->|"第 3 步：互相读"| D["上下文表示<br/>每个向量都聚合了<br/>整句话的信息"]
+    
+    style A fill:#f5f5f5,stroke:#999
+    style B fill:#e1f5fe,stroke:#0288d1
+    style C fill:#fff3e0,stroke:#f57c00
+    style D fill:#e8f5e9,stroke:#388e3c
+```
 
-#### 1. 什么是 Token——模型的"字"
+三步走：先拆成 token，再把每个 token 变成向量，最后让向量之间"互相看"——看完之后的向量就不再是孤立的坐标了，它聚合了整句话的上下文。这就是"读"。
 
-LLM 不认识"汉字"、"英文单词"、"标点"。它只认识 **token（词元）**。
+---
+
+#### 第 1 步：分词（Tokenization）——把字符串拆成模型认识的最小单位
+
+在拆之前，先立一个贯穿全文的约束——**上下文窗口（Context Window）：模型一次能同时处理的最大 token 数**。窗口本身按 token 计数，所以这一节先讲 token 是什么。
+
+> **一个帮你建立直觉的框架：模型有两支独立的"大小"轴**
+>
+> 描述一个模型，常被混为一谈的两个数字其实是正交的：
+> - **上下文窗口（工作台面多大）**：一次能摊开多长的对话 / 文档，单位是 token（常见 8K / 32K / 128K）。由 **MLA / 位置编码外推** 这类机制优化——第三部分 DeepSeek-V3 会拿 128K 举例
+> - **参数规模（脑容量多大）**：模型总共有多少参数，单位是 B（十亿，常见 7B / 70B / 671B）。由 **MoE** 这类机制优化——同一个 DeepSeek-V3 总参数 671B、每次只激活 37B
+>
+> 一个是"一次能处理多长"，一个是"模型本身多大"。后面讲 KV Cache、讲真模型时，会反复回到这两根轴。**窗口 ≠ 参数，别混。**
+
+两个关于窗口的关键事实：
+
+- **prompt 和生成输出共享同一个窗口**——常见误区是以为"8K 上下文 = 能输出 8K"。实际是 prompt 占掉的部分 + 生成的部分，加起来不能超过 8K。prompt 占了 6K，你最多只能生成 2K
+- **窗口就是 token 预算**——分词按 token 计数，窗口大小就是 token 数
+
+窗口是后面所有概念的"物理边界"：KV Cache（第二部分）随窗口内的 token 数线性增长、位置编码有它自己的有效范围（超出训练长度的 token 模型用不好）、上下文工程（下一篇第六部分）本质就是在固定窗口里决定什么进、什么出、什么放哪里。
+
+窗口里装的是按角色组织的对话：system 定规则、user 提需求、assistant 回、tool 回工具结果——后面讲工具调用（第四部分）会频繁用到这些角色。
+
+记住一句话：**窗口是预算，不是无限画布。**
+
+---
+
+LLM 不认汉字、不认英文单词、不认标点。它只认 **token（词元）**。
 
 Token 是模型自己的"字"：
 
@@ -72,7 +144,7 @@ emoji: "😀"             → 1-2 tokens
 **关键事实**：
 
 - **同一个词，不同模型可能切成不同数量的 token**——GPT 用 BPE，LLaMA 用 SentencePiece
-- **上下文窗口按 token 计数**——不是字符数
+- **窗口大小用 token 数衡量**——不是字符数（窗口的定义见本节开头）
 - **不同语言 token 效率不同**——中文比英文多消耗 30-50% 的 token
 
 **估算公式**：
@@ -84,11 +156,21 @@ emoji: "😀"             → 1-2 tokens
 estimated = (len(content) / 4) * 1.1 + 5  # +10% 安全边际，+5 是消息格式开销
 ```
 
-#### 2. 什么是 Embedding——把"字"变成"坐标"
+分词之后，你得到一串 token ID（整数）。`"苹果很甜"` → `[5921, 2918, 10668]`（假设的编号）。**模型还没"读"任何东西**——它只是把字符串拆成了它认识的编号。
 
-每个 token 进入模型后，被映射成一个**高维向量**（比如 4096 维的浮点数）。这就是 **embedding**。
+---
 
-你可以把 embedding 空间想象成一个"语义地图"：
+#### 第 2 步：向量化（Embedding + 位置）——给每个 token 一个"坐标"和一个"位置标签"
+
+拿到了 token ID，模型做两件事：**查语义坐标、加位置标签**。
+
+##### 2a. Embedding：查语义坐标
+
+每个 token ID 对应一个**高维向量**（比如 4096 维的浮点数）。这就是 **embedding**。
+
+本质：**embedding 是一个巨大的 lookup table**——token ID → 向量。训练完成后固定不变。你不能通过 prompt 改变某个词的 embedding。
+
+向量空间的直观：
 
 ```
         "国王" ──── "皇后"
@@ -97,300 +179,259 @@ estimated = (len(content) / 4) * 1.1 + 5  # +10% 安全边际，+5 是消息格�
            │         │
         "王子" ──── "公主"
 
-向量空间中，语义相近的词距离近：
+语义相近的词距离近：
 - "国王" 和 "王后" 距离很近
 - "猫" 和 "狗" 比 "猫" 和 "汽车" 距离近
-- "开心" 和 "高兴" 距离很近
 ```
-
-**embedding 在训练完成后就固定了**——你不能通过 prompt 改变某个词的 embedding。
 
 **为什么这对你重要？**
 
-- **"苹果"在 embedding 空间里同时靠近"水果"和"苹果公司"**——模型怎么知道你说的是哪个？靠**上下文**（attention 层的工作）
-- **专业术语如果不在训练数据里，embedding 就是随机的**——这时候给它一个**定义**比反复使用术语更有效
+- **"苹果"在 embedding 空间里同时靠近"水果"和"苹果公司"**——embedding 自己是分不清的。怎么区分？靠下一步 Self-Attention 看上下文。
+- **专业术语如果不在训练数据里，embedding 就是随机的**——这时候给它一个**定义**比反复使用术语更有效。
 
-#### 3. 什么是 Positional Encoding——给"字"加位置
+##### 2b. Positional Encoding：加上位置标签
 
-Transformer 没有循环结构，它本身不知道 token 的顺序。Positional Encoding 就是告诉它"第一个词是第一个，第二个词是第二个"。
+Transformer 没有循环结构，它本身不知道 token 的顺序。"我打你"和"你打我"——token 完全一样，不加位置信息就全乱了。
 
-从使用视角：
+Positional Encoding 在 embedding 向量上加一个"位置标记"：第一个 token 是位置 0，第二个是位置 1……
 
-- **位置信息跟语义信息一样重要**——"我打你"和"你打我"的 token 完全一样，全靠位置区分
-- **位置编码的设计决定了模型的长度外推能力**——为什么有的模型到 8K 就崩，有的能到 128K（RoPE / YaRN 等）
-- **相对位置编码**（RoPE）是现代模型主流——在中间插入内容比末尾追加更不容易搞乱 attention
+**对应用开发者重要的点**：
 
-#### 4. 什么是 Self-Attention（用 QKV 实现）——模型怎么"读懂"
+- **位置编码有它自己的有效范围**——超出训练长度的 token，位置信号衰减，模型用不好。这正是"有效上下文 ≠ 标称窗口"的成因之一（主题一第 3 步展开）
+- **往已有对话中间插内容，比在末尾追加更容易出错**——插入会打乱已有内容的相对位置关系，末尾追加不会。不管是加 RAG 结果、系统指令还是多轮对话拼接，能放末尾就放末尾
 
-**Self-Attention 是 Transformer 理解语言的核心机制**。
+---
 
-**一句话**：**每个 token 在读自己的 context 时，会"看向"所有其他 token，决定哪些 token 对理解自己最重要**。
+**关键：到这一步，每个 token 还是一个孤立的向量。**
 
-**举个例子**：模型读到"苹果"这个 token 时，它会去看周围所有的 token：
+它知道"我是什么词"（embedding）、"我在第几个位置"（position），但不知道"我跟其他 token 有什么关系"。`苹果` 的向量和 `很` 的向量**还没有任何交互**。
 
-```
-Context: "我昨天买了一个苹果，很甜。"
+真正的"读"在下一步：让这些孤立的向量**互相看**。
 
-"苹果" 看向所有 token，得到一组注意力分数：
+---
 
-token "我"   : 0.05   （不太相关）
-token "昨天" : 0.10   （时间修饰）
-token "了"   : 0.03
-token "买"   : 0.15   （动作修饰）
-token "了"   : 0.03
-token "一个" : 0.08   （量词）
-token "苹果" : 0.20   ← 自己（self-attention）
-token "，"   : 0.01
-token "很"   : 0.20   ← 重要！修饰"甜"
-token "甜"   : 0.15   ← 重要！描述苹果的味道
-```
+#### 第 3 步：互相读（Self-Attention / QKV）——token 之间开始"对话"
 
-`苹果` 注意到 `甜` 和 `很` 都高度相关——所以模型推断"苹果"这里是水果（而不是苹果公司）。
+Self-Attention 是 Transformer 理解语言的核心。一句话：
 
-**Self-Attention 的本质**：**让每个 token 决定"我应该重点关注哪些其他 token"**。
+**每个 token 看向所有其他 token，然后从最相关的那些 token 身上拉取信息，更新自己的表示。**
 
-#### Self-Attention 是怎么实现的？——QKV 三件套
-
-Self-Attention 内部其实在做"问答匹配"，需要三个东西：**Query（查询）、Key（键）、Value（值）**。
-
-**直觉类比**：
-
-你去图书馆找书：
-
-- **Query（你的查询）**：你想找"机器学习"相关的书
-- **Key（书的标签）**：每本书上的标签
-- **Value（书的内容）**：你真正想读的内容
-
-找的过程：
-1. 你的 Query 和每本书的 Key 比较——"机器学习" Query 和 "机器学习" Key 完全匹配
-2. 根据匹配度，从匹配的书的 Value 里抽取内容
-
-**在 Transformer 里**：
-
-每个 token 生成自己的 Query、Key、Value（每个都是向量）。
-
-- **Query** = 这个 token 在问"我应该关注什么样的信息？"
-- **Key** = 这个 token 自我介绍"我提供什么信息"
-- **Value** = 这个 token 实际携带的"信息内容"
-
-**计算 attention 分数的过程**：
+具体怎么实现？每个 token 先算出三个向量：**Query、Key、Value**。以"苹果"为例，输入句子是 `我 昨天 买 了 一个 苹果 ， 很 甜 。`：
 
 ```
-对 token A：
-  A.Query 和所有 token 的 Key 计算相似度
-  → 得到一组分数（比如 A.Query · B.Key = 0.7，A.Query · C.Key = 0.3）
-  → softmax 归一化（让分数和为 1）
-  → 得到 attention 权重
-
-用这些权重对所有 token 的 Value 加权求和：
-  → A 的新表示 = 0.7 × B.Value + 0.3 × C.Value + ...
+"苹果" 的向量（Embedding + Position 之后的结果，4096 维）
+   ↓ × Wq 矩阵  → Query   —— "苹果"在问：谁跟我有关？
+   ↓ × Wk 矩阵  → Key     —— "苹果"告诉别人：我能提供什么？
+   ↓ × Wv 矩阵  → Value   —— "苹果"实际带的内容
 ```
 
-**QKV 总结**：Q 和 K 决定"关注谁"，V 决定"拿到什么信息"。
+句子有 8 个 token，每个都走相同的三组矩阵乘法，产出 8 组 (Q, K, V)。
 
-**对应用开发者的关键事实**：
+**然后"苹果"用它自己的 Query，去跟所有 token 的 Key 做匹配**——这就是注意力分数的来源：
 
-- **Self-Attention 是"双向"的**——每个 token 看所有其他 token（包括自己）
-- **每个 token 自己决定看谁**——权重是动态计算的，不是预设的
-- **Causal Mask**（生成时用）让 attention 变成"单向"——每个 token 只能看到自己和之前的 token，不能看未来
+```
+"苹果".Query · "我".Key   → 相似度很低（主语跟宾语关联弱）     → 0.05
+"苹果".Query · "昨天".Key → 相似度低（时间修饰，不太相关）      → 0.10
+"苹果".Query · "买".Key   → 相似度中（动作和受事关联）         → 0.15
+"苹果".Query · "一个".Key → 相似度低（量词，弱关联）           → 0.08
+"苹果".Query · "苹果".Key → 相似度高（自己跟自己当然像）       → 0.20
+"苹果".Query · "很".Key   → 相似度高（"很"修饰了描述苹果的词）  → 0.20
+"苹果".Query · "甜".Key   → 相似度中高（直接描述苹果的味道）    → 0.15
+```
 
-#### 理解 Causal Mask："双向能力" vs "单向约束"
+softmax 归一化后（把差异拉开，总和 = 1），得到注意力权重。
 
-> **这是整个文档最容易混淆的地方，请仔细看。**
+**最后，用这些权重对所有 Value 加权求和**，得到"苹果"的新表示：
 
-你可能会想：既然 Self-Attention 是双向的，为什么还要加 Causal Mask 让它变单向？
+```
+"苹果"的新向量 = 0.05 × "我".Value + 0.10 × "昨天".Value + 0.15 × "买".Value
+               + 0.08 × "一个".Value + 0.20 × "苹果".Value + 0.20 × "很".Value
+               + 0.15 × "甜".Value
+```
 
-**答案是**：模型在"能做什么"和"实际推理时让做什么"是两个层面。
+"甜"和"很"的 Value 被大量拉进了"苹果"——模型据此推断这里的"苹果"是水果。
+
+**这正是 embedding 做不到的事。** Embedding 只存了一个词的平均语义——"苹果"处于水果和公司之间的模糊地带。Self-Attention 靠看**这一句**的上下文，动态地把"苹果"拉到了"水果"那一侧。
+
+**一句话记住各角色的分工**：**Query 决定"我要找谁"，Key 决定"我是谁（供别人匹配）"，Value 决定"我手里有什么内容（被拉走）"。** Q·K 算出注意力权重，按权重去拉别人的 Value。每个 token 都这样走一遍，句子里所有 token 就互相看过了。
+
+**两个关键特性**：
+
+- **动态**——权重是每次输入实时算出来的。同一个"苹果"换一个句子（"苹果发布了新手机"），它自己的 Query 不变，但其他 token 的 Key 全变了，Q·K 结果全变了——新句子里会指向"公司"
+- **计算上全连接**——公式能算任意两个位置的相似度。Decoder 固定加 Causal Mask 把全连接约束成单向（下面展开）
+
+---
+
+##### 方向约束（Causal Mask）："不能看还没生成的东西"
+
+> Self-Attention 的公式能算任意两个位置的相似度。但 Decoder 生成下一个 token 时，后面的 token 根本还不存在。Causal Mask 强制把"未来位置"屏蔽掉。
+
+**一句话**：Self-Attention 计算本身是**全连接**的（任意 i, j 都能算），但 Decoder 在前向传播时**固定**盖了一层因果掩码——上三角（j > i）的分数强制设成 0，实际生效的注意力被约束成"只看自己和之前"。
+
+分三层看：
 
 ```mermaid
 flowchart LR
-    subgraph 能力层面["模型权重定义的“能做什么”"]
-        A1["双向 Self-Attention<br/>权重能算任意 i, j 的 attention"]
+    subgraph 计算层["计算层：全连接"]
+        C1["Q @ K.T<br/>任意 i, j 都能算相似度"]
     end
 
-    subgraph 约束层面["推理时“让做什么”"]
-        A2["单向（生成）<br/>加 Causal Mask<br/>每个 token 只看自己及之前"]
-        A3["双向（理解）<br/>去掉 Causal Mask<br/>每个 token 看全部"]
+    subgraph 掩码层["掩码层：固定盖住未来"]
+        M1["Causal Mask<br/>上三角置 -inf<br/>softmax 后变 0"]
     end
 
-    能力层面 --> 约束层面
-    约束层面 -->|默认模式| A2
-    约束层面 -->|特殊模式| A3
+    subgraph 效果层["效果层：单向"]
+        E1["位置 i 只看到 j ≤ i<br/>看不到未生成的未来"]
+    end
 
-    style A1 fill:#e1f5fe,stroke:#0288d1
-    style A2 fill:#fff3e0,stroke:#f57c00
-    style A3 fill:#e8f5e9,stroke:#388e3c
+    计算层 --> 掩码层 --> 效果层
+
+    style C1 fill:#e1f5fe,stroke:#0288d1
+    style M1 fill:#fff3e0,stroke:#f57c00
+    style E1 fill:#e8f5e9,stroke:#388e3c
 ```
 
-**具体来说**：
+- **计算层**：`Q @ K.T` 对任意 (i, j) 都能算分数——公式不挑方向
+- **掩码层**：上三角（j > i）的分数设成 `-inf`，softmax 后变 0。mask **写死在计算图里**，训练和推理都带
+- **效果层**：位置 i 实际看到的只有 j ≤ i
 
-- **模型权重本身是双向的**——矩阵运算中，第 i 个 token 的 Query 可以和任意第 j 个 token 的 Key 算相似度。这是模型架构的"能力"
-- **Causal Mask 是生成时加的可移除约束**——它只在"自回归生成"场景下加上，让模型看不到未来。这是推理的"约束"
-- **如果要求模型只做"理解"（分类、总结、提取）**，可以**去掉 Causal Mask**，让 attention 双向看全部内容——这相当于把 LLM 的 Decoder 当 Encoder 用
+**三个常被讲混的说法**：
 
-**为什么文档中既有"Decoder 用单向"又有"Decoder-Only 仍然是双向的"**？
+| 容易混的说法 | 准确的表述 |
+|------|------|
+| "mask 是可选约束，去掉就能双向" | mask 固定在计算图里，主流 API 不暴露开关。Decoder 天生就是单向的 |
+| "训练用双向 attention，生成才加 mask" | Decoder 训练也带 Causal Mask，否则位置 i 偷看答案 |
+| "Decoder-Only 能做理解，靠去掉 mask 做双向 attention" | 归因错误。做分类/抽取靠的是把任务塞进 prompt，用单向生成输出结果 |
 
-| 说法 | 应用场景 | 解释 |
-|------|---------|------|
-| Decoder 用**单向** Self-Attention | **生成场景**（默认） | 每个 token 只看到自己和之前的位置——Causal Mask 生效 |
-| Decoder-Only 的 attention 是**双向的** | **理解场景**（可选的） | Attention 权重本身能算任意两个 token 之间的相似度——去掉 Causal Mask 就是双向 |
-| 为什么原始 Transformer 的 Decoder 有 **Cross-Attention** | 需要关注编码器输出 | Encoder-Decoder 架构中，Decoder 除了单向 attention，还要看 Encoder 的输出 |
-| 为什么 Decoder-Only 没有 Cross-Attention | 输入输出是同一段 | 不存在"独立的输入"需要关注，prompt 就在 Decoder 的上下文中 |
+**对应用开发者最重要的三个结论**：
 
-**结论**：**说"单向"时指的是生成时的约束模式，说"双向"时指的是模型本身的能力。** 两者不矛盾——可以理解为"**一个双向能力被 Causal Mask 临时约束成单向的生成机器**"。在应用中：
-- 指令遵循、角色设定 利用的是**训练时学习到的双向理解能力**
-- CoT、自回归生成 依赖的是 **Causal Mask 约束的单向生成能力**
-- 如果你把 LLM 当分类/检索/理解模型用（去掉 Causal Mask），它就能"双向理解"——这也是 **Decoder-Only 能做理解任务的根本原因**
+1. **提示词开头很关键**——生成第一个 token 时，attention 被 mask 限制只能看前面的 prompt，开头的 token 是整段上下文的"根"
+2. **每生成一个 token 都要重算 attention**——新 token 加入后 mask 矩阵多了一行，必须重算。这就是 KV Cache 要解决的问题（第二部分展开）
+3. **训练和推理都带 mask**——做"理解"任务时仍然带 mask，靠 prompt 引导单向生成输出结果
 
-#### 用 PyTorch 代码看 Causal Mask
+##### 有效上下文 ≠ 标称窗口：窗口里不是所有位置都被平等使用
 
-```python
-import torch
+窗口规定了"能装多少"（见第 1 步开头的上下文窗口），但装进去不等于"能用上"。
 
-seq_len = 4
-attention_scores = torch.randn(seq_len, seq_len)
+实证事实：模型对窗口内不同位置的关注度不均——**靠近开头和结尾的 token 被用得最充分，中间的大段容易被忽略**。这就是 Lost in the Middle。所以标称 128K 的模型，放在 100K 位置的关键指令可能根本没被有效利用。
 
-# 构造 Causal Mask（上三角设为 True）
-mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=1)
+两条实践规则：
 
-# 应用 Mask——"未来位置"设为 -inf
-masked_scores = attention_scores.masked_fill(mask.bool(), float("-inf"))
+- **重要信息往首尾放**——system 指令、核心约束放开头，最新上下文或结论放结尾，别埋在中间
+- **能末尾追加就别中间插入**——插入会打乱已有 token 的相对位置关系，末尾追加不会。加 RAG 结果、系统指令、多轮对话拼接都同理
 
-# Softmax 后，-inf 变成 0——这些位置完全不参与 attention
-probs = torch.softmax(masked_scores, dim=-1)
-# 第 1 行（t1）只能看自己：[1.0, 0, 0, 0]
-# 第 2 行（t2）能看 t1 和自己：[?, ?, 0, 0]
-```
+为什么中间弱？跟 Self-Attention 的注意力分配和位置编码的有效范围都有关：中间位置离首尾都远，注意力被稀释；位置编码在超长范围也会衰减。
 
-**Causal Mask = "未来屏蔽器"**——它在 Self-Attention 计算时，**阻止每个 token 看到还没生成出来的"未来位置"**。
+---
 
-**为什么需要它？** 没有 Causal Mask 时，第 N 个 token 的 attention 能看到位置 N+1、N+2...——但这些位置**根本还没有 token**（只有 padding 或随机值）。这会导致：
+**读完之后的成果**：`苹果` 的向量不再是孤立的——它包含了 `甜`、`很`、`买` 的信息。三个孤立的 token 向量变成了三个**互相聚合了上下文信息的表示**。
 
-- **训练时**：模型学会"作弊"——从未来位置偷答案
-- **推理时**：未来位置是 padding，模型困惑
-
-**Causal Mask 的"因果"含义**：
-
-- **原因（cause）** = 已经生成的 token → 看得见
-- **结果（effect）** = 还没生成的 token → 看不见
-
-保证模型**只看"原因"，不看"结果"**——这就是"自回归"的物理实现。
-
-**为什么这条对应用开发者重要？**
-
-理解了 Causal Mask 就能理解这些工程现象：
-
-1. **为什么"提示词开头"很重要？**——生成第一个 token 时，attention 矩阵被 Causal Mask 限制只能看前面的 prompt
-2. **为什么每生成一个 token 都要重算 attention？**——每个新 token 加入后，Causal Mask 矩阵变了（多一行/一列），必须重算（这是 KV Cache 重要的原因）
-3. **训练和推理方向不同**——训练必须用 Causal Mask（否则作弊），推理必须用 Causal Mask（否则偷看），但用 LLM 做"理解"任务（如分类）反而**不用** Causal Mask
+这就是模型对输入的"读"——从字符串，到 token，到向量，到互相看过之后的上下文表示。有了这个表示，模型下一步（主题二）才能开始真正的"处理"——Multi-Head 多角度分析，FFN 调取储存的知识。
 
 ---
 
 ### 主题二：模型怎么处理（Transformer Block 内部）
 
-> **这一节回答的问题**：Self-Attention 已经让 token 决定"看哪些"，但**看到之后怎么"处理信息"**？答案在 Transformer Block 里。
+> Self-Attention 让 token 看到了上下文，但这只是"看"。接下来模型要对看到的东西做"处理"：多角度分析（Multi-Head）、调取知识（FFN）、逐层抽象（Layer 堆叠）。
 
-**关键事实**：一个 Transformer Block 内部做两件事——**先 Self-Attention（看）、再 FFN（想）**。然后这个 Block 重复 N 次（32 层或 80 层），形成 Layer 堆叠。
+#### 先补一个前提：主题一讲的 Self-Attention 其实是简化版
 
-```mermaid
-flowchart TB
-    subgraph Block[单个 Transformer Block]
-        direction TB
-        SA["Self-Attention (Multi-Head)<br/>看哪些 token 重要"] --> LN1["+ Residual + LayerNorm"]
-        LN1 --> FFN["FFN<br/>基于看到的信息做计算"]
-        FFN --> LN2["+ Residual + LayerNorm"]
-    end
-
-    style SA fill:#e1f5fe,stroke:#0288d1
-    style FFN fill:#fff3e0,stroke:#f57c00
-```
-
-#### 5. 什么是 Multi-Head Attention——多角度看问题
-
-**Self-Attention 不止一组 QKV，而是多组并行**——典型 32-128 组。这就是"多头"。
-
-不同的 head 可以学到不同的关注模式：
-
-- **Head 1**：可能学到了"语法关系"（主语-谓语-宾语）
-- **Head 2**：可能学到了"指代关系"（"它"指代什么）
-- **Head 3**：可能学到了"长距离依赖"（开头的指令和后面的输出）
-- **Head 4**：可能学到了"实体识别"（什么是人名、地名）
-
-**对应用开发者的启示**：
-
-- **模型同时从多个角度"读"你的 prompt**——结构、关键词、上下文、格式约束
-- **如果你的 prompt 在不同维度上"打架"**（指令说"简短"但示例很长），不同 head 会关注不同部分，可能产生矛盾输出
-
-#### 6. 什么是 FFN——模型的"知识库"
-
-Self-Attention 决定"看哪里"，**FFN（前馈神经网络）决定"看懂什么"**。
-
-**直觉理解**：**FFN 是模型存储"事实性知识"的地方**。
+主题一里我们说"苹果"产出一组 (Q, K, V)，和其他 token 交互。实际模型里不是 1 组，是**32-128 组并行**——这就是 **Multi-Head Attention**。一组就是"一个头"。
 
 ```
-"北京是中国的首都"
-"水在 100 度沸腾"
-"Python 用缩进表示代码块"
+一个 token 进入 Self-Attention 层的实际流程：
 
-这些事实存在哪里？——存在 FFN 的权重里，不是 attention 层。
+输入向量（4096 维）
+  ↓ × Wq₁, Wk₁, Wv₁  → Head 1 的 (Q₁, K₁, V₁)  → 算 attention₁ → 产出 128 维
+  ↓ × Wq₂, Wk₂, Wv₂  → Head 2 的 (Q₂, K₂, V₂)  → 算 attention₂ → 产出 128 维
+  ...
+  ↓ × Wq₃₂, Wk₃₂, Wv₃₂ → Head 32 的 (Q₃₂, K₃₂, V₃₂) → 算 attention₃₂ → 产出 128 维
+
+32 × 128 = 4096 维 → 拼接 → 最终 Self-Attention 输出（4096 维）
 ```
 
-**FFN 的结构**（简化理解）：
+每组 head 有自己的 QKV 权重矩阵，训练中自然分化出不同的关注模式：有的 head 专看语法关系（主语-谓语），有的专看指代（"它"指谁），有的专看长距离依赖（开头的指令和三百行后的输出）。
+
+**对应用开发者来说**：模型同时从多个角度读你的 prompt。如果你的指令说"简短"但示例很长，不同 head 会各自关注不同的信号，可能产生矛盾。
+
+#### 第 4 步：调取知识（FFN）
+
+Self-Attention 的输出进入 **FFN（前馈神经网络）**。Attention 是从上下文拉信息，FFN 是基于拉来的信息调取模型储存的知识。
 
 ```
-FFN(x):
-  hidden = gelu(x @ W1)  # 升维到 4 倍（4096 → 16384）
-  out = hidden @ W2      # 降维回原维度（16384 → 4096）
-  return out
+FFN(x) = gelu(x @ W1) @ W2
+         ↑升维 4 倍    ↑降维回原维度
 ```
 
-- **占模型参数的大部分**（约 2/3）
-- **静态的**——训练完成后不变，你不能通过 prompt 改变模型的知识
-- **激活什么通路**——取决于 attention 找到的相关 token
+W1 和 W2 是两张大矩阵，占模型约 2/3 的参数。这些权重是**训练阶段学来的，推理阶段冻结不变**——每次调用 API，模型只是用固定权重跑前向计算，不会边用边学。"北京是中国的首都""水在 100 度沸腾"这些事实，存在 FFN 的权重里，不在 Attention 层。
 
-**FFN 与 Attention 的协作**：
+**Attention 和 FFN 的协作**——以"中国的首都是？"为例：
 
 ```
-输入: "中国的首都是？"
-  ↓
-Self-Attention: 让"首都"重点关注"中国"
-  ↓
-FFN: 激活"中国首都"对应的知识通路（FFN 中某组权重）
-  ↓
-输出 logits: "北京"的分数最高
+"首都" 在 Self-Attention 里重点关注了 "中国"
+  → Attention 的输出告诉 FFN："激活中国首都相关的知识"
+  → FFN 中对应的权重通路被激活
+  → 输出高分给 "北京"
 ```
 
-**对应用开发者的关键事实**：
+**对应用开发者来说**：few-shot 不是教模型新知识（FFN 训练完就不变了），是帮 Attention 找到正确的 FFN 通路。模型幻觉 = Attention 指错了路，FFN 激活了错误的通路。
 
-- **few-shot 本质上是帮 attention 定位相关 FFN 通路**——不是教新知识，是激活已有的知识提取路径
-- **如果模型"幻觉"了**——通常是 attention 没找到正确的 token，FFN 激活了错误的通路
-- **设角色、给定义**——是在 attention 层帮模型锁定正确的 FFN 通路
+#### 第 5 步：逐层抽象（Layer 堆叠）
 
-#### 7. 什么是 Layer 堆叠——多层 Transformer
+**Attention + FFN = 一个 Transformer Block。这个 Block 重复 32-80 次。**
 
-**单层 Transformer 做不了复杂推理**。模型由几十到上百层 Transformer 叠加：
+```
+Block 1: Multi-Head Attention → FFN → 输出向量
+  Block 2: Multi-Head Attention → FFN → 输出向量
+    ...
+      Block N: Multi-Head Attention → FFN → 最终向量
+```
 
-- **底层**（如第 1-10 层）：关注词的语法和表面关系
-- **中层**（如第 10-30 层）：关注语义和实体关系
-- **高层**（如第 30-80 层）：关注抽象指令和任务意图
+越深的层处理越抽象的信息：底层（1-10 层）关注词汇和表面语法，中层（10-30 层）关注语义和实体关系，高层（30+ 层）关注指令意图和任务结构。
 
-**对应用开发者的启示**：
+**CoT 有效的原因之一**：它把需要高层推理的复杂问题，拆成多个底层+中层可以处理的简单步骤。
 
-- **任务复杂度决定需要多少层**——简单任务可能只需要底层激活，复杂推理需要高层
-- **好的 prompt 同时在多层起作用**——底层看到词汇、中层看到结构、高层看到意图
-- **CoT 为什么有效**——把一个需要高层推理的问题拆成多个底层+中层的步骤
+> **下一篇会用到**：Multi-Head 解释了为什么 prompt 的不同维度会被分开处理；FFN 解释了为什么 few-shot 有效（不是教知识，是引路）；Layer 堆叠解释了为什么 CoT 拆步骤管用。
 
 ---
 
 ### 主题三：模型怎么"写"输出
 
-> **这一节回答的问题**：处理完所有层后，模型怎么把内部表示变成一个个 token 输出？
+> 回到前面那条管线——每个 token 在一层层的 Self-Attention + FFN 中不断聚合上下文信息。**对"下一个 token 该是什么"这个问题，模型只需要看最后一个位置的输出向量。** 因为 Causal Mask 的作用，这个向量已经通过每一层的 Attention 聚合了它前面所有 token 的信息——整段 prompt 被逐层提炼后，浓缩在了这 4096 维里。下面是把它变成具体下一个 token 的机械流程：投影到词表 → 转成概率 → 选一个 → 拼回输入循环。
 
-#### 8. 什么是自回归生成 + Softmax + Sampling——"逐 token 输出"的完整机制
+#### 第 6 步：投影到词表（LM Head）
 
-**核心事实**：LLM 不是"读完 prompt 后一次性写出答案"。它是**一个字一个字地生成**，每次只生成一个 token（一个词或一个字符片段），然后把这个新 token 加回去，再生成下一个。
+最后一个 token 的向量（4096 维，以 LLaMA-3 8B 为例）需要变成词表中每个候选 token 的得分。词表通常有 10-20 万个 token，靠一层矩阵乘法完成：
 
-**举个例子**——你想让模型回答"中国的首都是哪座城市？"：
+```
+最后一个 token 的向量（4096 维）
+  ↓ × W_lm_head（4096 × 128256 的大矩阵）
+  → logits（128256 维）——每个位置 = 一个候选 token 的原始得分
+```
+
+这一步叫 **LM Head（语言模型头）**，就是把模型内部表示翻译成每个候选 token 的得分。
+
+#### 第 7 步：从得分到概率（Softmax + Temperature）
+
+logits 是原始分数，值有大有小。Softmax 把它们转成总和 = 1 的概率分布：
+
+```
+logits: [2.5, 1.8, 1.2, 0.5, -1.0]     ← 5 个候选 token 的原始分数
+  ↓ softmax
+probs:  [0.65, 0.32, 0.18, 0.09, 0.02]  ← 概率分布，总和 = 1
+```
+
+**Temperature** 控制分布的集中度：T 越低，高分 token 的优势被放大，输出更确定；T 越高，分布更平均，更多候选有机会被选中。
+
+#### 第 8 步：选一个 token（Sampling）
+
+按概率随机选——得分最高的最可能被选中，但**不是 100%**。这正是同样的 prompt 每次输出可能不同的原因。
+
+实际 API 通常叠加 top_p（累积概率截断，候选概率累加到 p 后截断）和 top_k（只保留前 k 个候选），避免选中概率极低的离谱 token。
+
+#### 第 9 步：拼回输入，循环（自回归）
+
+选中的 token 拼到输入末尾，整个序列重新跑一遍模型，生成下一个：
 
 ```mermaid
 flowchart LR
@@ -403,245 +444,26 @@ flowchart LR
     T3 -- 拼到末尾 --> P4["prompt + 北 + 京 + 市"]
     P4 -- 生成 --> E["END"]
     E --> Result["最终输出: 北京市"]
-
-    style P fill:#f0f0f0,stroke:#666
-    style P2 fill:#f0f0f0,stroke:#666
-    style P3 fill:#f0f0f0,stroke:#666
-    style P4 fill:#f0f0f0,stroke:#666
-    style T1 fill:#fff3e0,stroke:#f57c00
-    style T2 fill:#fff3e0,stroke:#f57c00
-    style T3 fill:#fff3e0,stroke:#f57c00
-    style E fill:#ffebee,stroke:#c62828
-    style Result fill:#e8f5e9,stroke:#388e3c
 ```
 
-**递推关系**：
+每一步的输入 = 上一步的输入 + 上一步的输出。这就是"自回归"——用自己的输出来决定下一步。
 
-- 第 1 步的输入 = P（prompt），输出 = T1（北）
-- 第 2 步的输入 = **P + T1**（= P2），输出 = T2（京）
-- 第 3 步的输入 = **P + T1 + T2**（= P3），输出 = T3（市）
-- 每一步的输入 = **上一步的输入 + 上一步的输出**
+这个循环什么时候停？有三个机制，优先级从模型自身到调用方：
 
-这就是 "**regressive（回归）**" 的本意——**用自己之前的输出回归（成为）下一步的输入**。
+- **EOS（End of Sequence）**：模型在训练时学会了输出一个特殊的"结束符" token。一旦生成 EOS，循环自然终止——图里的 `END` 就是它
+- **max_tokens**：调用方设的硬上限。哪怕模型还没输出 EOS，达到这个上限也强制截断——你看到的"输出被截断"多半是撞了这个
+- **stop sequences**：你指定的停止串（如换行、某个 JSON 结束符）。模型一旦生成这个串就停，常用来精确控制输出格式
 
-**这就是"自回归"（autoregressive）**：
+> **对开发者的意义**：输出"没说完"通常不是模型 bug，是 max_tokens 太小或 EOS 提前触发；想让它在某处停，用 stop sequences 比靠 prompt 求它更可靠。
 
-- **auto** = 自己
-- **regressive** = 回归（用自己之前的输出作为输入）
+#### 对应用开发者来说，这四步串在一起意味着什么
 
-每生成一个新 token，模型都把"目前为止生成的所有内容"当作新的输入，再决定下一个 token。
+1. **输出越长越慢**——每个新 token 都要把整段序列重跑一遍模型
+2. **CoT 有效**——中间的推理 token 进入上下文，后续生成能看到前面的推理步骤
+3. **prompt 开头影响每一个后续输出**——每个 token 都依赖前面所有 token
+4. **T 值控制输出风格**——代码/数学用 T=0（确定），对话用 T=0.7-1.0（自然），创意写作用 T=1.5+（多样）
 
-#### Softmax + Sampling：怎么"选"下一个 token
-
-模型处理完所有层后，输出**一个向量**，对下一个 token 做选择：
-
-```
-logits（最后一层的原始分数）: [2.5, 1.8, 1.2, 0.5, -1.0]  # 5 个候选 token 的分数
-       ↓
-Softmax 转成概率: [0.65, 0.32, 0.18, 0.09, 0.02]  # 总和为 1
-       ↓
-采样（Sampling）: 按概率选一个 → "今天"
-```
-
-**Temperature** 控制 Softmax 的"锐度"：
-
-```
-T = 0.1: 极度集中（概率都压在最高分上）  → 输出确定
-T = 1.0: 标准（按训练分布）              → 自然
-T = 2.0: 几乎均匀（高分的优势被稀释）    → 输出多样
-```
-
-#### 为什么"评分并行"和"选 token 串行"要分开看？
-
-```python
-# 伪代码：单步生成（看起来简单，但内部有并行 + 串行两部分）
-
-# === 并行阶段（GPU 一次性算完所有候选 token 的概率）===
-# 假设词表有 10 万个 token
-logits = model.forward(input_ids)        # GPU 并行：所有 token 的分数
-probs = softmax(logits / temperature)    # GPU 并行：所有 token 的概率
-# 此时：probs[0]=0.02, probs[1]=0.15, probs[2]=0.40, ... 10 万个值
-# 全部算完了
-
-# === 串行阶段（按概率选 1 个 token）===
-top_k_filter = probs.top_k(50)           # 选 top 50
-next_token = sample(top_k_filter)         # 选 1 个
-# 必须等这一步完成才能开始下一步
-```
-
-**"并行"和"串行"在不同层次**：
-
-- **GPU 算子层**：一次 attention、一次 softmax 都是**矩阵并行**
-- **自回归 token 层**：每生成 1 个新 token 都要等上 1 个完成，**这是串行的**
-
-**KV Cache 的存在理由和"并行"无关**——它解决的是另一个问题：避免重算历史 token 的 K 和 V。具体看 §2 KV Cache。
-
-#### 为什么这对你重要？
-
-1. **每个 token 依赖前一个 token**——但**不是简单串行**。现代 LLM 在每一步的"评分阶段"是 GPU 并行的，但在"选 token 阶段"是串行的
-2. **每一步都重新跑 attention**——所以**输出越长越慢**（自回归的 token 越多，attention 计算越多）
-3. **生成的每个 token 都进入"对话历史"**——你的 prompt 在 KV Cache 里被反复读取
-4. **CoT（思维链）有效**——因为每一步推理的 token 都进入 context，后续生成能看到前面的推理
-
-**Temperature 选择**：
-- **T=0**：代码生成、数学（要稳定）
-- **T=0.7-1.0**：自然语言生成（要自然）
-- **T=1.5+**：创意写作（要多样性）
-
-#### 9. 自注意力 vs 自回归：两个容易混淆的概念
-
-**一句话区分**：
-
-- **自注意力（Self-Attention）** = 模型**怎么读** context 的机制（"看哪些 token"）
-- **自回归（Autoregressive）** = 模型**怎么写**下一个 token 的策略（"按什么顺序生成"）
-
-它们描述的是**两个不同维度**的事情：
-
-| 维度 | 自注意力 (Self-Attention) | 自回归 (Autoregressive) |
-|------|--------------------------|--------------------------|
-| **回答的问题** | 处理一个 token 时，**应该看其他哪些 token**？ | 生成下一个 token 时，**按什么顺序**？ |
-| **作用阶段** | 处理 input 的 attention 计算阶段 | 输出 token 的生成阶段 |
-| **方向性** | **双向**（每个 token 看所有其他 token）| **单向**（每个新 token 只能看自己和之前的） |
-| **类比** | 读一篇文章时"反复回看上下文" | 写作时"从左到右一个一个字写" |
-| **对应 prompt 工程** | 决定"角色设定/few-shot 怎么影响理解" | 决定"CoT 怎么逐步展开" |
-
-**自注意力的方向性问题——Causal Mask**：
-
-虽然叫"自"注意力，但标准 Self-Attention 是**双向**的——每个 token 可以看所有其他 token（包括未来位置）。
-
-但生成时是**单向的**——因为生成下一个 token 时未来还不存在。这个单向性不是 Self-Attention 本身的特性，是通过 **Causal Mask（因果掩码）** 强制实现的：
-
-```python
-# 训练和理解时用双向 Self-Attention
-attention_scores = Q @ K.T  # 双向：每个 token 跟所有 token 算相似度
-
-# 生成时用 Causal Mask 变成单向
-mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=1)  # 上三角
-attention_scores = attention_scores.masked_fill(mask, -inf)
-# 现在 "苹果" 看不到 "很" 之后的 token
-```
-
-**对应现象速查表**：
-
-| 现象 | 跟 Self-Attention 有关 | 跟自回归有关 |
-|------|----------------------|--------------|
-| 模型"理解"上下文（角色设定、Few-shot） | ✅ | |
-| 上下文长注意力分散（KV Cache 增长） | ✅ | ✅（每步重算） |
-| CoT 思维链有效 | | ✅（中间步骤可被后续看到） |
-| 上下文太长变慢 | ✅ | ✅ |
-| 模型按 token 一个一个输出 | | ✅ |
-| 推理模型慢（生成思考 tokens） | | ✅ |
-
----
-
-### 主题四：现代 LLM 为什么都是 Decoder-Only
-
-> **这一节回答的问题**：在原始 Transformer 论文（2017）中，模型分两部分：**Encoder**和**Decoder**。但今天你用的所有主流大模型（GPT-4/5、Claude 4、Gemini、DeepSeek-V3、Qwen3、LLaMA-4）**都是 Decoder-Only**——这是为什么？
-
-#### 10. 一句话区分
-
-- **Encoder（编码器）** = **读** context 的组件——把输入"理解"成一个向量表示
-- **Decoder（解码器）** = **写**输出的组件——基于已读到的内容，**逐 token 生成**回答
-- **Encoder-Decoder** = 两者都有（原始 Transformer）
-- **Decoder-Only** = 只要 Decoder（现代所有 LLM）
-
-#### 原始 Transformer：Encoder-Decoder 架构
-
-```mermaid
-flowchart LR
-    subgraph Encoder[Encoder: 编码器]
-        E1["读完整 input<br/>(双向 attention)"]
-        E1 --> E2["输出: 一组向量<br/>(代表 input 的'理解')"]
-    end
-
-    subgraph Decoder[Decoder: 解码器]
-        D1["基于 input 的理解<br/>(cross-attention)"]
-        D1 --> D2["+ 自回归生成<br/>(单向 attention)"]
-        D2 --> D3["输出: 一个 token"]
-    end
-
-    E2 -.cross-attention.-> D1
-
-    style E1 fill:#e1f5fe,stroke:#0288d1
-    style D2 fill:#fff3e0,stroke:#f57c00
-```
-
-**关键特征**：
-
-- **Encoder**：用**双向** Self-Attention——每个 token 能看所有其他 token（包括未来位置）
-- **Decoder**：用**单向** Self-Attention（Causal Mask）+ **Cross-Attention**（关注 Encoder 的输出）
-
-**典型应用**：翻译（"Hello" → "你好"）、摘要（长文 → 短文）——这类"输入完整、输出也完整"的任务
-
-#### 现代 LLM：Decoder-Only 架构
-
-```mermaid
-flowchart LR
-    subgraph Decoder[Decoder-Only]
-        D1["读 prompt<br/>(单向 attention)"]
-        D1 --> D2["自回归生成<br/>每步输出一个 token"]
-        D2 --> D3["token 拼到末尾重跑"]
-    end
-
-    style D1 fill:#fff3e0,stroke:#f57c00
-    style D3 fill:#ffebee,stroke:#c62828
-```
-
-**关键特征**：
-
-- **只有 Decoder**——Encoder 那一半被砍掉
-- **仍然用单向** Self-Attention（Causal Mask）
-- **没有 Cross-Attention**——不需要，因为没有"独立"的输入要关注
-- 输入和输出**用同一套机制**处理——把 prompt 也当作"还没生成完的输出"的一部分
-
-#### 为什么现代 LLM 几乎都选 Decoder-Only？
-
-| 原因 | 解释 |
-|------|------|
-| **1. 训练目标统一** | Decoder-Only 的训练目标就是"预测下一个 token"——所有文本（包括 prompt、回答、代码、对话）都可以塞进同一个目标，无需区分"输入"和"输出" |
-| **2. 涌现能力强** | 扩大规模时 Decoder-Only 出现了"涌现能力"（in-context learning、chain-of-thought、function calling），Encoder-Decoder 没有这种涌现 |
-| **3. 数据利用率高** | 同一段文本既可以当"输入"（理解任务）又可以当"输出"（生成任务），训练数据利用率翻倍 |
-| **4. Scaling 友好** | Decoder-Only 的 scaling law 更清晰——参数量/数据量/性能三者的关系更可预测 |
-| **5. 工程简单** | 只有一套模型架构，无需考虑"何时用 encoder 何时用 decoder" |
-
-#### 历史上的"决胜"
-
-- **2018-2019：Encoder-Decoder 时代**（T5、BART）——翻译/摘要很强
-- **2020 之后：Decoder-Only 时代**——GPT-3（175B）证明超大 Decoder-Only 全能
-- **现在**：所有主流 LLM（GPT-4/5、Claude 4、Gemini、DeepSeek-V3、Qwen3、LLaMA-4、Mistral 3）都是 Decoder-Only
-
-#### 实际开发中的意义
-
-**作为应用开发者，你不需要在 Encoder / Decoder 之间选**——主流 API（OpenAI、Anthropic、Google、DeepSeek）都给你 Decoder-Only 的统一接口：
-
-```
-input:  prompt
-output: 生成的 token（逐个）
-```
-
-但理解这个区别能帮你理解：
-
-- **为什么所有 API 都是"流式输出"**——Decoder-Only 自回归生成的天然特性
-- **为什么 encoder 风格的"理解"任务也能用 LLM 做**——Decoder-Only 的 Self-Attention 权重本身是**双向**的（任意两个 token 之间都能算相似度），只是在"生成"模式下加了 Causal Mask 变成单向。在做"理解"任务（分类、总结、抽取）时，可以直接**暴露全部 prompt 让模型做双向 attention**，不需要生成多个 token——这就相当于把 Decoder-Only 当 Encoder 用。详见上面"双向能力 vs 单向约束"的讨论。
-- **为什么 prompt 中加 context 能让模型"理解"更好**——本质上是 Decoder-Only 的 attention 在 prompt 部分做了"理解"工作
-
-#### 总结成一张图
-
-```mermaid
-flowchart TB
-    subgraph 原始Transformer[原始 Transformer: Encoder-Decoder]
-        E1[Encoder<br/>双向 attention<br/>读 input] --> D1[Decoder<br/>单向 attention + cross-attention<br/>生成 output]
-    end
-
-    subgraph 现代LLM[现代 LLM: Decoder-Only]
-        D2[Decoder<br/>单向 attention<br/>读 + 写 同一个组件]
-    end
-
-    Q[2017-2019: 翻译/摘要等<br/>需要明确分离'输入'和'输出'] --> 原始Transformer
-    R[2020+: 大规模涌现<br/>统一目标 训练数据利用率高] --> 现代LLM
-```
-
-**结论**：现代 LLM 选 Decoder-Only 不是因为"更好"，是因为"更通用、更适合大规模训练"——一个架构既能做理解也能做生成，还能通过 prompt 在两者间切换。
+> **下一篇会用到**：角色设定、Few-shot、CoT、分隔符等提示词工程技巧，本质上都是在引导 QKV/Attention/FFN/自回归运作。看完这篇前，确认你理解了这四样东西各自在管线里的位置。
 
 ---
 
@@ -665,91 +487,74 @@ Self-Attention 的计算方式决定了：
   → 每个 token 的 attention 分数 = Q · K（query 和所有 key 的相似度）
 
 结合起来：
-  第 1 步：输入 [t1, t2, t3]，算 K[t1], K[t2], K[t3]
-  第 2 步：输入 [t1, t2, t3, t4]
+  第 1 轮：输入 [t1, t2, t3]，算 K[t1], K[t2], K[t3]
+  第 2 轮：输入 [t1, t2, t3, t4]
      → 需要 K[t1], K[t2], K[t3], K[t4]
-     → 但 K[t1], K[t2], K[t3] 在第 1 步已经算过了！
+     → 但 K[t1], K[t2], K[t3] 在第 1 轮已经算过了！
 
-结论：如果不缓存，每步都要重算所有历史的 K 和 V。
+结论：如果不缓存，每轮都要重算所有历史的 K 和 V。
 ```
 
-**这个"重算"的成本有多大？**
+这个"重算"的成本有多大？
 
-```
-第 1 步：算 K[t1], K[t2], K[t3]                     → 3 次 K 投影
-第 2 步（没缓存）：重算 K[t1], K[t2], K[t3] + 算 K[t4] → 4 次 K 投影
-第 3 步（没缓存）：重算 K[t1], K[t2], K[t3], K[t4] + K[t5] → 5 次 K 投影
+第 1 轮：算 K[t1], K[t2], K[t3]                         → 3 次 K 投影
+第 2 轮（没缓存）：重算 K[t1], K[t2], K[t3] + 算 K[t4]     → 4 次 K 投影
+第 3 轮（没缓存）：重算 K[t1..t4] + 算 K[t5]              → 5 次 K 投影
 ...
-第 N 步（没缓存）：算 N + 1 个 K 投影
+第 N 轮（没缓存）：算 N+2 个 K 投影
 总计算量：3 + 4 + 5 + ... + (N+2) = O(N²)  ← 不可接受
 
 有 KV Cache：
-第 1 步：算 K[t1], K[t2], K[t3] → 缓存
-第 2 步：只算 K[t4] → 追加到缓存
-第 3 步：只算 K[t5] → 追加到缓存
+第 1 轮：算 K[t1], K[t2], K[t3] → 缓存
+第 2 轮：只算 K[t4] → 追加到缓存
+第 3 轮：只算 K[t5] → 追加到缓存
 ...
-总计算量：N  → 可接受
-```
+总计算量：≈ N   ← 可接受
 
-**KV Cache 的存在解决了 O(N²) 重算问题**，但它带来了新的问题——**显存占用随 token 数线性增长**。
+KV Cache 用一个显存问题换掉了一个计算问题——**代价和收益都是 O(N) 级别的**。这就是为什么它叫"连接架构和工程的关键概念"。
 
-这就是为什么说 KV Cache 是"连接架构和工程的关键概念"——它用一个显存问题换掉了一个计算问题，**代价和收益都是 O(N) 级别的**。空间换时间的思想。
+### Prefill 和 Decode：KV Cache 生命周期中的两个阶段
 
-### Prefill 和 Decode 是两阶段
-
-KV Cache 的生命周期分为两个截然不同的阶段：
+KV Cache 不是"一直匀速增长"——它的生命周期分为两段：
 
 ```mermaid
-flowchart TB
-    subgraph Prefill[Prefill 阶段]
-        A["输入: 整个 prompt<br/>(比如 1000 tokens)"] --> B["一次性算出所有 K, V<br/>建立初始 KV Cache"]
-        B --> C["特征: Compute-bound<br/>GPU 算力是瓶颈"]
-        C --> D["耗时: 一次性，<br/>与 token 数成 O(N²)"]
+flowchart LR
+    subgraph Prefill["阶段一：Prefill（填充）"]
+        A["一次性吞入整个 prompt<br/>并行算出所有 token 的 K,V"] --> B["KV Cache 从空到满"]
     end
 
-    subgraph Decode[Decode 阶段]
-        E["输入: 1 个新 token"] --> F["只算这个 token 的 K, V<br/>拼到现有 KV Cache 末尾"]
-        F --> G["特征: Memory-bandwidth bound<br/>显存带宽是瓶颈"]
-        G --> H["耗时: 每步很慢，<br/>且 KV Cache 越大越慢"]
+    subgraph Decode["阶段二：Decode（解码）"]
+        C["每次只进 1 个新 token<br/>只算这 1 个的 K,V 然后追加"] --> D["KV Cache 逐步变大"]
     end
 
-    Prefill -->|处理完成<br/>→ 开始生成| Decode
-    Decode -->|生成下一个 token| Decode
+    Prefill -->|prompt 处理完，开始生成| Decode
+    Decode -->|每生成一个 token，再进下一轮| Decode
 
     style Prefill fill:#e1f5fe,stroke:#0288d1
     style Decode fill:#fff3e0,stroke:#f57c00
 ```
 
-| 阶段 | Prefill | Decode |
-|------|---------|--------|
-| **做什么** | 处理整个 prompt，建立 KV Cache | 一个个生成新 token，追加到 KV Cache |
-| **输入量** | 整个 prompt（1000+ tokens） | 1 个 token |
-| **计算模式** | 矩阵乘法，GPU 并发算所有 token | 1 个 token 的 QKV，之后读取整个 KV Cache |
-| **瓶颈** | **Compute-bound**（GPU 算力利用率高） | **Memory-bandwidth bound**（GPU 算力闲置，卡在搬运数据） |
-| **KV Cache 变化** | 从空到充满 | 逐步增长 |
-| **对延迟的影响** | prompt 越长→prefill 越久 | 已生成的 token 越多→decoder 越慢 |
-| **对成本的影响** | 一次性，但长 prompt 很贵 | 每步累加，输出越长越贵 |
+两个阶段的瓶颈完全不同：
 
-### Decode 阶段为什么越来越慢
+| | Prefill | Decode |
+|---|---|---|
+| **做什么** | 一次处理整个 prompt | 一轮生成一个 token |
+| **计算量** | 所有 token 并行算，GPU 跑满 | 只算 1 个 token，GPU 大部分时间闲着 |
+| **真正的瓶颈** | **GPU 算力**——prompt 越长越久 | **显存带宽**——历史 KV Cache 越大，从显存搬到计算单元越慢 |
+| **延迟感受** | 一次性开销（长 prompt 会明显） | 每个 token 都慢一点，越往后越慢 |
+| **复杂度** | **O(N²)**（N 个 token 两两算 attention） | **O(N)**（每步算 1 个 token，但要读全部历史） |
 
-是的——你每生成一个新 token，"已生成的 token 数"增加 1，KV Cache 体积增加一层（模型有 N 层，所以是 N 个 K, V 向量）。
+三笔账要分开看，别以为"有了 KV Cache 一切都线性了"：
 
-生成第 100 个 token 时，需要**读取 99 个历史 token 的 KV Cache**（约 200 万+ 个数值）。生成第 1000 个 token 时，需要 **读取 999 个历史 token**。
+- **Prefill 计算量 O(N²)**：prompt 里 N 个 token 两两算 attention 相似度，N 翻倍成本约翻 4 倍——这就是 input token 也收费、长文档首 token 明显卡顿（TTFT 高）的原因
+- **Decode 每步 O(N)**：每生成一个 token，要和它前面的全部历史做 attention，历史越长单步越慢
+- **KV Cache 显存 O(N)**：缓存体积随历史 token 数线性增长（见上面的公式）
 
-**关键在于 Decode 阶段的计算特点**：
+Prefill 的 O(N²) 是 KV Cache 救不了的——缓存解决的是"重算"，不是"首次算"。这也是为什么长 prompt 的首 token 延迟天然高，跟 MLA 压缩 KV Cache 不是一回事。
 
-```
-Decode 阶段的 Attention 计算：
-  attention = softmax(Q_new @ K_cache^T) @ V_cache
+Decode 阶段为什么越往后越慢？每生成一个 token，"已生成的 token 数"就 +1，KV Cache 体积就大一圈。生成第 100 个 token 时要读 99 个历史的 K,V；生成第 1000 个时要读 999 个。计算量不大（Q 只有 1 个），但**搬运数据的时间越来越长**——GPU 大部分时间在等数据，不是在算。
 
-  Q_new:    [1, head_dim]           ← 新 token 的 Query
-  K_cache:  [seq_len, head_dim]     ← 整个历史（不断增长）
-  V_cache:  [seq_len, head_dim]     ← 整个历史（不断增长）
-```
-
-这个矩阵乘法的**计算量很小**（1 × seq_len × head_dim），但**数据量很大**（seq_len 越长，从显存搬到 GPU 核心的数据就越多）。
-
-**GPU 的利用率**在 Decode 阶段非常低——因为大部分时间花在**等数据从显存搬过来**，而不是**真的在算**。
+> **对你来说这意味着什么**：尽量让模型输出精炼。不是怕 token 贵，是每多生成一个 token 都让下一个 token 更慢——不是因为模型在想，是因为显存在搬。
 
 ### KV Cache 的显存成本公式
 
@@ -777,33 +582,30 @@ KV Cache 显存 = 2 × L × H × D × S × bytes_per_element
 - 长上下文 API 价格高（需要的显存是短上下文的 10-100 倍）
 - 你的并发请求会**共享服务商的显存池**——每个请求的 KV Cache 占掉一部分可用显存
 
-### 连续批处理（Continuous Batching）对 KV Cache 的影响
+> 上面的公式告诉你**一个请求占多少显存**。下一个问题自然就是：**多个请求同时跑，显存怎么分？** 这就引出了连续批处理——现代推理服务用来管理多请求 KV Cache 竞争的调度策略。
 
-> 这一节对理解"为什么并发请求越多，响应越慢"很重要。
+### 连续批处理：为什么并发越多，响应越慢
 
-现代推理服务（vLLM、SGLang、TGI）都用**连续批处理**（Continuous Batching）：
+现代推理服务（vLLM、SGLang、TGI）不会等一个请求完全生成完才处理下一个——它们用**连续批处理**：一个请求算完 1 个 token，立刻切到另一个请求算它的下一个 token，来回轮转。
 
-- 传统批处理：等所有请求的生成都完成，再处理下批
-- 连续批处理：一个请求生成完 1 个 token 后立即处理其他请求的 token
-
-**KV Cache 的影响**：
+**但这跟 KV Cache 有什么关系？** 每个并发请求都需要自己在 GPU 显存里的一份 KV Cache。连续批处理意味着多个请求的 KV Cache **同时占着同一张 GPU 的显存**。
 
 ```
-显存池 = 服务商单张 GPU 的显存（比如 A100 80GB）
+一张 A100 GPU 有 80GB 显存
 
-并发 10 个 20K token 的请求：
-每个请求的 KV Cache = 5.9 MB × 20K ≈ 120 GB
-10 个请求 = 1200 GB → 远超 80GB → 这 10 个请求不能同时处理
+10 个请求，每个 20K token：
+  每个请求的 KV Cache ≈ 5.9 MB × 20K ≈ 118 GB
+  总计 ≈ 1180 GB → 远超 80GB → 放不下，必须排队
 
-并发 5 个 2K token 的请求：
-每个请求的 KV Cache = 5.9 MB × 2K ≈ 12 GB
-5 个请求 = 60 GB → 可以在 80GB 显存中同时处理
+5 个请求，每个 2K token：
+  每个请求的 KV Cache ≈ 5.9 MB × 2K ≈ 12 GB
+  总计 ≈ 60 GB → 可以在 80GB 里同时处理
 ```
 
-这就是为什么：
-- 服务商限制最大并发连接数
-- **长 prompt + 长生成 = 高延迟 + 高成本**
-- **并发查询短任务比并发查询长任务更省钱**
+**结论**：并发限制的本质不是 CPU 不够用，是**显存放不下那么多份 KV Cache**。所以：
+- **长上下文请求不仅自己贵，还挤占其他请求的显存空间**
+- **大量短请求并发比少量长请求并发更实际**
+- **服务商限制 max_concurrency 的根源就在这里**
 
 ### Prompt Cache / Prefix Caching
 
@@ -841,312 +643,173 @@ flowchart TB
 
 ### 现代 LLM 的 KV Cache 优化（减少显存占用）
 
-为了在有限的显存中支持更长的上下文，业界做了大量优化：
+除了 Prefix Caching 这种"复用"思路，业界还从另外两个方向降 KV Cache 显存：
 
-#### 1. GQA / MLA：减少 KV Cache 存储量
+#### 1. 减少单 token 存储量
 
-DeepSeek-V3 的 MLA（Multi-head Latent Attention）和 Llama 3 的 GQA（Grouped Query Attention）都通过**共享 KV** 来减少显存占用：
+MLA（DeepSeek-V3）、GQA（Llama 3）都是通过共享或压缩 KV 来减少每 token 的显存占用。MLA 能把 KV Cache 压到标准 MHA 的 1/32，是 DeepSeek-V3 支持 128K 上下文的物理前提。**详见第三部分。**
 
-| 机制 | 原理 | KV Cache 减少倍数 | 代表模型 |
-|------|------|----------------|---------|
-| MHA（标准） | 每个 head 独立的 K, V | 1x（基线） | Llama 2 70B、GPT-3 |
-| GQA | 多个 Q head 共享一组 KV | 2-8x | Llama 3 8B/70B、Gemma 2 |
-| **MLA** | 把 KV 压缩到低维潜空间 | **32x** | **DeepSeek-V3** |
+#### 2. 提高显存利用率：PagedAttention（vLLM）
 
-#### 2. PagedAttention（vLLM）
+把 KV Cache 切成固定大小的"页"（类似操作系统的虚拟内存），消除碎片——**显存利用率从 ~40% 提升到 ~90%**。同时支持 Prefix Caching（多请求共享 system prompt 的 KV Cache 页）和动态调度。
 
-把 KV Cache 切成固定大小的"页"（类似 OS 虚拟内存）：
+#### 3. 压缩精度：KV Cache 量化
 
-- **显存利用率从 ~40% 提升到 ~90%**（消除碎片）
-- 支持 **Prefix Caching**——多个请求共享相同 system prompt 的 KV Cache
-- 支持 **Continuous batching**——动态调度 KV Cache 页
-
-### 3. KV Cache 量化
-
-把 FP16（16 位浮点）的 KV Cache 量化为 INT8（8 位整数）或 INT4：
+把 FP16 压缩为 INT8 或 INT4：
 
 ```
-FP16 KV Cache:   5.9 MB / token (100%)
-INT8 KV Cache:   2.9 MB / token (50%)    ← 质量损失很小
-INT4 KV Cache:   1.5 MB / token (25%)    ← 质量损失可接受
-```
-
-大多数生产推理服务默认启用 KV Cache 量化。
-
-## 工程层面的总结
-
-```
-KV Cache 是"用显存换速度"的产物：
-  ↓
-没有它：每步重算 O(N²)，再大的显存也救不了
-  ↓
-有了它：每步只需 1 个 QKV + 读取历史 K,V
-  ↓
-代价：显存占用 = O(L × H × D × S)
-  ↓
-现代优化：MLA / GQA → 减少存储
-          PagedAttention → 消除碎片
-          KV Cache 量化 → 压缩精度
-          Prefix Caching → 复用结果
+FP16:  5.9 MB / token  →  基线
+INT8:  2.9 MB / token  →  质量损失很小，生产环境默认
+INT4:  1.5 MB / token  →  质量可接受
 ```
 
 ---
 
-## 第三部分：从通用架构到 DeepSeek-V3——一个真实大模型怎么实现
+**第二部分收束**：KV Cache 的整条逻辑链
 
-前面讲了"教科书版"的 Transformer——标准 Tokenization、Self-Attention、Dense FFN。但真实的大模型会在教科书架构上做大量改造。
+```mermaid
+flowchart TB
+    A["自回归生成要求每轮重跑整个序列"] --> B["不缓存 = 重算 O(N²)<br/>不可接受"]
+    B --> C["KV Cache：历史 K,V 存起来<br/>每轮只算新 token"]
+    C --> D["代价：显存占用随长度线性增长"]
+    D --> E1["Prefill: GPU 算力瓶颈<br/>prompt 越长越久"]
+    D --> E2["Decode: 显存带宽瓶颈<br/>历史越长越慢"]
+    D --> E3["并发: 多请求抢显存<br/>长请求挤占短请求"]
+    E1 --> F1["Prefix Caching<br/>复用已算好的 prompt 前缀"]
+    E2 & E3 --> F2["减小单 token 的显存占用<br/>MLA（压缩 K,V）/ KV Cache 量化"]
 
-**为什么用 DeepSeek-V3 做对照？**
-
-1. **完全开源**——架构细节全部公开（DeepSeek-V3 Technical Report）
-2. **架构有代表性**——用了当今主流的多种优化（MLA / MoE / FP8）
-3. **正在被广泛使用**——DeepSeek App、DeepSeek API、各种开源衍生模型
-
-**真实模型 = 教科书架构 + 工程优化**。理解了这个等式，你就能把前面的核心概念（Attention、FFN 等）跟真实模型的技术选择对应起来。
-
-### DeepSeek-V3 的整体参数
-
-| 指标 | 数值 | 对比教科书标准变化 |
-|------|------|------------------|
-| **总参数** | 671B | 极大 |
-| **激活参数**（每次推理用到的） | **37B** | **只有总参数的 5.5%（MoE 效果）** |
-| 层数 | 61 层 | 标准 |
-| 隐藏维度 | 7168 | 标准 |
-| 注意力头数 | 128 头 | 标准 |
-| 专家数（MoE） | 256 路由 + 1 共享 | **关键创新** |
-| 每 token 激活专家 | 8 个 | **关键创新** |
-| 上下文窗口 | **128K** | 远超原始 Transformer |
-| 位置编码 | **YaRN**（RoPE 扩展） | RoPE + 外推 |
-| 注意力机制 | **MLA（Multi-head Latent Attention）** | **核心创新** |
-| 训练精度 | **FP8** | 前沿 |
-
-### 关键创新速览：DeepSeek-V3 在改什么
-
-在深入每个组件之前，先总览 DeepSeek-V3 对教科书的四大改动：
-
-| 教科书组件 | 标准做法 | DeepSeek-V3 的做法 | 带来的好处 |
-|-----------|---------|-------------------|-----------|
-| **位置编码** | 训练多长就只能用多长 | **YaRN 外推**：训练 4K，推理 128K | 超长上下文 |
-| **Self-Attention** | 每头独立 K,V，KV Cache 大 | **MLA**：把 K,V 压缩到低维潜空间 | KV Cache 减小 32x |
-| **FFN** | 每次推理用全部参数 | **DeepSeekMoE**：256 专家，每 token 只选 8 个 | 总参数大但激活参数小，成本低 |
-| **训练精度** | FP16/BF16 | **FP8 混合精度** | 训练成本低 |
-
-下面逐一展开。
-
-### DeepSeek-V3 各个组件的真实实现
-
-#### 1. Tokenization：用 SentencePiece
-
-DeepSeek-V3 用 **SentencePiece**（不是 GPT 的 BPE）。
-
-- **优势**：把空格当作普通字符处理，用同一套词表处理多语言
-- **代价**：英文一个词 ≈ 0.6-0.8 token，比 GPT-4o 的 BPE 更"碎片"
-- **对应用开发的启示**：从 GPT 切到 DeepSeek，**相同文本的 token 数会增加 20-30%**，成本估算需重算
-
-#### 2. Embedding：7168 维向量空间
-
-每个 token 映射成 7168 维浮点数向量。
-
-- **比 GPT-4 推测的 12288 维小**——因为 MoE 把"知识"分散到专家 FFN 里，embedding 不需要装那么多
-- **词表大小 100K+**——支持多语言
-
-#### 3. Positional Encoding：YaRN（RoPE 扩展）
-
-DeepSeek-V3 用 **RoPE**（旋转位置编码），但支持到 128K 上下文，远超训练时的 4K。
-
-**怎么做到的？**
-
-- 训练时只用 4K 上下文训练位置编码
-- 推理时用 **YaRN** 外推到 128K
-- 核心思想：**对长距离的 RoPE 频率做"温度缩放"**——保留近距离精度，放松远距离精度
-
-**对应用开发的启示**：
-
-- 128K 窗口**真实可用**——不是"理论上 128K 但 100K 后就不行了"
-- 但远距离仍有 Lost in the Middle 效应——关键信息仍要放靠近开头/结尾，跟位置编码优化无关
-
-#### 4. Self-Attention：MLA（Multi-head Latent Attention）——核心创新
-
-这是 DeepSeek-V3 **最重要的架构创新**。它直接回答了第二部分提出的问题——"KV Cache 到底有多贵？"和"怎么把它降下来？"
-
-**标准 MHA 的问题**：
-
-```
-标准 Self-Attention（MHA）：
-  每层每个 head 独立存 K, V
-  KV Cache = [layer, head, seq_len, head_dim]
-
-DeepSeek-V3 配置（61 层，128 头，head_dim=128）：
-  每 token 的 KV Cache = 2 × 61 × 128 × 128 × 2 bytes ≈ 4 MB
-  100K tokens → 400 GB 显存  ← 灾难
+    style A fill:#f0f0f0,stroke:#666
+    style C fill:#e1f5fe,stroke:#0288d1
+    style D fill:#fff3e0,stroke:#f57c00
+    style F1 fill:#e8f5e9,stroke:#388e3c
+    style F2 fill:#e8f5e9,stroke:#388e3c
 ```
 
-**MLA 的解法**：把 K,V 压缩到一个**低维潜空间（latent space）**。
+> **下一篇会用到**：Working Memory 截断、Lost in the Middle、压缩早期消息、Plan Mode 状态外部化等上下文工程技巧，都是围绕着 KV Cache 的显存限制和注意力分配做文章。看下一篇 Part 6 前，确认你理解了"为什么 KV Cache 是瓶颈"。
 
-```
-标准 MHA：
-  KV Cache: [layer, head, seq_len, head_dim]    ← 每个 head 独立
+---
 
-MLA：
-  KV Cache: [layer, seq_len, latent_dim=512]    ← 所有 head 共享压缩向量
-  → 比 MHA 小 128×128/512 = 32 倍
-```
+## 第三部分：教科书架构 → 真实模型
 
-**MLA 的精髓**：
+Part 1 讲了"数据在模型里怎么走"——管道里有 Tokenization、Embedding、Positional Encoding、Self-Attention、FFN、LM Head 这些零件。但在单个零件层面讲完之后，还需要退一步看**整张设计图**：一个"教科书级"的 Transformer 到底长什么样？真实模型又在哪些零件上动了手脚？
 
-- **存储**：只存低维压缩向量（KV Cache 从 4 MB/token 降到 ~130 KB/token）
-- **计算**：需要 attention 时，从压缩向量恢复出 K, V 做计算
-- **质量**：压缩有损，但通过精心设计的恢复矩阵，**质量接近标准 MHA**
+### 先明确基线：教科书 Transformer 长什么样
 
-**这对应用开发者意味着**：
+下表是 Part 1 各零件收束成的一张规范——这是后续对照真实模型时的"锚点"：
 
-- **长上下文成本大幅降低**——DeepSeek-V3 用 MLA 把 100K tokens 的 KV Cache 从 400 GB 压到 ~12 GB
-- 你的**对话可以更长**——因为服务商能承受的显存成本更低
-- **别忘了 Lost in the Middle**——MLA 只解决 KV Cache 大小问题，不解决注意力分散问题
+| 组件 | 教科书做法 | Part 1 对应位置 |
+|------|-----------|---------------|
+| **Tokenization** | BPE 分词 | 第 1 步 |
+| **Embedding** | token → 固定维度向量（如 4096） | 第 2a 步 |
+| **位置编码** | 绝对位置编码（或 RoPE），训练多长就只能用多长 | 第 2b 步 |
+| **Self-Attention** | **MHA**：每头独立 K,V，KV Cache = 层数 × 头数 × 序列长度 | 第 3 步 |
+| **FFN** | **Dense**（全连接），每次推理激活 100% 参数 | 第 4 步 |
+| **层数** | 32-80 层 Multi-Head + Dense FFN 堆叠 | 第 5 步 |
+| **训练精度** | FP16 / BF16 | — |
+| **上下文窗口** | 4K-8K tokens | — |
 
-#### 5. FFN：DeepSeekMoE——另一个核心创新
+这个基线的核心矛盾在 Part 2 已经暴露了：**序列越长，KV Cache 越大，显存扛不住。** 而且 FFN 是 Dense 的——模型多大，每次推理就算多少参数，不长的上下文也挺贵。
 
-**传统 FFN**（教科书版）：
+### DeepSeek-V3 改了教科书的哪些地方
 
-```
-FFN(x):
-  hidden = gelu(x @ W1)  # 升维到 4 倍
-  out = hidden @ W2      # 降维回原维度
-  # 每次推理都用全部参数
-```
+| 组件 | 教科书 | DeepSeek-V3 | 为什么改 |
+|------|--------|-------------|---------|
+| Tokenization | BPE | SentencePiece | 多语言统一词表，但切 GPT 时 token 数 +20-30% |
+| 位置编码 | 训练多长用多长 | **YaRN**（RoPE 外推）：训练 4K，推理 128K | 超长上下文 |
+| Self-Attention | MHA | **MLA**：K,V 压缩到共享低维向量 | KV Cache 减小 32x，长上下文从物理上变得可行 |
+| FFN | Dense（100% 激活） | **MoE**：256 专家，每 token 只激活 8 个（3.5%） | 总参数 671B，激活仅 37B，推理成本大幅下降 |
+| 层结构 | 全部 Dense FFN | 前 3 层 Dense + 后 58 层 MoE | 底层通用特征用 Dense 更稳定 |
+| 训练精度 | FP16/BF16 | **FP8** 混合精度 | 训练成本约 558 万美元（对比 GPT-4 推测超 1 亿） |
+| 上下文窗口 | 4K-8K | **128K** | 长文档/长对话不用截断 |
 
-**DeepSeekMoE**（把"知识库"拆成 256+1 个"专家"）：
+Tokenization、层结构、训练精度这三行是背景信息，你知道了就行。真正值得深入的是下面两个——它们跟你每天用模型时的"成本和能力边界"直接相关。
 
-```
-MoE_FFN(x):
-  # 1. Router 决定"这个 token 适合哪些专家处理"
-  router_scores = softmax(x @ W_router)    # 256 个专家的得分
-  selected = top_k(router_scores, k=8)      # 只选分数最高的 8 个
+### 核心创新 1：MLA——接住 Part 2 的 KV Cache 瓶颈
 
-  # 2. 只激活选中的 8 个专家
-  for expert in selected:
-    output += expert(x) * router_scores[expert]
+回忆 Part 2 的结论：KV Cache 显存随序列长度线性增长，生成越长越慢，长上下文贵得离谱。
 
-  return output
-```
+MLA 干了一件事：**不存完整的 K,V，存压缩版**。
 
-**DeepSeekMoE 与标准 FFN 的差异**：
+标准 MHA 中 128 个 head 各自存各自的 K,V——每条 K 和 V 都是完整的向量。MLA 的做法是把所有 head 的 K,V 压缩到一个共享的低维向量（latent_dim=512），Attention 计算时再从压缩向量恢复出各 head 需要的 K,V。**存的是压缩版，算的时候临时展开**——相当于 K,V 在显存里的体积缩小了 32 倍。
 
-| 维度 | 标准 Dense FFN | DeepSeekMoE |
-|------|--------------|-------------|
-| 每次激活参数比例 | **100%** | **3.5%（8/256 专家 + 1 共享）** |
-| 总参数 vs 激活参数 | 总=激活 | 总 671B，激活 **37B** |
-| 推理成本 | 与总参数成正比 | 与激活参数成正比 |
-| 训练成本 | 与总参数成正比 | 与**所有专家**的总参数成正比 |
+```mermaid
+flowchart LR
+    subgraph 标准MHA["标准 MHA"]
+        A1["128 个 head<br/>每个 head 独立存 K,V"] --> A2["KV Cache 体积<br/>= 层数 × 128 × 序列长度"]
+    end
 
-**为什么 DeepSeek-V3 的 API 便宜**？
+    subgraph MLA["MLA"]
+        B1["128 个 head 共享<br/>1 个压缩向量（512维）"] --> B2["KV Cache 体积<br/>= 层数 × 1 × 序列长度<br/>= 原来 1/32"]
+    end
 
-```
-每次推理成本 ≈ 激活参数 × 算力单价
-
-稠密模型（如 LLaMA-3 70B）：激活 70B × $X = 70BX
-MoE 模型（如 DeepSeek-V3）：激活 37B × $X = 37BX  ← 约一半
+    style 标准MHA fill:#fff3e0,stroke:#f57c00
+    style MLA fill:#e8f5e9,stroke:#388e3c
 ```
 
-这就是 DeepSeek API 能做到"白菜价"的根本原因。
+**效果**：100K tokens 的 KV Cache 从 ~400 GB 压到 ~12 GB，一张 A100（80GB）就能装下。长上下文 API 不再需要"天价显存"，价格才降得下来。
 
-**对应用开发的启示**：
+**边界**：MLA 只解决"能不能装下"的问题，不解决"能不能用好"的问题。Lost in the Middle（中间信息被忽略）是注意力机制的固有特性，跟 K,V 存多大无关。
 
-- MoE 模型 API **按激活参数定价**，不是按总参数
-- MoE 对**批量请求更友好**——多个请求可以共享专家 FFN 参数
-- **专家分工在训练中自然涌现**——某些专家专攻代码，某些专攻数学，某些专攻中文
+### 核心创新 2：MoE——为什么 API 便宜
 
-#### 6. Layer 堆叠：61 层，前 3 层是 Dense
+教科书 Transformer 的 FFN 是 Dense 的：每次推理所有参数都参与计算。参数越大，算一次越贵。
 
-DeepSeek-V3 有 61 层，但**不是所有层都用 MoE**：
+MoE 把 FFN 拆成了 256 个"专家"：
 
 ```
-Layer 1-3:    [MLA] + [Dense FFN]      ← 提取通用基础特征
-Layer 4-61:   [MLA] + [MoE FFN]        ← 按领域分工
+标准 Dense:
+  token 进来 → FFN（100% 参数参与计算）
+
+MoE:
+  token 进来 → Router 打分 → 选得分最高的 8 个专家 → 只这 8 个参与计算
 ```
 
-**为什么前 3 层用 Dense？**
+**账是这样算的**：
 
-- 底层需要稳定的"通用特征提取"——Dense FFN 更稳定
-- 高层需要按领域"专家分工"——MoE FFN 更高效
+- DeepSeek-V3 总参数 671B，但每次推理只激活 8/256 = 3.5% 的 FFN 参数
+- 加上 Attention 等固定开销，实际激活约 37B
+- 推理成本 ∝ 激活参数 → 37B 的成本跑 671B 的模型
 
-#### 7. 训练精度：FP8 混合精度
+这就像一个大楼里有 256 个部门，但每个问题只需要找最相关的 8 个部门回答。大楼的总规模可以很大，单次回答的成本却不高。**API 便宜的根本原因不是训练便宜，是推理只跑一小部分参数。**
 
-DeepSeek-V3 是**首个大规模成功训练 FP8 的大模型**。
+> **两个创新优化的是两个不同的"大小"，别混了**：
+> - **671B 是参数规模（脑容量）**——MoE 优化它，让你用 37B 的激活成本跑 671B 的模型
+> - **128K 是上下文窗口（工作台面）**——MLA 优化它，让长上下文的 KV Cache 从天价变可行
+>
+> 一个是"模型多大"，一个是"一次能处理多长"，正交的两个维度，各自被不同机制优化。下面三条结论要分清哪条对应哪根轴。
 
-| 精度 | 每参数字节数 | 说明 |
-|------|------------|------|
-| FP32 | 4 bytes | 训练标准精度 |
-| FP16 / BF16 | 2 bytes | 推理常用 |
-| **FP8** | **1 byte** | **DeepSeek 创新，显存减半** |
+### 这跟你有什么关系
 
-- 大部分计算用 FP8（快、省显存）
-- 关键部分（如 Loss 计算）保留 FP32（保证稳定）
-- 显存占用减半 → **能训练更大的模型**
-- 训练成本约 558 万美元（相比 GPT-4 推测超 1 亿美元）
+三条可以带走的结论：
 
-### DeepSeek-V3 vs 标准 Transformer 对照表
+1. **长上下文不再是你需要回避的东西**。MLA 让 128K 上下文在成本上可行，你不必为了省钱而刻意压缩 system prompt 或多轮历史
+2. **但注意力的物理特性没变**。MLA 解决的是显存问题，不是注意力衰减问题——关键信息仍然要放靠近开头或结尾，避开中间的 Lost in the Middle
+3. **看任何新模型的报告，用同一套框架**：对着教科书基线的 8 行，看新模型改了哪几行、为什么改、对你有何影响。骨架没变，变的只是个别零件的工程实现
 
-| 组件 | 教科书标准 | DeepSeek-V3 | 对应用开发者的影响 |
-|------|-----------|-------------|-----------------|
-| Tokenization | BPE | SentencePiece | 从 GPT 切 DeepSeek **token 数 +20-30%** |
-| 位置编码 | 绝对 RoPE | **YaRN（RoPE 扩展）** | **128K** 上下文真实可用 |
-| Self-Attention | MHA | **MLA** | KV Cache **减小 32x**，长上下文便宜 |
-| FFN | Dense | **DeepSeekMoE**（256 专家） | 总参数 671B，**激活仅 37B**，API 便宜 |
-| 训练精度 | FP16/BF16 | **FP8** | 训练成本低 → API 更便宜 |
-| 上下文窗口 | 4K-8K | **128K** | 长文档/长对话可处理 |
-
-### DeepSeek-V3 对 AI 应用开发者的总结
-
-四条你可以直接用的结论：
-
-1. **为什么便宜**：MoE 让激活参数仅 37B（总 671B 的 5.5%），每次推理只算激活参数
-2. **为什么能长上下文**：MLA 把 KV Cache 从 400 GB（100K tokens）压缩到 ~12 GB，显存需求降 32 倍
-3. **为什么代码/数学强**：MoE 专家在训练中自然分工，某些专家专攻代码/数学/中文
-4. **最佳实践**：放心用长 system prompt、结构化输出、长程对话、COT 思维链——MLA 和 MoE 让这些变得便宜
-
-### 小结：抽象架构 vs 真实模型
-
-| 你在文档里看到的 | 真实 DeepSeek-V3 |
-|-----------------|-----------------|
-| Tokenization（概念） | **SentencePiece**（实现） |
-| Self-Attention（MHA） | **MLA**（KV Cache 压缩 32x） |
-| FFN（单层全连接） | **DeepSeekMoE**（256 专家 + 路由） |
-| 32 层 Transformer | **61 层** Transformer |
-| FP32 / FP16 精度 | **FP8 混合精度** |
-| 4K 上下文 | **128K**（YaRN 外推） |
-
-**核心骨架不变**：
-
-```
-Tokenization → Embedding → Positional Encoding → Self-Attention + FFN × N → Output → Softmax → 自回归
-```
-
-理解了这个骨架，看任何模型的技术报告都不会迷路——只是某些组件做了工程优化（MLA 替 MHA、MoE 替 FFN）。
+> **下一篇会用到**：驾驭工程中的长程任务设计（两阶段循环、Plan Mode），底层都依赖于真实模型的工程边界——MLA 让长上下文便宜、MoE 让推理成本低、128K 让长对话可行。这一部分是为看懂驾驭工程的"为什么能这么做"打基础。
 
 ## 第四部分：工具调用（Tool Calling）——大模型原生支持的特殊机制
 
-你每天在用的 Agent 能力（让模型调工具）看起来像是模型"主动决定调外部系统"。**实际上这是大模型原生支持的一种特殊输出格式**——不是真的"调用"了什么，而是输出了一个结构化的"工具调用请求"，由你的代码负责执行。
+你每天在用的 Agent 能力（让模型"调工具"）看起来像模型主动操作了外部系统。**实际上模型没有调用任何东西——它只是输出了一段结构化的 JSON，由你的代码看到后去执行。** 这是模型训练时学会的一种"特殊输出格式"，不是魔法。
 
-## 1. 工具调用是"输出 JSON"不是"调 API"
+## 1. 工具调用 vs 结构化输出：别混
 
-**最反直觉的事实**：当模型说"我要调用 search 工具"时，它**并没有真的调用任何东西**，它只是输出了一个结构化 JSON：
+两者都输出 JSON，但约束不同：
+
+| 概念 | 特点 | 例子 |
+|------|------|------|
+| **结构化输出**（JSON mode） | 格式约束为 JSON，**内容自由** | `{"summary": "..."}` |
+| **工具调用**（Tool Calling） | 格式约束为 JSON，**且内容必须匹配工具 Schema**（name+args+类型） | `{"name": "get_weather", "arguments": {"city": "北京"}}` |
+
+关键区别：支持 tool_calls 的模型必然支持结构化输出，反之不一定——有些小模型能靠 prompt 吐 JSON，但不会被正确路由到指定工具。
+
+当模型"说要调 search"时，它输出的就是这样的 JSON：
 
 ```json
 {"name": "search", "arguments": {"query": "Transformer 架构"}}
 ```
-**这是你的代码**（LangChain、Agent 框架、或者你自己写的逻辑）**看到这段 JSON 后**，**真的去执行**那个工具。
 
-模型只负责生成 JSON，不负责真的调用外部 API。
-
-> **一个重要区分：结构化输出 ≠ 工具调用**
->
-> | 概念 | 特点 | 例子 |
-> |------|------|------|
-> | **结构化输出**（JSON mode） | 模型输出被约束为 JSON 格式，但**内容自由** | `{"summary": "..."}`、`{"tags": [...]}` |
-> | **工具调用**（Tool Calling） | 模型输出**特定的 JSON 结构**（`name`+`args`），且**与工具 Schema 绑定** | `{"name": "get_weather", "arguments": {"city": "北京"}}` |
->
-> **关键区别**：结构化输出只保证格式是 JSON，不限制内容是什么。工具调用除了格式还**约束内容必须匹配工具定义**（工具名和参数类型）。一个模型可能支持 JSON mode 但不支持 tool_calls（比如某些小模型通过 prompt 可以输出 JSON，但不会正确路由到指定工具）。**支持 tool_calls 的模型必然支持结构化输出，反之不一定。**
+**你的代码**（LangChain、Agent 框架或自己写的逻辑）看到这段 JSON 才去真的执行。模型只负责生成，不负责调用外部 API。
 
 ## 2. 大模型怎么支持工具调用——训练到推理的全链路
 
@@ -1173,24 +836,17 @@ assistant: "北京今天 22 度，晴天。"
 2. **tool_calls 的 JSON 结构长什么样**（`{"name": ..., "arguments": ...}`）
 3. **输出的 JSON 必须与工具的 JSON Schema 匹配**（参数名、类型）
 
-### 2.2 推理时发生了什么——三步骤
+这呼应了 Part 1 的"训练学、推理冻"：**会输出工具 JSON 这件事是 SFT 学来的、冻结在权重里**；而"这次具体调哪个工具"是推理时靠喂给模型的 Schema 现选的。所以你加一个新工具不用重新训练——把它的 Schema 放进 prompt 即可，模型在生成时自己选。
 
-当你在 Agent 中使用模型时，工具调用在模型内部实际经历三步：
+### 2.2 推理时：一轮工具调用 = 两次 LM Head 输出
 
-```
-第一步：你的代码把工具 Schema 拼到 System Prompt 末尾
-  system = "你是助手。可用工具：[{'name': 'get_weather', 'parameters': {'city': {'type': 'string'}}}]"
+当你在 Agent 里用模型时，一次工具调用就是 Part 1 管道（读→处理→写）跑两遍：
 
-第二步：模型进入自回归生成
-  → Self-Attention 读到工具 Schema（在 prompt 的末尾附近）
-  → FFN 激活"SFT 时学会的"工具调用通路
-  → 输出 { → 输出 "name": → 输出 "get_weather" → 输出 "arguments": → 输出 "北京"
+1. **你的代码把工具 Schema 拼到 System Prompt 末尾**，连同历史、用户问题一起发给模型
+2. **模型自回归生成**：Self-Attention 读到工具 Schema（在 prompt 末尾附近）→ FFN 激活"SFT 时学会的"工具调用通路 → LM Head 输出一段 tool_calls JSON（正是主题三"怎么选下一个 token"选到了 JSON）
+3. **你的代码看到 tool_calls → 真的去执行 → 把结果发回模型** → 模型看到结果，LM Head 再输出自然语言
 
-第三步：你的代码看到 tool_calls JSON → 真的去执行 → 把结果发回给模型
-  → 模型看到工具结果 → 输出自然语言
-```
-
-**关键**：模型**不需要真的调用 API**，它只是**选择输出一个特定格式的 JSON**。那个 JSON 怎么执行，是你的代码的事。
+完整数据流见下节 mermaid 图。**关键**：模型不需要真的调用 API，它只是选择输出一个特定格式的 JSON，怎么执行是你的代码的事。
 
 ### 2.3 模型怎么"决定"用哪个工具——注意力竞争
 
@@ -1282,42 +938,25 @@ messages = [
 | 普通 Chat 模型（V3、GPT-4o） | 直接输出 tool_calls | 快、便宜 |
 | 推理模型（DeepSeek-R1、o1） | 先输出 reasoning_content 思考，再输出 tool_calls | 准、贵 3-10 倍 |
 
-## 5. 工具调用失败的五种原因
+## 5. 常见失败原因与设计原则（一一对应）
 
-| 原因 | 表现 | 解决 |
+| 失败原因 | 表现 | 设计原则（怎么避免） |
 |------|------|------|
-| **工具描述不清楚** | 模型选错工具 | description 写具体使用场景和反例 |
-| **参数 Schema 太复杂** | 模型输出 JSON 格式错 | 参数扁平化（避免嵌套 dict） |
-| **工具太多（>20）** | 模型注意力分散 | 用 router agent 分层管理 |
-| **模型不支持工具调用** | 模型不返回 tool_calls | 换支持 tool_calls 的模型；或通过**提示词模拟**（见附注） |
-| **上下文太长 Schema 被截断** | 模型不记得有哪些工具 | 压缩上下文 |
-
-## 6. 设计原则
-
-```
-1. description 是"模型的 prompt"——越具体，模型选得越准
-2. Schema 越简单越好——扁平参数优于嵌套 dict
-3. 工具数量控制在 5-10 个——多了注意力分散
-4. 错误处理要返回给模型——让模型能根据错误调整
-5. 参数命名要清晰——"query"比"q"好
-```
+| **工具描述不清楚** | 模型选错工具 | description 写具体场景+反例，它是模型的"prompt"（呼应 2.3） |
+| **参数 Schema 太复杂** | JSON 格式错 | 参数扁平化，避免嵌套 dict；命名清晰（"query"优于"q"） |
+| **工具太多（>20）** | 注意力分散 | 控制在 5-10 个，多了用 router agent 分层 |
+| **上下文太长 Schema 被截断** | 不记得有哪些工具 | 压缩上下文（见第六部分） |
+| **工具执行出错** | 模型无法自救 | 把错误返回给模型，让它据错误调整 |
+| **模型不支持 tool_calls** | 无输出 | 换原生支持的模型，或用**提示词模拟**（见附注） |
 
 ## 小结
 
-```
-工具调用 = 模型输出结构化 JSON（tool_calls）+ 你的代码真的去执行
+工具调用 = 模型用 Part 1 学过的 LM Head 输出一段 tool_calls JSON + 你的代码真的去执行。
 
-不是模型主动调外部系统
-是模型说想做什么
-你的代码听到后真的去做
-```
-
-**5 条关键事实**：
-1. 不支持原生工具调用的模型可以通过**提示词模拟**（见附注），但精度不如原生支持
-2. 工具 description 决定模型选得对不对——这是你的 prompt
-3. JSON Schema 限制模型输出——它不会乱传参数
-4. 每次工具调用是两次 LLM 调用
-5. 推理模型调工具更准确但贵 3-10 倍
+- 不是模型主动调外部系统，是模型"说想做什么"，你的代码听到后去做
+- 选哪个工具靠 Self-Attention 在描述间竞争（2.3）→ 写好 description
+- 每轮是两次 LLM 调用，靠 `tool_call_id` 配对
+- 不支持原生的模型可用提示词模拟，但精度不如原生（见附注）
 
 > **附：提示词模拟工具调用（不原生支持 tool_calls 时的替代方案）**
 >
@@ -1351,6 +990,8 @@ messages = [
 > | 适用范围 | 仅支持 tool_calls 的模型 | 任何模型 |
 >
 > **什么时候用**：必须用不支持 tool_calls 的模型时、工具少（1-3 个）快速验证时。优先用原生，提示词模拟是备选。
+
+> **下一篇会用到**：Tool description 设计、中间件拦截、Recovery Hints 等工具设计技巧，都基于"模型输出 JSON 而非真的调用"这个核心事实。看下一篇 Part 7 前，确认你理解了：① 工具调用本质是 LM Head 输出 JSON（呼应 Part 1 主题三）；② description 决定 Self-Attention 怎么选工具（呼应 2.3）；③ 每轮是两次 LLM 调用，靠 `tool_call_id` 配对。
 
 ---
 

@@ -1,1587 +1,519 @@
 ---
 sidebar_position: 5
-description: "上下文设计是软件策略而非窗口机制。本文把上下文拆成七层并逐层给管理策略，核心是在信息充分与成本注意力之间取舍，每轮都要亲手构造而非简单拼接消息。"
+description: "Context 是软件策略不是窗口机制。两轴展开：轴 1 上下文管理技巧（分层注入、压缩分层级、Prompt Cache、token 预算、提示词组装、会话隔离、错误自愈、行为干预）；轴 2 记忆系统（分层、检索、遗忘、状态外部化、多轮设计）。"
 ---
 
-# 上下文管理篇
+# Context 篇
 
-> 本文讨论的是 Agent 系统中的"上下文设计"，而非 LLM 本身的上下文窗口机制。上下文窗口是硬件限制，上下文设计是软件策略。
+Context 是软件策略不是窗口机制。读这篇之前你应该对 Agent 大脑的循环有基本认知——本篇聚焦"每轮上下文怎么装"和"跨 session 记忆怎么管"两条主线。
 
-Agent 的每一轮 LLM 调用，都需要构造一段"当前任务需要看到的信息"。这段信息就是上下文。
-
-但**"构造上下文"远不止"把消息拼起来"那么简单**——你需要管理 Session 隔离、Working Memory 截断、超长上下文压缩、Token 预算、长期记忆分层、错误自愈、循环打断、状态外部化、PII 脱敏、Prompt Cache 优化……每一项都直接决定了 Agent 的连贯性、成本和可靠性。
-
-本文从五个部分展开：
-
-1. **用原始代码管理上下文**——不依赖框架，自己手写上下文管理的完整体系
-2. **用框架管理上下文**（LangChain 1.0 / LangGraph）
-3. **上下文的工程细节**——PII 脱敏、Prompt Cache、分层预算
-4. **状态外部化与持久化**——基于文件系统的长程记忆
-5. **常见陷阱**
-
-最后覆盖设计检查清单。
+工程化的核心拉扯有两组：
+- 信息充分 ↔ 成本 / 注意力稀释（token 预算、注意力随上下文增长而递减、KV Cache 膨胀）
+- 持久 ↔ 检索 / 遗忘（存得多检索慢、存得少上下文不够；忘得太快用户觉得 AI 失忆，忘得太慢信息污染）
 
 ---
 
-## 先建立坐标系：上下文的层次
+## 一、动机
 
-Agent 系统里的"上下文"是分层的。理解分层，才能理解每一层的设计目标：
+Context 是大脑每轮 Reason 之前组装 prompt 那一刻的工程化设计。下游连着 CoT、Tool 调用、Cache 命中、压缩触发、记忆检索。
 
-```mermaid
-flowchart TB
-    SP[System Prompt<br/>角色与行为规范] --> C[Context]
-    CH[Conversation History<br/>对话历史] --> C
-    WM[Working Memory<br/>短期工作记忆] --> C
-    RC[Retrieved Context<br/>检索到的外部信息] --> C
-    TR[Tool Results<br/>当前轮工具返回值] --> C
-    EM[Externalized State<br/>文件系统外部记忆] --> C
-    LT[Long-Term Memory<br/>长期持久化记忆] --> C
+本篇分两轴：
+- **轴 1 上下文管理技巧**：每轮 / 单 session 内的工程化（分层注入、压缩分层级、Prompt Cache、token 预算、提示词组装、会话隔离、错误自愈、行为干预）
+- **轴 2 记忆系统**：跨 session 的工程化（分层、检索、遗忘、状态外部化、多轮设计）
 
-    style SP fill:#e1f5fe,stroke:#0288d1
-    style CH fill:#f3e5f5,stroke:#7b1fa2
-    style WM fill:#fff3e0,stroke:#f57c00
-    style EM fill:#ffebee,stroke:#c62828
-    style LT fill:#e8f5e9,stroke:#388e3c
-    style C fill:#fafafa,stroke:#666
-```
-
-| 层次 | 时间跨度 | 存储位置 | 管理策略 |
-|------|---------|---------|---------|
-| **System Prompt** | 整个会话 | 引擎硬编码 + 文件动态加载 | 每次必带，前缀稳定 |
-| **Conversation History** | 当前会话 | 内存 + 可选持久化 | 滑动窗口 + 压缩 |
-| **Working Memory** | 当前会话 + 当前任务 | 从 History 中截取 | 截取最近 N 轮 |
-| **Retrieved Context** | 当前轮 | RAG 检索结果 | 按需注入，用后丢弃 |
-| **Tool Results** | 当前轮 | 消息列表 | 短期完整，长期掩码 |
-| **Externalized State** | 当前任务 | 文件系统（PLAN.md/TODO.md） | 显式读写，断点续传 |
-| **Long-Term Memory** | 跨会话 | 向量数据库 / KV 存储 | 语义检索，分层融合 |
-
-每一层都有自己的生命周期和管理策略，不能混为一谈。
+与 Agent 大脑篇的边界：
+- 大脑篇判断"压缩对思维链的破坏"是思考过程视角
+- 本篇展开"压缩算法本身 / token 预算分配 / cache 命中 / 死循环防卡"等工程细节
 
 ---
 
-## 维度一：用原始代码管理上下文
+## 二、关键判断速览
 
-### 核心矛盾
+### 轴 1 · 管理技巧
 
-上下文设计始终在解决一个矛盾：
+- 提示词组装本身是动态加载架构：`内核 \<1K token` + `AGENTS.md`（项目规范）+ `Skills`（外挂），不是单一字符串拼接（10）
+- System Prompt 按稳定性分层注入（`string[]` 数组 + `SYSTEM_PROMPT_DYNAMIC_BOUNDARY`），不拼成单一字符串
+- 工具定义全程稳定，动态增删让 cache key 失配
+- Token 预算用动态残差（`rest_tokens = context_size - max_tokens - curr_message_tokens`），不用固定配额
+- 超预算时按 User 边界整轮丢弃，不按条数丢（单条删会产生 orphan ToolResult）
+- Session 物理隔离：`map[workDir]*Session` + `sync.RWMutex`，每 WorkDir 一份独立上下文内存（11）
+- Working Memory 滑动窗口：截最近 N 条 + 预估 Token 量，超阈值即触发摘要（11）
+- 压缩分层级（5 阶段：原地缩减 → snip → microcompact → server-side → LLM summary），不上来就调 LLM
+- 双重降级压缩：物理防线先于业务逻辑，远期 Observation Masking 全量掩码 + 短期 Head-Tail Truncation（12）
+- Prompt Cache 分层：static 段跨用户稳定 / dynamic 段按会话重算 / scratchpad 不进 cache
+- 错误自愈：在 ToolResult 路径上劫持错误，分类器匹配后注入"系统救援指南"祈使句，迫 LLM 走标准排障 SOP（14）
+- 行为干预 / 防死循环：Doom Loop 指纹检测 + 在 Main Loop 尾部以 `RoleUser` 注入强力修正指令（角色权重 = 最高近因效应）（15）
 
-**更多上下文 → 模型理解更准，但成本更高、注意力被稀释、KV Cache 更大**
+### 轴 2 · 记忆系统
 
-**更少上下文 → 成本更低、响应更快，但模型可能"失忆"或理解偏差**
+- 长期记忆"索引常驻 + 全文按需"（MEMORY.md ≤200 行 / 25KB 注入 system，全文按 Prefetch 召回）
+- 记忆分四层（session / user / domain / global），每层生命周期与注入策略不同
+- 状态外部化：把宏观规划落 `PLAN.md`、粒度待办落 `TODO.md`，断点续传靠文件（13）
+- PlanMode 架构开关：简单任务不开避免官僚化，复杂任务强制注入规范（13）
+- Bootstrapping 分支：嗅 `PLAN.md`/`TODO.md` 是否存在 → A 新建 / B 断点续传不覆盖（13）
+- 记忆检索默认向量召回，辅以关键词 / 图谱混合
+- 遗忘策略三层兜底（容量上限 + 时间衰减 + 重要性淘汰 + 用户显式清除）
+- 多轮对话的 Session 是物理隔离的上下文内存空间（11）
 
-传统软件开发中几乎不存在这个问题——变量作用域是编译器管的。但在 Agent 系统中，每轮上下文需要你亲手构造。
+---
 
-### 1. 从最小化上下文管理开始
+## 三、轴 1 · 上下文管理技巧
 
-不依赖框架，核心逻辑可以拆成多个独立组件，每个组件管一件事：
+### 3.1 提示词组装的分层架构
 
-```python
-@dataclass
-class ContextConfig:
-    """上下文管理的完整配置"""
-    # Working Memory 参数
-    working_memory_limit: int = 6      # 截取最近 N 条消息
-    working_memory_token_budget: int = 4000  # Token 上限
+提示词本身就是一个动态加载架构，不是一个字符串：
 
-    # Compaction 参数
-    compaction_threshold: int = 12000  # 触发压缩的字符阈值
-    compaction_retain: int = 6        # 短期保护区大小
+| 层 | 内容 | 体积 | 生命周期 |
+|---|---|---|---|
+| 内核 | 角色定义、行为约束、CoT 触发 | `\<1K` token | 几乎不变 |
+| `AGENTS.md` | 项目规范、命名风格、协作约定 | KB 级 | 项目内稳定 |
+| Skills | 可调用的 SOP / 工具簇 | 每条 KB 级 | 按场景启用 |
 
-    # 长期记忆参数
-    enable_externalized_state: bool = True  # 是否启用 PLAN.md/TODO.md
-    plan_mode: bool = False            # 是否开启 Plan 模式
+为什么不全塞进 system prompt？全塞进字符串会导致：(a) 体积爆炸挤占 KV Cache；(b) 项目规范变更要改代码；(c) 复用性差。`PromptComposer` 在每次 `Run()` 时按 `WorkDir` 重算 System Prompt；`SkillLoader` 扫描 `.skills/**/SKILL.md` + 手写 YAML Frontmatter 解析。
 
-    # Session 参数
-    session_max_history: int = 500    # Session 最大消息数
-    session_ttl_days: int = 30        # Session 过期时间
+Eager vs Lazy 两阶段加载：
+- **元数据（name / description）** 注入 system，让 LLM 知道有哪些 Skill 可用
+- **正文（具体步骤）** 仅在 LLM 调用 `read_skill` 后注入 message
 
-    # PII 脱敏
-    enable_pii_redaction: bool = True
+当前很多实现只做 Eager Loading，省了 `read_skill` 工具但每次都付 token 代价。
+
+### 3.2 System Prompt 按稳定性分层
+
+不同稳定性内容塞进 system prompt 时该分开：
+
+| 内容类型 | 稳定性 | 进哪一段 |
+|---|---|---|
+| 组织策略、项目规范、跨用户稳定的工具描述 | 跨用户字节级稳定 | static 段（boundary 前） |
+| 当前会话状态、用户当前输入、cwd 等 | 会话 / 用户特定 | dynamic 段（boundary 后） |
+
+cc-07 用 `system: string[]` 数组，每个元素是独立的 cache entry，边界标记前是 6 个跨用户字节级稳定的静态段，边界后是会话 / 用户特定的动态段。
+
+按稳定性切块是 Prompt Cache 命中率的基础。改 static 段会让所有用户的 cache 全部失效。
+
+### 3.3 工具定义稳定常驻
+
+工具集是跨会话 / 跨用户 / 跨 turn 都不变的，放进静态段。控制可用性用 logit masking / 权限层，不用动态增删 tool definitions。动态增删会让 cache key 失配，整段前缀作废。
+
+### 3.4 Token 预算动态残差
+
+`rest_tokens = context_size - max_tokens - curr_message_tokens`
+
+scratchpad 每轮增长，历史预算每轮收缩。固定配额会被 scratchpad 增长吃掉，必须动态算。dify-05 §四 4.1 的 `_calculate_rest_token` 就是这套公式。
+
+### 3.5 Session 物理隔离与 Working Memory
+
+```go
+// 极简骨架，11
+type GlobalSessionMgr struct {
+    mu       sync.RWMutex
+    sessions map[string]*Session   // key = WorkDir
+}
+
+func (s *Session) GetWorkingMemory(limit int) []Message {
+    // 滑动窗口：截最近 N 条 + 预估 Token 超阈值即触发摘要
+}
 ```
 
-这套配置将作为参数传入所有上下文管理组件，保证它们对"截取多少、保留什么、脱敏哪些"有统一的判断。
+要点：
+- **Session = WorkDir 绑定的隔离上下文内存空间**。多 WorkDir 物理隔离（`sync.RWMutex` 保护 map）避免并发串扰。
+- **Append-only + GetWorkingMemory**：全量历史保存在 Session 内存 / `xxx.jsonl`，每轮 API 调用时通过 `GetWorkingMemory` 截取。
+- **引擎生命周期解耦**：`Run(session)` 接收外部 Session 实例，让上层决定会话隔离粒度（Claude Code 全局共享一个 WorkDir；本设计支持多目录独立会话）。
+- **孤儿 ToolResult 防护**：截断后若首条是 `RoleUser + ToolCallID`，必须舍弃——否则 API 直接 400 报 `tool message must follow assistant with tool_calls`。
 
-### 2. Working Memory：短期工作记忆的截取
+### 3.6 历史裁剪按 User 边界整轮丢弃
 
-#### 滑动窗口截取
+超 token 预算时丢哪些历史？按 User 边界整轮丢弃，保证 `(User, Assistant)` 配对完整。
 
-最朴素的策略：从 Session 的全量历史中截取最近 N 条消息。
+CoT / FC 模式依赖完整的 `(Thought, Action, Observation)` 序列，单条删除会让 LLM 看到"上一步 Action 是 X，Observation 是 Y"但 Y 和 X 已经不在同一个 User 问题了，模型无法理解。dify-05 §四 4.2 的 `AgentHistoryPromptTransform.get_prompt` 逆序遍历触达 User 边界才评估一次 token。
 
-```python
-def get_working_memory(history: list, limit: int = 6) -> list:
-    """截取最近 N 条消息作为 Working Memory。
+按条数截断 history 不处理 orphan 是常见反模式。把 ToolCall 截掉但 ToolResult 还在，API 直接 400 报错 `messages with role 'tool' must be a response to a preceding message with 'tool_calls'`。
 
-    关键：必须处理 ToolResult 孤儿问题。
-    大模型 API 强制要求消息连续性——如果 ToolCall 被截断丢弃，
-    但 ToolResult 还在，API 会直接报 400 Bad Request。
-    """
-    total = len(history)
-    if total <= limit or limit <= 0:
-        return list(history)
+### 3.7 压缩分层级
 
-    # 截取最近 limit 条
-    result = list(history[total - limit:])
+5 阶段决策链按代价递增、视野递减排序：
 
-    # 边界处理：丢弃断头的 ToolResult
-    # 如果第一条是带有 ToolCallID 的 tool result，
-    # 但对应的 ToolCall 已被截断，必须丢弃
-    while result:
-        if result[0].get("role") == "tool" and result[0].get("tool_call_id"):
-            result = result[1:]
-        else:
-            break
+| 阶段 | 操作 | 代价 |
+|---|---|---|
+| Stage 1 | O(1) 持久化超长 tool_result | 零 |
+| Stage 2 | 删除语义死分支 | 零 |
+| Stage 3 | cache-aware 旧 tool_result 清理 | 零 |
+| Stage 4 | 服务端透明 | 零 |
+| Stage 5 | 调 LLM 生成 summary | 高（~17K output tokens） |
 
-    return result
+能不调 LLM 就不调；能 cache-aware 就 cache-aware；只在前面四道防线都不够时才付出 Stage 5 的代价。
+
+诊断关键：当前是单条消息太大（Stage 1）、语义死分支（Stage 2）、跨轮累积（Stage 3）、还是整段太长（Stage 5）？诊断对了才能用对的那一层。
+
+### 3.8 双重降级压缩栈
+
+另一种视角：仿操作系统 GC 的物理防线 > 业务逻辑：
+
+```
+阶梯 1（物理）：ToolResult 超长 → `…[已被系统清理。原始长度: X 字节]…` 全量掩码
+阶梯 2（物理）：单条 >1000 字符 → Head-Tail Truncation，保头 500 + 尾 500
+阶梯 3（语义）：远期 Assistant 推理废话折叠（>200 字符）
 ```
 
-`get_working_memory` 的核心职责是"截取 + 兜底"。它不修改原始 history，只返回当前轮 LLM 需要的子集。
-
-**为什么需要 ToolResult 孤儿处理？**
-
-OpenAI / Anthropic 的 API 都要求消息按严格顺序排列：每条 `tool` 角色的消息必须有一条对应的 `assistant` 消息（携带 `tool_calls`）。如果 LLM 在第 10 轮调用了 `read_file`，到第 16 轮时你把 assistant 那条截掉了，但 tool result 还在，API 会报错："messages with role 'tool' must be a response to a preceeding message with 'tool_calls'"。
-
-这是"调包开发"时绝对接触不到的底层智慧，但它是从根源上杜绝 400 报错的关键。
-
-#### Token 感知的双维度截取
-
-按条数截取有一个明显问题：如果其中一条消息是 1 万行的 `read_file` 返回结果，即使 `limit=6` 也可能让总 Token 数瞬间超标。
-
-更稳健的做法是**条数 + Token 双维度截断**：
-
-```python
-def get_working_memory_with_budget(
-    history: list,
-    msg_limit: int = 20,
-    token_budget: int = 8000,
-) -> list:
-    """双维度截取：先按条数，再按 Token 预算。
-
-    从最新的消息开始往前填，填满预算为止。
-    """
-    result = []
-    current_tokens = 0
-
-    # 从最新到最旧遍历
-    for msg in reversed(history):
-        msg_tokens = estimate_tokens(msg)
-        if current_tokens + msg_tokens > token_budget:
-            break  # 预算用完
-        result.insert(0, msg)  # 前插保持顺序
-        current_tokens += msg_tokens
-
-    # 最后处理一次孤儿
-    while result and result[0].get("role") == "tool" and result[0].get("tool_call_id"):
-        result = result[1:]
-
-    return result
-
-
-def estimate_tokens(msg: dict) -> int:
-    """粗略估算单条消息的 Token 数。
-    英文 ~4 字符/token，中文 ~1.5 字符/token，加 10% 安全边际。
-    """
-    content = msg.get("content", "")
-    tool_calls = msg.get("tool_calls", [])
-    base = len(content) / 4
-    for tc in tool_calls:
-        base += len(tc.get("name", "")) / 4 + len(str(tc.get("args", ""))) / 4
-    return int(base * 1.1) + 5  # +5 是消息格式开销
-```
-
-### 3. Session 管理：物理隔离与持久化
-
-#### Session 实体结构
-
-```python
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import List, Dict, Any
-import threading
-
-
-@dataclass
-class Session:
-    """会话实体：维护一次人机交互的完整历史"""
-    id: str
-    work_dir: str = ""              # 绑定的物理工作区
-    tenant_id: str = ""             # 多租户隔离字段
-    user_id: str = ""
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
-    expires_at: datetime = None    # TTL 过期
-
-    history: List[Dict[str, Any]] = field(default_factory=list)
-    context: Dict[str, Any] = field(default_factory=dict)   # 会话变量（标题、偏好等）
-    metadata: Dict[str, Any] = field(default_factory=dict)  # 元数据
-
-    total_tokens_used: int = 0
-    total_cost_usd: float = 0.0
-
-    _lock: threading.RLock = field(default_factory=threading.RLock)
-
-    def append(self, *msgs: Dict[str, Any]) -> None:
-        """线程安全地追加消息"""
-        with self._lock:
-            self.history.extend(msgs)
-            self.updated_at = datetime.now()
-```
-
-#### 全局 SessionManager
-
-```python
-class SessionManager:
-    """全局会话管理器：负责多用户/多终端的物理隔离"""
-    def __init__(self):
-        self._sessions: Dict[str, Session] = {}
-        self._lock = threading.RWMutex()
-
-    def get_or_create(self, session_id: str, work_dir: str) -> Session:
-        """获取或创建会话"""
-        with self._lock:
-            if session_id in self._sessions:
-                return self._sessions[session_id]
-            sess = Session(id=session_id, work_dir=work_dir)
-            self._sessions[session_id] = sess
-            return sess
-
-    def get(self, session_id: str, current_tenant_id: str = "") -> Session:
-        """获取会话（带租户隔离检查）"""
-        sess = self._sessions.get(session_id)
-        if sess is None:
-            return None
-
-        # 租户隔离：返回 ErrSessionNotFound 而非 ErrUnauthorized
-        # 不泄露 Session 是否存在的信息，防止攻击者枚举 SessionID
-        if current_tenant_id and sess.tenant_id != current_tenant_id:
-            return None  # 不是 raise Unauthorized
-
-        return sess
-```
-
-**关键设计原则：**
-
-- **Session ID 是隔离边界**：每个用户、每个终端、每个飞书群聊对应独立 Session，互不干扰
-- **返回 None 而非抛异常**：当租户不匹配时，返回"不存在"而非"无权限"，防止攻击者通过错误类型判断 Session 是否存在
-- **读写锁保证并发安全**：飞书后台 N 个群聊同时请求，每个 Session 内部用 `RLock` 保护 history 列表
-
-#### Session 的滑动窗口裁剪
-
-```python
-def append_with_window(self, *msgs: Dict[str, Any], max_history: int = 500) -> None:
-    """追加消息并按滑动窗口裁剪"""
-    with self._lock:
-        self.history.extend(msgs)
-        # 滑动窗口裁剪
-        if len(self.history) > max_history:
-            self.history = self.history[len(self.history) - max_history:]
-```
-
-`max_history=500` 是一个平衡点：太小上下文不够，太大 Redis 存储压力大、加载慢。
-
-### 4. Compaction：阶梯降级的上下文压缩
-
-Working Memory 防的是"消息条数爆炸"，但防不住"单条消息暴击"——一次 `read_file` 读了个 1MB 的日志，即使 Working Memory 只取 6 条，其中一条 1MB 也能瞬间打穿上下文窗口。
-
-这时候需要 **Compactor（上下文压缩器）**。
-
-#### 双重降级压缩策略
-
-```python
-class Compactor:
-    """上下文压缩器：防止单次大文件输出导致 OOM"""
-    def __init__(self, max_chars: int = 12000, retain_last: int = 6):
-        self.max_chars = max_chars   # 触发压缩的字符阈值（水位线）
-        self.retain_last = retain_last  # 短期保护区大小
-
-    def compact(self, msgs: list) -> list:
-        """对消息数组执行阶梯降级压缩
-
-        三道防线：
-        1. System Prompt 永远保留
-        2. 远期历史：ToolResult 全量掩码 + Thinking 折叠
-        3. 短期保护区：超长 ToolResult 掐头去尾截断
-        """
-        if self.estimate_length(msgs) < self.max_chars:
-            return msgs  # 大多数情况的快速路径
-
-        compacted = []
-        protect_start = max(0, len(msgs) - self.retain_last)
-
-        for i, msg in enumerate(msgs):
-            # 防线 1：System Prompt 绝对不动
-            if msg.get("role") == "system":
-                compacted.append(msg)
-                continue
-
-            new_msg = dict(msg)  # 拷贝，避免污染原始引用
-            in_working_memory = i >= protect_start
-
-            # 防线 2：远期历史的 ToolResult 全量掩码
-            if msg.get("role") == "tool" and not in_working_memory:
-                if len(msg.get("content", "")) > 200:
-                    new_msg["content"] = (
-                        f"...[早期的工具输出已被系统强制清理。"
-                        f"原始长度: {len(msg['content'])} 字节]..."
-                    )
-
-            # 防线 3：短期保护区内仍超长的 ToolResult 掐头去尾
-            elif msg.get("role") == "tool" and in_working_memory:
-                content = msg.get("content", "")
-                max_keep = 1000
-                if len(content) > max_keep:
-                    head = content[:500]
-                    tail = content[-500:]
-                    new_msg["content"] = (
-                        f"{head}\n\n...[内容过长，中间 {len(content) - max_keep} "
-                        f"字节已被系统截断]...\n\n{tail}"
-                    )
-
-            # 远期 Thinking 折叠
-            elif msg.get("role") == "assistant" and not in_working_memory:
-                if len(msg.get("content", "")) > 200:
-                    new_msg["content"] = "...[早期的推理思考过程已折叠]..."
-
-            compacted.append(new_msg)
-
-        return compacted
-
-    def estimate_length(self, msgs: list) -> int:
-        return sum(len(m.get("content", "")) for m in msgs)
-```
-
-**关键设计原则：**
-
-- **死死保住 ToolCall 意图**：压缩 ToolResult 时，`tool_calls` 字段（模型的行动证据）必须保留。如果删了，模型会困惑"我刚才调过这个工具吗？"然后陷入重复调用的死循环
-- **保留 URL 和文件路径**：压缩时不要做不可逆丢弃，让 Agent 还能通过工具重新读取原始源
-- **保留错误上下文**：不要清除 Agent 的失败尝试，这些错误是宝贵的学习信号
-
-#### 为什么不能简单粗暴地删长消息？
-
-新手的第一反应："历史消息太长，直接把字数超过阈值的删掉不就行了？"
-
-**绝对不行。**
-
-ReAct 循环依赖长程逻辑链：模型在第 3 轮调了 `read_file`，结果在第 15 轮才用到。如果你把第 3 轮的 `ToolResult` 删了，模型会陷入困惑——它以为命令没发出去，会重新发起调用，从而陷入死循环。
-
-Compaction 的目标是：**丢弃冗余数据（释放内存），但死死保住意图和逻辑链**。
-
-### 5. Prompt Cache 优化
-
-Agent 系统的输入/输出 Token 比例可以高达 100:1——每生成一个回答 token 可能需要处理 100 个输入 token。**输入成本远高于输出成本**。
-
-**Prompt Cache** 是解决这个问题的关键基础设施。它的原理是把每次 LLM 计算时生成的 KV Cache 中间结果缓存起来，下次遇到相同前缀时直接复用，跳过重复计算。
-
-要让 Prompt Cache 真正生效，需要遵守几个原则：
-
-**1. 保持提示前缀稳定**
-
-```python
-# 错误：在 System Prompt 开头放秒级时间戳
-system_prompt = f"当前时间: {datetime.now()}\n你是助手..."
-
-# 正确：时间戳放到末尾，或者干脆不放
-system_prompt = "你是助手...\n\n（用户消息中的时间戳会变化，但前缀不变）"
-```
-
-**2. 上下文只追加（Append-Only）**
-
-```python
-# 错误：在循环中重排历史消息
-messages.sort(key=lambda m: m["priority"])
-
-# 正确：永远只在末尾追加
-messages.append(new_msg)
-```
-
-**3. 工具定义保持稳定**
-
-不要在运行时动态增删工具定义。需要控制工具可用性时，用 **logit 掩蔽**（在解码时屏蔽某些工具的输出概率）而不是删除工具定义——这样缓存不受影响。
-
-**4. 注意 TTL**
-
-Claude 的 Cache TTL 是 5 分钟。对于高频请求场景，保持请求间隔在 TTL 以内。
-
-### 6. PII 脱敏
-
-上下文里如果包含用户的敏感信息（信用卡号、SSN、API Key），会随着摘要、向量库、日志永久泄露。
-
-```python
-import re
-
-PII_PATTERNS = [
-    (re.compile(r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"), "[REDACTED_CC]"),  # 信用卡
-    (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[REDACTED_SSN]"),                       # SSN
-    (re.compile(r"(?i)api[_-]?key[\s:=]+[\w-]{20,}"), "[REDACTED_API_KEY]"),       # API Key
-    (re.compile(r"(?i)(password|secret|pwd)[\s:=]+\S{8,}"), "[REDACTED_SECRET]"),  # 密码
-    (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "[REDACTED_IP]"),                # IP
-]
-
-def redact_pii(text: str) -> str:
-    """在压缩摘要、存入向量库之前调用"""
-    for pattern, replacement in PII_PATTERNS:
-        text = pattern.sub(replacement, text)
-    return text
-```
-
-**关键插入点：**
-
-1. 压缩成摘要时
-2. 存入向量数据库时
-3. 写入日志时
-
-**局限性：** 正则脱敏不是万能的。`192.168.1.1` 可能是代码里的常量不是 IP；复杂的 PII 格式可能漏报。生产建议：正则作为基础防线，敏感场景用专业服务（AWS Comprehend / Google DLP）。
-
-### 7. 状态外部化（Plan Mode）：用文件系统做长程记忆
-
-短期记忆（Working Memory）解决了"单次对话内的信息管理"，但解决不了"跨越好几天、几十个子模块重构"的超长任务。
-
-传统的 AI 框架会在内存里维护复杂的状态机或图数据库，但这太重了，而且人类无法干预。
-
-**驾驭工程的解法：把状态写到文件系统里。**
-
-```python
-class PlanModeComposer:
-    """Plan Mode 下的 Prompt 组装器：强制 Agent 使用 PLAN.md / TODO.md"""
-
-    def build_system_prompt(self, work_dir: str) -> str:
-        base = "# 核心身份\n你是一个高级软件工程师助手。\n\n"
-
-        if self.plan_mode:
-            base += """
-# 长程任务强制规范 (Plan Mode: ON)
-
-收到指令后，你必须、且只能按照以下顺序执行：
-
-**[STEP 1: 强制环境嗅探 (Bootstrapping)]**
-- 使用 bash 检查工作区根目录下是否已存在 PLAN.md 和 TODO.md
-- 分支 A (全新任务)：文件不存在 → 依次创建
-  1. 先创建 PLAN.md，写下你的理解、架构设计、技术选型
-  2. 再创建 TODO.md，拆解具体的可执行步骤（使用 Markdown Checkbox）
-- 分支 B (断点续传)：文件已存在 → 绝对不要覆盖
-  1. 立即 read_file 阅读 PLAN.md 了解全局目标
-  2. 阅读 TODO.md 找到第一个未完成的 [ ] 任务，从那里继续
-
-**[STEP 2: 严格的单步执行与实时打勾]**
-- 每完成一个子任务，必须立即停下来，用 edit_file 将 TODO.md
-  中对应的行修改为 - [x]
-- 绝对不允许"一口气写完所有代码最后再打勾"
-
-**[STEP 3: 迷失时的自救]**
-- 如果遇到报错或不知道下一步，立即 read_file 重新读取 TODO.md 确认位置
-"""
-        return base
-```
-
-**为什么用文件做记忆？**
-
-| 优势 | 说明 |
-|------|------|
-| **透明可观测** | VS Code 直接打开 TODO.md，Agent 当前在干嘛、接下来做啥一目了然 |
-| **零成本 HITL** | Agent 走偏了？手动改 TODO.md，Agent 下次读取时就接受纠偏 |
-| **天然持久化** | 进程崩溃 100 次，TODO.md 还在，重启后无缝恢复 |
-| **极致省 Token** | 长程规划不塞上下文，需要时一次 read_file 唤醒 |
-
-**Plan Mode 是开关而非强制**：简单任务（"帮我查天气"）不要开启 Plan Mode，否则 Agent 会变成"繁文缛节的官僚"——任何命令都先创建 PLAN.md 写"我的计划是运行 date"。
-
-### 8. 错误自愈：上下文感知的 Recovery Hints
-
-当 Agent 工具调用失败时，传统框架只返回原始报错。LLM 面对生硬的错误信息，要么机械道歉直接放弃，要么陷入盲目试错（连续三次生成相同的错误参数）。
-
-**错误自愈**：在工具报错时，引擎层拦截并注入"锦囊妙计"。
-
-```python
-class RecoveryManager:
-    """错误自愈：在工具执行失败时注入恢复建议"""
-
-    def analyze_and_inject(self, tool_name: str, raw_error: str) -> str:
-        hints = {
-            ("edit_file", "在文件中未找到 old_text"): (
-                "你提供的 old_text 与文件当前内容不一致，或缺少缩进。"
-                "请先使用 read_file 重新读取该文件，获取最新内容后再发起编辑。"
-            ),
-            ("read_file", "no such file or directory"): (
-                "路径似乎不正确。请不要凭空猜测，"
-                "先使用 bash 执行 `ls -la` 或 `find . -name` 查找正确路径。"
-            ),
-            ("bash", "command not found"): (
-                "系统中未安装该命令。请思考：是否有替代命令？"
-                "或者你是否需要先编写脚本安装？"
-            ),
-            ("bash", "DeadlineExceeded"): (
-                "该命令被超时强杀。如果它是常驻服务（如 web server），"
-                "请转入后台执行（如 nohup ... &），不要阻塞主线程。"
-            ),
+关键约束：
+- **System Prompt 神圣不可压缩**——它是 cache 的根，改一字全盘失配。
+- **ToolCall 意图不死**——保留 `msg.ToolCalls` 字段、只替 `Content`，否则 LLM 会困惑"我刚才调过这个工具吗？"陷入重复调用死循环。
+- **字符估算公式**：`估算 Token = len(content) + len(tc.Name) + len(tc.Arguments)`，不用调 BPE 编码器实时算。
+- **物理边界**：全量历史存 Session，仅本轮发 API 时压缩，不在内存里做"半压缩中间态"。
+
+两层压缩栈视角互补：决策链（3.7）看"何时升级到 LLM summary"，降级栈（3.8）看"零代价的物理手段能压掉多少"。
+
+### 3.9 错误自愈：上下文感知的 Recovery 注入
+
+工具错误 → ToolResult 是一类特殊上下文，必须劫持、不能裸传。
+
+```go
+// 极简骨架，14
+func (r *RecoveryManager) AnalyzeAndInject(toolName string, rawError string) string {
+    switch toolName {
+    case "edit_file":
+        if strings.Contains(rawError, "not found") {
+            return "请先使用 read_file 读取目标文件确认内容，再重试 edit_file。"
         }
-
-        for (tool, keyword), hint in hints.items():
-            if tool == tool_name and keyword.lower() in raw_error.lower():
-                return f"{raw_error}\n\n[系统救援指南]: {hint}"
-
-        return raw_error  # 未匹配则原样返回
-```
-
-**关键设计原则：**
-
-- **使用祈使句**：锦囊中明确写"请先使用 read_file"，LLM 看到高权重指令执行的顺从度会大幅上升
-- **基于稳定特征匹配**：匹配 Go 原生的 POSIX 错误（`no such file or directory`）或工具内部固定报错格式，避免被版本更新打破
-- **生产建议**：基于错误码（Domain Error Codes）而非字符串匹配。依赖模糊的中文报错做逻辑分支是脆弱的反模式
-
-### 9. 防死循环：System Reminders
-
-你可能会问：System Prompt 写在上下文最前面，LLM 怎么会忘记？
-
-LLM 确实没"忘记"——字面意义上还在那里。但有两个行为陷阱导致它"装看不见"：
-
-1. **上下文内容分布偏移**：连续几次遇到相同错误时，末尾堆满结构相似的 ToolResult，这些高重复度 token 强力牵引模型的下一步生成
-2. **近因偏差（Recency Bias）**：模型对距离最近的信息响应权重最高，泛泛而谈的系统规则被末尾的错误信息淹没
-
-**解法：在决策点（Point of Decision）注入提醒。**
-
-```python
-import hashlib
-
-class ReminderInjector:
-    """防死循环：在每次 LLM 调用前检测重复模式，必要时注入打断指令"""
-
-    def __init__(self):
-        self.consecutive_failures: Dict[str, int] = {}
-
-    def check_and_inject(self, tool_name: str, args: dict, is_error: bool) -> dict | None:
-        """根据上轮结果决定是否注入打断消息"""
-        # 用 tool_name + args 哈希作为指纹
-        fingerprint = hashlib.md5(
-            (tool_name + str(args)).encode()
-        ).hexdigest()
-
-        if not is_error:
-            # 执行成功，清空失败计数器
-            self.consecutive_failures.clear()
-            return None
-
-        # 累加失败次数
-        self.consecutive_failures[fingerprint] = self.consecutive_failures.get(fingerprint, 0) + 1
-        fail_count = self.consecutive_failures[fingerprint]
-
-        # 阈值 3 次：触发打断
-        if fail_count >= 3:
-            return {
-                "role": "user",  # 必须是 user，借助 Recency Bias
-                "content": (
-                    f"[SYSTEM REMINDER 警告]\n"
-                    f"你似乎陷入了死循环。你刚刚连续 {fail_count} 次使用相同的参数"
-                    f"调用了 '{tool_name}' 工具，并且都失败了。\n"
-                    f"请立即停止无效的重试！你需要：\n"
-                    f"1. 停止猜测参数。跳出当前的局部思维。\n"
-                    f"2. 彻底改变你的策略。\n"
-                    f"3. 如果无法通过工具解决，直接结束任务并向用户说明你需要什么人工帮助。"
-                )
-            }
-
-        return None
-```
-
-**关键设计原则：**
-
-- **指纹识别**：`MD5(tool_name + args)` 作为唯一指纹，连续三次相同才触发
-- **必须以 user 角色注入**：借助 LLM 的 Recency Bias，让这条消息成为模型"看到的最后一条"，获得最高响应权重
-- **参数规范化（进阶）**：模型会用 `read_file{"path": "/tmp/a.txt"}` 和 `read_file{"path": "/tmp/a.txt "}`（末尾多空格）来绕过检测。生产实现需要对参数做规范化（如 trim、绝对路径化）才能识别"本质上的"死循环
-
-### 10. 长期记忆的分层管理
-
-Working Memory 解决了"单次对话内的信息管理"。跨会话怎么办？
-
-把记忆分成四层：
-
-| 类型 | 时间跨度 | 例子 | 存储方式 |
-|------|---------|------|---------|
-| **工作记忆** | 秒-分钟级 | 正在处理的代码片段 | 上下文窗口 |
-| **会话记忆** | 分钟-小时级 | 这次对话的历史 | Session（内存+Redis） |
-| **长期记忆** | 天-月级 | 用户偏好、成功模式 | 关系数据库 |
-| **语义记忆** | 永久 | 相关历史问答、知识库 | 向量数据库 |
-
-会话记忆已经由 Session 覆盖。这一层重点讲**长期 + 语义的混合检索**。
-
-```python
-def fetch_hierarchical_memory(
-    query: str,
-    session_id: str,
-    recent_top_k: int = 5,
-    semantic_top_k: int = 3,
-    summary_top_k: int = 2,
-) -> List[dict]:
-    """分层融合检索：Recent + Semantic + Summary，去重合并"""
-    items = []
-    seen_ids = set()
-
-    # 第一层：时间维度（最近 N 条）
-    for item in fetch_session_memory(session_id, recent_top_k):
-        item["_source"] = "recent"
-        items.append(item)
-        seen_ids.add(item["id"])
-
-    # 第二层：语义维度（相关 N 条）
-    for item in fetch_semantic_memory(query, semantic_top_k):
-        if item["id"] not in seen_ids:
-            item["_source"] = "semantic"
-            items.append(item)
-            seen_ids.add(item["id"])
-
-    # 第三层：摘要维度（长期压缩）
-    for item in fetch_summaries(query, summary_top_k):
-        item["_source"] = "summary"
-        items.append(item)
-
-    # 限制总数防止上下文爆炸
-    return items[:10]
-```
-
-**为什么分层？**
-
-- **Recent**：用户说"刚才那个"，需要最近的对话
-- **Semantic**：用户问相关话题，需要历史中语义相关的
-- **Summary**：长对话的压缩摘要，快速建立上下文
-
-三层融合、去重合并。`_source` 标记很重要——后续处理时可以根据来源决定优先级。
-
-### 11. 语义去重：MMR 重排序
-
-纯相似度检索可能返回一堆重复内容。MMR（Maximal Marginal Relevance）平衡相关性和多样性：
-
-```
-MMR(d) = λ * Sim(d, query) - (1-λ) * max(Sim(d, d_selected))
-
-λ = 0.7：偏向相关性（默认）
-λ = 0.5：平衡
-λ = 0.3：偏向多样性
-```
-
-```python
-def mmr_reorder(query_vec, items: list, top_k: int, lambda_: float = 0.7) -> list:
-    """贪心选择：每步选相关性高且与已选结果相似度低的项"""
-    if len(items) <= top_k:
-        return items
-
-    selected = []
-    remaining = set(range(len(items)))
-
-    while len(selected) < top_k and remaining:
-        best_idx = -1
-        best_score = -1e9
-
-        for i in remaining:
-            relevance = cosine_sim(query_vec, items[i]["vector"])
-            # 与已选结果的最大相似度作为惩罚项
-            max_sim = max(
-                (cosine_sim(items[i]["vector"], items[s]["vector"]) for s in selected),
-                default=0.0,
-            )
-            score = lambda_ * relevance - (1 - lambda_) * max_sim
-            if score > best_score:
-                best_score = score
-                best_idx = i
-
-        selected.append(best_idx)
-        remaining.remove(best_idx)
-
-    return [items[i] for i in selected]
-```
-
-实践用法：需要 5 条结果，先取 15 条候选，MMR 重排到 5 条。
-
-### 12. 把所有组件装到循环里
-
-把所有上下文管理组件集成到 `react_loop`（详见 [Agent Loop 设计篇](agent-loop-design)）中：
-
-```python
-def react_loop_with_context(
-    prompt: str,
-    session: Session,
-    tools: dict,
-    config: ContextConfig,
-    compactor: Compactor,
-    recovery: RecoveryManager,
-    reminder: ReminderInjector,
-    planner: PlanModeComposer,
-) -> str:
-    """完整上下文管理的 ReAct 循环"""
-
-    # 1. System Prompt 动态组装（Plan Mode 时注入外部化指令）
-    system_msg = {
-        "role": "system",
-        "content": planner.build_system_prompt(session.work_dir)
+    case "bash":
+        if strings.Contains(rawError, "command not found") {
+            return "请先 which <cmd> 确认可执行文件位置，或安装后重试。"
+        }
     }
-
-    # 2. 追加用户输入
-    session.append({"role": "user", "content": prompt})
-
-    for step in range(config.max_iterations):
-        # 3. 提取 Working Memory（双维度截取 + 孤儿处理）
-        recent = get_working_memory_with_budget(
-            session.history,
-            msg_limit=20,
-            token_budget=config.working_memory_token_budget,
-        )
-
-        # 4. 拼装当前轮上下文
-        context = [system_msg] + recent
-
-        # 5. Compaction 压缩（防 OOM）
-        context = compactor.compact(context)
-
-        # 6. 调用 LLM
-        response = llm.invoke(context)
-
-        # 7. 解析并执行工具
-        tool_calls = response.get("tool_calls", [])
-        if not tool_calls:
-            break
-
-        # 8. 执行工具（带 Recovery 注入）
-        for tc in tool_calls:
-            result = safe_tool_call(tc["name"], tc["args"], tools)
-            content = (
-                recovery.analyze_and_inject(tc["name"], str(result))
-                if result.get("error")
-                else str(result)
-            )
-            session.append({
-                "role": "tool",
-                "content": content,
-                "tool_call_id": tc["id"]
-            })
-
-        # 9. System Reminders 检测（防死循环）
-        last_tool_call = tool_calls[-1]
-        reminder_msg = reminder.check_and_inject(
-            last_tool_call["name"],
-            last_tool_call["args"],
-            is_error=bool(last_tool_call.get("error")),
-        )
-        if reminder_msg:
-            session.append(reminder_msg)  # 作为 user 注入，借助 Recency Bias
-
-    return extract_final_answer(session.history)
+}
 ```
 
-关键设计要点：
+设计要点：
+- **拦截点**：在 `registry.Execute` 返回后、`session.Append(observationMsgs...)` 前，是唯一能修改 outbound message 的窗口。
+- **祈使句话术**：直接告诉 LLM "请先使用 XXX 工具"，不要描述"你刚才遇到了 XXX 错误"——LLM 在读 ToolResult 那一刻就是在执行排障 SOP。
+- **分类器实现**：演示用 `strings.Contains` 正则，生产必须改领域错误码（`ERR_FILE_NOT_FOUND` / `DEADLINE_EXCEEDED` / `PERMISSION_DENIED`），字符串匹配脆且误命中。
+- **3 类典型模式**：
+    - `edit_file` 模式：未找到 `old_text` → "先 read_file 再重试"；命中多处 → "加上下文保唯一性"
+    - `read_file/write_file` 模式：`no such file` → `ls -la` 自查；`permission denied` → `chmod` / 换文件
+    - `bash` 模式：`command not found` / `DeadlineExceeded`（自写 `context.WithTimeout(30s)`） / `syntax error`
+- **"未知错误用 AI 治愈 AI"**：分类器不命中的堆栈，后台再调一个轻量模型（如 GLM-4 Flash）把堆栈翻译成"操作建议"再注入。
 
-- **System Prompt 每次重新组装**：确保 Plan Mode 状态变化时生效
-- **Working Memory 先截取再压缩**：截取是逻辑筛选，压缩是物理降级，两层都不可少
-- **Recovery 在工具返回时立即生效**：不能等到下一轮 Reason 阶段
-- **Reminder 在 Observe 阶段尾部注入**：作为 user 消息写入 Session，下一轮 Reason 时凭借 Recency Bias 生效
+Recovery 治"错"——它假设 LLM 想修但缺信息；与下面要讲的 Reminders 治"卡"——它假设 LLM 已经不会修了，必须强干预，是不同问题。
+
+### 3.10 行为干预：防死循环的 System Reminders
+
+LLM 进入 Doom Loop（同一工具同样参数连续失败 ≥3 次）或 Exploration Spiral（不停尝试不同变体但方向错了），普通 Error Recovery 已经救不了。必须主动注入强力修正指令。
+
+```go
+// 极简骨架，15
+func (loop *MainLoop) observeFailure(toolName, args string) {
+    fingerprint := md5(toolName + args)
+    loop.failCount[fingerprint]++
+    if loop.failCount[fingerprint] >= 3 {
+        session.Append(Message{
+            Role: RoleUser,  // 关键：必须是 RoleUser，不是 System
+            Content: "你已 3 次尝试 edit_file 同一个文件均失败。请停下来，使用 read_file 重新读取，再用 plan 工具列出后续步骤。",
+        })
+    }
+}
+```
+
+设计要点：
+- **必须 `RoleUser` 注入**：实验证明（Lost in the Middle）模型对 Message 末尾的响应权重大于头部；伪装成 User 的最新消息权重 ≈ 最高近因效应。注入 System Prompt 反而被中间注意力稀释。
+- **哈希指纹 + 滑动窗口**：`md5(toolName + args)` 是最低成本的"同失败"识别。成功即清空计数器，避免误判。
+- **与 Error Recovery 分层**：Recovery 治"错"——丢救援指南；Reminders 治"卡"——强干预跳出错误循环。
+- **阈值兜底物理强杀**：超阈值后不仅注入指令，还应强制 `break loop` / 转人工，否则 LLM 会无视建议继续打转。
+- **上下文分布偏移警告**：相同结构的错误堆在 Message 末尾会"牵引"模型继续走老路——这也是为何要换一种话术（从"建议"升级到"强制"）。
+
+### 3.11 Prompt Cache 分层
+
+什么必须按字节稳定，什么可以每轮重算：
+
+| 内容 | 稳定性级别 | 进 cache 吗 |
+|---|---|---|
+| 跨用户工具描述 / 编码规范 | 跨用户稳定 | 进 static cache |
+| 当前会话状态 / 工具结果 | 跨 turn 重算 | 不进 cache |
+| scratchpad / 历史对话 | 每轮变化 | 不进 cache |
+| MEMORY.md 索引 | 跨会话稳定 | 进 static cache |
+| 记忆全文 Prefetch 召回 | 按需注入 | 不进 cache（注入到 message 前缀之外） |
+
+`SYSTEM_PROMPT_DYNAMIC_BOUNDARY` 不可移动，移动产生 `2^N` 变体命中率归零。永远不要在 system prompt 开头放秒级时间戳或动态 ID。
 
 ---
 
-## 维度二：用框架管理上下文（LangChain 1.0 / LangGraph）
+## 四、轴 2 · 记忆系统
 
-### LangChain 1.0 的上下文机制
+### 4.1 索引常驻 + 全文按需
 
-LangChain 1.0 的 `create_agent`（`langchain/agents/factory.py`）底层基于 LangGraph 构建，上下文管理的核心是 `AgentState` 类型与 `add_messages` reducer（来自 LangGraph）。
+| 组件 | 注入位置 | 容量 |
+|---|---|---|
+| MEMORY.md 索引 | 注入 system（常驻） | ≤200 行 / 25KB |
+| 具体记忆文件全文 | 按 Prefetch 召回注入 message | ≤5 个相关文件 |
 
-**LangChain v1 提供的标准中间件（`langchain.agents.middleware`）：**
+这条记忆是"每次都可能用到"还是"偶尔才需要"？前者入索引常驻，后者按需 Prefetch 召回。
 
-| 中间件 | 用途 |
-|--------|------|
-| `SummarizationMiddleware` | Token 阈值触发，调用 LLM 对早期消息生成摘要 |
-| `ContextEditingMiddleware` | Anthropic 风格的 tool result 清理，达到阈值后用占位符替换 |
-| `PIIMiddleware` | 检测并处理 Email / 信用卡 / IP / MAC / URL 等敏感信息 |
-| `HumanInTheLoopMiddleware` | 在工具执行前挂起，等待人工审批 |
-| `TodoListMiddleware` | 让 LLM 维护 TODO 列表追踪任务进度 |
-| `FilesystemFileSearchMiddleware` | 提供对本地文件系统的检索能力 |
-| `ShellToolMiddleware` | 安全执行 shell 命令（带沙箱策略） |
-| `ModelRetryMiddleware` / `ToolRetryMiddleware` | 模型/工具调用的指数退避重试 |
-| `ModelCallLimitMiddleware` / `ToolCallLimitMiddleware` | 调用次数限制（防失控循环） |
-| `ModelFallbackMiddleware` | 主模型失败时降级到备用模型 |
-| `LLMToolSelectorMiddleware` / `ProviderToolSearchMiddleware` | 工具选择/检索 |
+### 4.2 记忆四层分层
 
-> 源码位置：`D:\open_code\langchain\libs\langchain_v1\langchain\agents\middleware\`
+| 层级 | 存什么 | 生命周期 | 注入策略 |
+|---|---|---|---|
+| session | 单次会话上下文 | 循环结束销毁 | 不外部化 |
+| user | 用户长期偏好（沟通风格、命名习惯） | 跨 session 持久，按 user 索引 | 按 Prefetch 召回 |
+| domain | 领域知识（k8s debug 步骤、特定项目架构） | 按领域 ID 索引 | 按 Prefetch 召回 |
+| global | 跨领域常识（编码规范、安全原则） | 所有用户共享 | 可考虑常驻 |
 
-#### MessagesState：消息列表的自动管理
+每层的存储后端选型：user / domain 用 Redis 或 DB，global 用只读文件。
 
-LangChain Agent 的状态定义基于 LangGraph 的 `add_messages` reducer（源码：`langchain/agents/middleware/types.py`）：
+### 4.3 状态外部化：PLAN.md + TODO.md
 
-```python
-from langgraph.graph.message import add_messages
-from typing_extensions import Annotated, Required, NotRequired
-from typing import TypedDict, Generic, Any
-from langchain_core.messages import AnyMessage
-from langgraph.channels.ephemeral_value import EphemeralValue
+Agent 内部状态（"我现在做到哪了 / 下一步该做什么"）是个易失品，进程崩了或被压缩了就丢了。让 Agent 主动把状态落到文件：
 
+| 文件 | 内容 | 更新粒度 |
+|---|---|---|
+| `PLAN.md` | 宏观导航：目标 + 阶段拆分 + 当前阶段 | 阶段切换时 |
+| `TODO.md` | 颗粒度任务清单，Markdown Checkbox 格式 | 每完成一步即 `edit_file - [ ]` → `- [x]` |
 
-class AgentState(TypedDict, Generic[ResponseT]):
-    """LangChain Agent 的核心状态定义"""
-    messages: Required[Annotated[list[AnyMessage], add_messages]]
-    jump_to: NotRequired[Annotated[Literal["tools", "model", "end"] | None,
-                                  EphemeralValue, PrivateStateAttr]]
-    structured_response: NotRequired[Annotated[ResponseT, OmitFromInput]]
+设计要点：
+- **不用内存结构体**：直接 `write_file` / `edit_file` 落磁盘，跨重启 / 跨上下文压缩都不丢。
+- **强制单步打勾**：完成一项勾一项，禁止一口全勾——避免"LLM 一口气宣称 5 件事完成但实际只做了 2 件"的责任幻觉。
+- **迷失自救 SOP**：报错或迷茫时主动 `read_file TODO.md` 确认当前位置 + 当前阶段；显式诱导而不是依赖 LLM "自己想起来"。
+- **PlanMode 架构开关**：简单任务（"改个变量名"）不开 PlanMode 避免官僚化；复杂任务（"重构模块"）强制注入 PlanMode 规范（`先 read_file PLAN.md → 按 TODO.md 推进 → 每步完成打勾`）。
+- **PlanMode ≠ Thinking Phase**：前者是宏观导航（"我要把这个文件拆 3 段"），后者是微观手术刀（"这一行怎么改"）。混淆会导致要么规划太粗、要么微观决策爆炸。
+- **`./server &` 子进程陷阱**：PlanMode 阶段若让 LLM 启动本地服务，必须用同步阻塞（让 LLM 等它起来）而不是 `&` 后台——否则 LLM 在它起来前就开始下一步然后报错。
+- **断点续传 / 多人协作**：因为状态在文件，可被 git 跟踪、被人类 review、被另一个 Agent 接力。
+
+### 4.4 Bootstrapping 嗅探与断点续传
+
+Agent 启动时嗅 `PLAN.md` / `TODO.md` 是否存在，两个分支：
+
+| 嗅探结果 | 行为 |
+|---|---|
+| 都不存在 | **新建路径**：通过 PlanMode 生成 → 写盘 → 推进 |
+| 存在 | **续传路径**：读取已有文件 → 找到第一个未完成的 `- [ ]` → 继续 |
+
+**关键禁止**：续传路径下绝不可覆盖已有 PLAN.md——否则 LLM 会"自作主张重做一遍规划"丢失前序决策。
+
+### 4.5 持久记忆 = Working + State + Episodic + Retrieval
+
+```
+Working Memory  → Session 内存（11）  →  滑动窗口截取
+State           → PLAN.md / TODO.md   →  长期断点（13）
+Episodic        → memory/YYYY-MM-DD.md → 当日事件流
+Hybrid Retrieval → MEMORY.md 索引 + 向量召回（9） →  跨日复用
 ```
 
-关键在于 `Annotated[..., add_messages]`——这个 reducer 定义了 `messages` 字段在两个节点之间怎么合并。
+四层各有适用场景。崩溃恢复靠 State + Episodic；语义相似召回靠 Hybrid；当前 Session 走 Working。
 
-**`add_messages` 的工作机制：**
+### 4.6 记忆检索
 
-1. **新消息默认追加到末尾**——大部分情况下，节点返回的是一条新消息（AIMessage 或 ToolMessage），它有新 ID，所以被直接 append
-2. **同 ID 的消息替换**——如果返回的消息有 ID，且列表中已有同 ID 的消息，旧消息被替换而非追加
-3. **删除消息**——通过 `RemoveMessage(id=xxx)` 按 ID 删除指定消息（`RemoveMessage` 来自 `langchain_core.messages.modifier`）
-4. **清空全部**——通过 `RemoveMessage(id=REMOVE_ALL_MESSAGES)`（常量来自 `langgraph.graph.message`）
+默认向量召回（语义相似），辅以关键词 / 图谱（GraphRAG 时）混合。纯向量对精确关键词不敏感，纯关键词对语义相似不敏感，必须混合。
 
-> ⚠️ **注意**：LangChain v1 没有 `MessagesState` 这个名字——LangGraph 的 `MessagesState` 仍可用，但 `create_agent` 默认使用 `AgentState`。
+### 4.7 遗忘策略三层兜底
 
-#### 消息压缩：RemoveMessage 的正确用法
+| 兜底层 | 触发 | 动作 |
+|---|---|---|
+| 容量上限 | MEMORY.md > 200 行 / 25KB | 触发压缩或淘汰 |
+| 时间衰减 | 7-30 天没被召回 | 分数衰减（半衰期按记忆类型分级） |
+| 重要性淘汰 | 与最近任务相关度低 | 优先淘汰 |
+| 用户显式清除 | 用户说"忘掉这条" | 立即清除，避免"AI 记住了用户想忘的事" |
 
-LangChain v1 中删除消息的标准方式（源码：`langchain_core/messages/modifier.py`）：
-
-```python
-from langchain_core.messages import RemoveMessage
-from langgraph.graph.message import REMOVE_ALL_MESSAGES
-
-# 删除指定 ID 的消息
-RemoveMessage(id="msg_abc123")
-
-# 清空全部消息（实际用法见 SummarizationMiddleware）
-RemoveMessage(id=REMOVE_ALL_MESSAGES)
-```
-
-`RemoveMessage` 通过 `add_messages` reducer 处理——返回包含 `RemoveMessage` 的状态更新即可触发删除。
-
-#### State 中的上下文管理字段
-
-LangChain v1 的 `AgentState`（源码：`langchain/agents/middleware/types.py:347`）只有三个字段：
-
-- **`messages`**：核心消息列表，由 `add_messages` reducer 管理
-- **`jump_to`**：路由覆盖信号，中间件可以设置此字段要求路由到特定节点。它是 `EphemeralValue`——值不会跨步骤保留，用完即消失
-- **`structured_response`**：结构化输出标记，存在此字段时循环结束
-
-如果需要扩展上下文管理字段（如摘要、长期记忆），可以在继承 `AgentState` 的自定义 State 类中添加：
-
-```python
-from langchain.agents.middleware import AgentState
-from typing import Annotated
-from langgraph.graph.message import add_messages
-
-class CustomAgentState(AgentState):
-    summary: str = ""                          # 历史摘要
-    working_memory_limit: int = 6              # 截取限制
-    externalized_plan: str = ""                # PLAN.md 内容（Plan Mode）
-    long_term_memory: list[dict] = []          # 检索到的长期记忆
-```
-
-#### 中间件机制：动态注入上下文
-
-LangChain v1 的中间件是上下文管理的核心入口。中间件有六种钩子（源码：`types.py`）：
-
-| 钩子 | 触发时机 | 用途 |
-|------|---------|------|
-| `before_agent` | Agent 执行开始前 | 初始化、检查前置条件 |
-| `before_model` | 每次 LLM 调用前 | 上下文压缩、动态 Prompt、PII 检查 |
-| `wrap_model_call` | 包裹 LLM 调用 | 重试、降级、改写请求/响应 |
-| `after_model` | 每次 LLM 响应后 | PII 输出检查、限流 |
-| `wrap_tool_call` | 包裹工具调用 | Recovery Hints、重试、超时控制 |
-| `after_agent` | Agent 执行结束后 | 清理、日志、状态持久化 |
-
-**装饰器风格的中间件**（源码：`types.py:1821-1991`）：
-
-```python
-from langchain.agents.middleware import (
-    AgentMiddleware, AgentState,
-    before_model, after_model, wrap_tool_call, dynamic_prompt,
-)
-from langchain_core.messages import SystemMessage, RemoveMessage
-from langchain.agents import create_agent
-from langchain_core.tools import tool
-from langgraph.runtime import Runtime
-
-
-@before_model
-def compress_context(state: AgentState, runtime: Runtime) -> dict | None:
-    """在每次 LLM 调用前压缩上下文（before_model 钩子）"""
-    messages = state["messages"]
-
-    # Compaction 触发条件：估算 token 超阈值
-    if estimate_total_tokens(messages) > 12000:
-        # 保留最近 6 条，删除中间消息并插入摘要
-        to_compress = messages[1:-6]
-        if to_compress:
-            summary = llm.summarize(to_compress)
-            summary_msg = SystemMessage(content=f"历史对话摘要: {summary}")
-            # 通过 RemoveMessage 删除，用 SystemMessage 插入新摘要
-            return {
-                "messages": [
-                    *[RemoveMessage(id=m.id) for m in to_compress if m.id],
-                    summary_msg,
-                ]
-            }
-    return None
-
-
-@wrap_tool_call
-def inject_recovery_hints(request, handler):
-    """在工具调用失败时注入恢复建议（wrap_tool_call 钩子）"""
-    try:
-        return handler(request)
-    except Exception as e:
-        hint = recovery_manager.analyze_and_inject(
-            request.tool_call["name"], str(e)
-        )
-        return ToolMessage(
-            content=f"{str(e)}\n\n[系统救援指南]: {hint}",
-            tool_call_id=request.tool_call["id"],
-            status="error",
-        )
-
-
-# 通过 create_agent 接入
-agent = create_agent(
-    model="openai:gpt-5",
-    tools=[...],
-    middleware=[compress_context, inject_recovery_hints],
-)
-```
-
-中间件的核心优势：上下文管理的所有逻辑（压缩、Recovery、PII 脱敏、限流）都以**模块化、可插拔**的方式接入，不需要改动核心循环。
-
-#### 关键的内置中间件用法
-
-**1. SummarizationMiddleware（基于 LLM 的摘要）**
-
-源码（`summarization.py:208`）通过 `trigger` 触发，调用 `model.invoke()` 生成摘要，默认 prompt 包含 `SESSION INTENT`/`SUMMARY`/`ARTIFACTS`/`NEXT STEPS` 四个固定 section。
-
-```python
-from langchain.agents.middleware import SummarizationMiddleware
-from langchain.agents import create_agent
-
-agent = create_agent(
-    model="openai:gpt-5",
-    tools=[...],
-    middleware=[
-        # 当 token 数达到 4000 时触发摘要，保留最近 20 条消息
-        SummarizationMiddleware(
-            model="openai:gpt-4o-mini",  # 用便宜的模型做摘要
-            trigger=("tokens", 4000),
-            keep=("messages", 20),
-        ),
-    ],
-)
-```
-
-`trigger` 支持三种形式（源码 `summarization.py:123-134`）：
-- `("fraction", 0.8)`：达到模型最大输入 token 的 80%
-- `("tokens", 4000)`：达到指定 token 数
-- `("messages", 50)`：达到指定消息数
-
-它特别处理了 **AI/Tool 消息配对完整性**（`_find_safe_cutoff_point` 函数）——确保 cut off 时不会把 `AIMessage.tool_calls` 和对应的 `ToolMessage` 拆散。
-
-**2. ContextEditingMiddleware（Anthropic 风格的 tool result 清理）**
-
-源码（`context_editing.py:187`）实现了 Anthropic 的 `clear_tool_uses_20250919` 行为：token 超阈值后，把早期的 tool result 内容清空为占位符（默认 `[cleared]`）。
-
-```python
-from langchain.agents.middleware import ContextEditingMiddleware, ClearToolUsesEdit
-
-agent = create_agent(
-    model="anthropic:claude-sonnet-4-6",
-    tools=[...],
-    middleware=[
-        ContextEditingMiddleware(
-            edits=[
-                ClearToolUsesEdit(
-                    trigger=100_000,         # token 阈值
-                    clear_at_least=0,        # 至少释放多少 token
-                    keep=3,                  # 保留最近 3 个 tool result
-                    clear_tool_inputs=False, # 是否同时清空对应 ToolCall 的 args
-                    exclude_tools=(),        # 排除的 tool 名单
-                ),
-            ],
-            token_count_method="approximate",  # 或 "model"（精确但慢）
-        ),
-    ],
-)
-```
-
-`ClearToolUsesEdit` 的关键设计：**绝不删除 ToolMessage 对象本身**，只把 `content` 字段替换为占位符。这样对应的 `AIMessage.tool_calls` 完整保留——模型依然能"看到"自己调过什么工具，只是看不到工具的原始返回值。`response_metadata` 中标记 `context_editing.cleared=True`，防止重复清理。
-
-**3. PIIMiddleware（敏感信息处理）**
-
-源码（`pii.py:492`）内置的 PII 检测类型和策略：
-
-```python
-from langchain.agents.middleware import PIIMiddleware
-from langchain.agents import create_agent
-
-agent = create_agent(
-    model="openai:gpt-5",
-    tools=[...],
-    middleware=[
-        # 不同类型用不同策略
-        PIIMiddleware("email",       strategy="redact"),
-        PIIMiddleware("credit_card", strategy="mask"),    # 显示后四位：****-****-****-1234
-        PIIMiddleware("ip",          strategy="hash"),    # 确定性哈希：<email_hash:a1b2c3d4>
-        PIIMiddleware("url",         strategy="block"),   # 直接抛异常中断运行
-
-        # 自定义正则检测
-        PIIMiddleware(
-            "api_key",
-            detector=r"sk-[a-zA-Z0-9]{32}",
-            strategy="redact",
-        ),
-    ],
-)
-```
-
-内置检测类型（源码 `pii.py:560`）：`email`/`credit_card`（Luhn 算法校验）/`ip`（stdlib 校验）/`mac_address`/`url`。
-
-四种策略（源码 `pii.py:562`）：
-
-| 策略 | 行为 | 适用 |
-|------|------|------|
-| `block` | 抛 `PIIDetectionError` 中断 | 严格合规场景 |
-| `redact` | 替换为 `[REDACTED_TYPE]` | 一般合规、日志清理 |
-| `mask` | 部分掩码（如 `****-1234`） | 人类可读、客服 UI |
-| `hash` | 确定性哈希（`<type_hash:digest>`） | 分析、调试 |
-
-PIIMiddleware 有三个粒度（源码 `pii.py:556-567`）：
-- `apply_to_input`：检查用户输入
-- `apply_to_output`：检查 AI 输出（启用流时还会装入 `_PIIStreamTransformer`）
-- `apply_to_tool_results`：检查 tool 结果
-
-`strategy="block"` 时，流式 transformer 在检测到完整 PII pattern 的瞬间抛 `PIIDetectionError`，通过 `StreamMux.afail` 直接失败 run（源码 `pii.py:212,277,385`）。
-
-### LangGraph Checkpointer：Session 持久化
-
-LangGraph 通过 Checkpointer 原生支持 Session 持久化（来自 LangGraph 标准库，本仓库内未包含，本节给出 LangGraph 官方推荐用法）：
-
-```python
-from langgraph.checkpoint.memory import MemorySaver          # 内存版（测试用）
-from langgraph.checkpoint.sqlite import SqliteSaver          # SQLite 持久化
-from langgraph.checkpoint.postgres import PostgresSaver      # PostgreSQL 持久化
-
-# 内存版
-memory = MemorySaver()
-
-# SQLite 持久化
-sqlite = SqliteSaver.from_conn_string("sessions.db")
-
-# PostgreSQL 持久化（多租户生产）
-pg = PostgresSaver.from_conn_string("postgresql://...")
-
-# 编译时挂载 Checkpointer
-agent = graph.compile(checkpointer=sqlite)
-
-# 使用 thread_id 标识 Session
-config = {"configurable": {"thread_id": "user_123_session_456"}}
-
-# 调用时，LangGraph 自动加载 / 保存状态
-result = agent.invoke({"messages": [user_msg]}, config)
-
-# 中断后可以从 Checkpoint 恢复
-state = agent.get_state(config)
-```
-
-LangGraph 的 Checkpointer 自动处理：
-
-- **状态序列化**：把当前 State（包括 messages、自定义字段）写入存储
-- **thread_id 隔离**：不同 thread_id 对应不同 Session
-- **中断恢复**：进程崩溃后，从最后一个 Checkpoint 恢复执行
-- **跨设备同步**：基于 PostgreSQL 的 Checkpointer 支持分布式部署
-
-### 在 LangChain 中接入上下文压缩中间件
-
-LangChain v1 推荐用中间件方式实现 Working Memory + Compaction，而不是手写图节点：
-
-```python
-from langchain.agents.middleware import (
-    SummarizationMiddleware,
-    ContextEditingMiddleware,
-    ClearToolUsesEdit,
-)
-from langchain.agents import create_agent
-
-agent = create_agent(
-    model="openai:gpt-5",
-    tools=[...],
-    middleware=[
-        # 1. Token 阈值触发 LLM 摘要（防 OOM）
-        SummarizationMiddleware(
-            model="openai:gpt-4o-mini",
-            trigger=[("fraction", 0.8), ("messages", 100)],  # OR 语义
-            keep=("messages", 20),
-        ),
-
-        # 2. Anthropic 风格的 tool result 清理（极端场景兜底）
-        ContextEditingMiddleware(
-            edits=[
-                ClearToolUsesEdit(
-                    trigger=100_000,
-                    keep=3,
-                ),
-            ],
-        ),
-    ],
-)
-```
-
-中间件执行顺序：第一个声明的最外层。`SummarizationMiddleware.before_model` 在每次 LLM 调用前先跑，做 token 估算和摘要；`ContextEditingMiddleware.wrap_model_call` 在调用 LLM 之前清掉已经过期的 tool result 内容。
-
-### LangGraph Subgraph：上下文隔离
-
-当一个任务太复杂时，可以用 Subgraph 隔离上下文——子 Agent 在自己的 State 中工作，只把精华结果返回给主 Agent。
-
-```python
-from langgraph.graph import StateGraph, START, END
-from typing import TypedDict, Annotated
-from langgraph.graph.message import add_messages
-from langchain_core.messages import HumanMessage, AIMessage
-
-
-# 子 Agent 的独立状态
-class SubAgentState(TypedDict):
-    messages: Annotated[list, add_messages]
-    findings: str  # 子 Agent 的核心产出
-
-
-def research_subagent(state: dict) -> dict:
-    """研究子 Agent：在自己的窗口里探索，最后只返回精华"""
-    # 调用子图
-    subgraph_input = {"messages": [HumanMessage(content=state["task"])]}
-    result = research_subgraph.invoke(subgraph_input)
-
-    # 只把精华返回给主 Agent，不暴露所有中间过程
-    return {"messages": [AIMessage(content=result["findings"])]}
-
-
-# 接入主图
-main_graph = StateGraph(AgentState)
-main_graph.add_node("research", research_subagent)
-main_graph.add_node("synthesize", synthesize_results)
-main_graph.add_edge(START, "research")
-main_graph.add_edge("research", "synthesize")
-main_graph.add_edge("synthesize", END)
-```
-
-**上下文隔离的价值**：
-
-- **Token 压缩比**：子 Agent 可能探索了几万 token 的信息，但最终只返回 1000-2000 token 的精华
-- **并行化**：多个子 Agent 同时探索不同方向，各自独立窗口互不干扰
-- **专业化**：每个子 Agent 最多 5 个工具，让它们各自专精
-
-### "有框架" vs "无框架"在上下文管理上的根本区别
-
-| 对比维度 | 框架（LangChain/LangGraph） | 无框架 |
-|---------|---------------------------|--------|
-| Session 隔离 | Checkpointer + thread_id | 手动 SessionManager + Map |
-| 消息合并 | `add_messages` reducer | 手动 `messages.append()` |
-| 消息删除 | `RemoveMessage(id=xxx)` | 手动切片 |
-| 上下文压缩 | `SummarizationMiddleware` / `ContextEditingMiddleware` | 手动 Compactor |
-| 长期记忆 | Store + Retriever | 自己接向量数据库 |
-| 持久化 | Checkpointer 原生 | 自己序列化 + Redis |
-| HITL 集成 | `HumanInTheLoopMiddleware` | 手动挂起 + channel |
-| PII 处理 | `PIIMiddleware`（六种策略 + 流式 transformer） | 手写正则分类器 |
-| 工具重试 | `ToolRetryMiddleware`（指数退避） | 手写 retry 循环 |
-| 调用限制 | `ModelCallLimitMiddleware` / `ToolCallLimitMiddleware` | 手写计数器 |
-
-选型建议：
-
-- **该用框架的情况**：标准 ReAct + 需要持久化 + 跨设备同步 + 团队已有 LangChain 工程实践 + 想用现成的中间件组合
-- **该用原始代码的情况**：循环逻辑不标准 + 需要深度自定义上下文管理逻辑 + 需要嵌入框架没有的特殊能力（如 WASI 沙箱、Temporal 持久化）
+保留 `/memory forget <key>` 或 `/memory clear` 接口。遗忘是软删（标记过期但保留可恢复窗口期），不是硬删。
 
 ---
 
-## 维度三：上下文的工程细节
+## 五、多轮对话设计
 
-### 1. 上下文工程的四策略框架
+多轮对话本质上是一连串 Session 内的 Assistant turn，但有几个 Context 维度经常被忽视：
 
-LangChain 在 2025 年提出了一个简洁框架，把上下文工程的所有操作归纳为四种策略：
+### 5.1 Topic Shift 检测与 Session 分裂
 
-| 策略 | 核心思想 | 典型实践 |
-|------|---------|---------|
-| **Write** | 把信息写到上下文之外 | Scratchpad 模式、PLAN.md / TODO.md |
-| **Select** | 把相关信息检索回来 | RAG、按需加载、渐进式暴露 |
-| **Compress** | 压缩上下文 | 摘要、Masking、掐头去尾 |
-| **Isolate** | 隔离上下文 | Sub-Agent、Multi-Agent |
+用户在对话中途切换主题（"顺便问下……""对了另外……"），继续套用同一个 Session 会让历史污染当前任务。两个做法：
+- **轻量**：检测到主题切换关键词，注入 `RoleUser` 提醒 "我们换个话题，但前提是上一段对话你已经看到"
+- **重量**：长程主题切换 → 落 `memory/YYYY-MM-DD.md` 关掉旧 Session，开新 Session
 
-Agent 的失败本质上是上下文的失败——失败不是模型的失败，是信息环境的失败。
+### 5.2 上下文连续性 vs 主题隔离的取舍
 
-### 2. Token 估算
+完全连续（全对话塞一起）vs 完全隔离（每主题新开 Session）是两端。中间方案：
+- **近期 N 轮** 全保留（确保当前主题完整）
+- **远期** 触发"摘要回灌"——压缩成本主题摘要注入 system
+- **跨主题** 只在用户显式引用（"刚才那个 bug 怎么解"）时召回
 
-精确计算 Token 需要调用 tokenizer，太慢了。生产中用字符数估算：
+### 5.3 显式的上下文边界标记
 
-| 组成部分 | 估算方式 | 说明 |
-|---------|---------|------|
-| 英文文本 | 字符数 / 4 | 标准 GPT 估算 |
-| 中文文本 | 字符数 / 1.5 | 中文 Token 密度更高 |
-| 代码 | 字符数 / 3 | 代码 Token 密度更高 |
-| 消息格式 | 每条 +5 | role/content 结构开销 |
-| 安全边际 | +10% | 防止估算偏小 |
+不能让 LLM 自己猜"现在该忘什么"。引入：
+- `--- CONTEXT_BOUNDARY ---` 显式主题切换标记
+- `--- SESSION_RESTART ---` 重启标记
+- `--- FORGET ---` 用户显式遗忘指令
 
-```python
-def estimate_tokens(messages: list) -> int:
-    total = 0
-    for msg in messages:
-        content = msg.get("content", "")
-        # 中文按 1.5 字符/token 估算
-        total += len(content) / 1.5
-        total += 5  # 消息格式开销
-    return int(total * 1.1)  # 加 10% 安全边际
-```
-
-误差在 10-15% 以内，对预算控制够用了。
-
-### 3. Context Rot：更大的窗口不是万能药
-
-你可能想：既然窗口大小是问题，用更大的窗口不就行了？
-
-Chroma 的研究揭示了一个关键现象——**Context Rot（上下文腐蚀）**：随着上下文中 Token 数量增加，模型准确回忆和利用信息的能力递减。
-
-原因在 Transformer 架构本身：自注意力的计算量与 Token 数量呈 n² 关系。10K Token 约 1 亿次注意力计算，50K Token 约 25 亿次。这创造的不是"硬悬崖"，而是**性能梯度**——信息检索的准确率随上下文长度逐渐下滑。
-
-**核心结论：上下文是有限资源，具有递减的边际回报。往里塞更多信息，不一定能让模型表现更好。**
-
-| 模型 | 上下文窗口 | 换算成字数（粗估） |
-|------|-----------|------------------|
-| GPT-4o | 128K tokens | ~50 万字 |
-| Claude Sonnet 4 | 200K tokens | ~80 万字 |
-| Gemini 2.5 Pro | 1M tokens | ~400 万字 |
-
-窗口看起来很大，但实际场景中的消耗远超想象。
-
-### 4. Prompt Cache：让上下文工程可负担
-
-Claude 的实现：
-
-| Token 类型 | 相对费用 | 说明 |
-|-----------|---------|------|
-| 标准输入 | 1x | 每次都完整计算 |
-| Cache 写入（5 分钟 TTL） | 1.25x | 首次写入稍贵 |
-| Cache 读取 | 0.1x | **节省 90%** |
-
-对于 100K Token 的缓存对话，成本降低 90%，延迟降低 79%。
-
-**Agent 系统的 Cache 优化原则：**
-
-1. **保持提示前缀稳定**：System Prompt 放最前面且不频繁变动。不要在开头放秒级时间戳或随机 ID
-2. **上下文只追加（Append-Only）**：不要修改或重排历史消息
-3. **工具定义保持稳定**：不要动态增删工具定义，用 logit 掩蔽控制可用性
-4. **注意 TTL**：高频请求场景保持间隔在 TTL 内（Claude 5 分钟）
-
-### 5. 分层 Token 预算
-
-隔离策略（Multi-Agent）中，Token 预算需要分层管理：
-
-```python
-class BudgetManager:
-    """Session → Task → Agent 三级预算"""
-
-    def check_budget(self, session_id: str, estimated_tokens: int) -> dict:
-        budget = self.session_budgets[session_id]
-
-        if budget.task_used + estimated_tokens > budget.task_budget:
-            if budget.hard_limit:
-                return {"can_proceed": False, "reason": "Task budget exceeded"}
-            else:
-                return {"can_proceed": True, "require_approval": True}
-
-        # 警告阈值
-        usage_percent = budget.task_used / budget.task_budget
-        if usage_percent > 0.8:
-            self.emit_warning(session_id, usage_percent)
-
-        return {"can_proceed": True}
-```
-
-三种预算执行模式：
-
-| 模式 | 行为 | 适用场景 |
-|------|------|---------|
-| 硬限制 | 超预算直接拒绝 | 成本敏感、对外 API |
-| 软限制 | 超预算发警告，继续执行 | 任务优先、内部工具 |
-| 审批模式 | 超预算暂停，等人工确认 | 关键任务需要人工把关 |
-
-### 6. 背压机制：渐进式限流
-
-预算压力增大时，不应突然停止，而是渐进式限流：
-
-```python
-def calculate_backpressure_delay(usage_percent: float) -> int:
-    """根据预算使用率返回延迟（毫秒）"""
-    if usage_percent >= 0.95:
-        return 1500   # 重度限流
-    elif usage_percent >= 0.9:
-        return 750
-    elif usage_percent >= 0.85:
-        return 300
-    elif usage_percent >= 0.8:
-        return 50     # 轻微限流
-    else:
-        return 0      # 正常执行
-```
-
-背压的好处：响应变慢让用户感知到"预算在消耗"，实现平滑降级而非突然断掉，用量下来后自动恢复正常。
+标记本身是 token 代价，但比让 LLM 自决"该忘什么"靠谱得多。
 
 ---
 
-## 维度四：状态外部化与持久化（深入）
+## 六、反模式
 
-### 为什么需要状态外部化？
+### 轴 1 · 管理技巧
 
-Working Memory 解决了"单次对话内的信息管理"。但对于跨越好几天、包含几十个子模块重构的超大型任务，它就捉襟见肘了。
+- 把所有内容拼成一个 system prompt 字符串，静态段和动态段混在一起，任何修改都让整个前缀哈希失效，cache 命中率从 ~90% 暴跌到 0%
+- 在 system prompt 开头放秒级时间戳或动态 ID，每次请求前缀都不同
+- 按条数截断 history 不处理 orphan
+- 压缩 ToolResult 时连带删 `tool_calls` 字段，模型困惑"我刚才调过这个工具吗？"陷入重复调用死循环
+- 上来就调 LLM 做 summary，100K token 历史让 LLM 总结付出 ~17K output tokens
+- 给 history 分配固定 token 配额，scratchpad 每轮增长，固定配额会被吃掉
+- 动态增删 tool definitions 控制可用性，cache key 失配
+- 把 prompt cache 当银弹不维护 cache key，账单没省还多了 `cache_write` 的 1.25x 开销
+- 压缩后丢失环境状态（文件 / skill / agent），LLM 不是忘了对话，是忘了"我还能用什么工具"
+- **裸 ToolResult 错误直传**：工具报错不加 Recovery 注入，LLM 看到的堆栈信息对他不可操作而反复重试同一条失败路径
+- **错误恢复注入走 System Prompt**：错误恢复的话术必须靠 `RoleUser` 最新消息注入才被读进去——但工具错误和排障建议同字段语义不冲突，反而显得"我推荐你这样做"，弱干预
+- **Recovery 注入用 `strings.Contains` 在生产**：演示可以，生产必须用领域错误码匹配，否则脆且误命中
+- **死循环时只丢 Error Recovery**：Doom Loop / Exploration Spiral 阶段 LLM 已经"读不进"建议了，必须升级到 System Reminders 强干预
+- **Reminders 注入走 System Prompt**：被中间注意力稀释，模型对 Message 末尾的响应权重大于头部；必须 `RoleUser`
+- **PlanMode 套所有任务**：简单任务也强制先写 PLAN.md 再做 → 官僚化反而拖慢
+- **续传路径覆盖 PLAN.md**：嗅到旧文件但 LLM "重新规划一遍"覆盖了历史决策，前序推理归零
+- **TODO.md 一口气全勾**：LLM 自我感觉"5 件事都做了"的幻觉，实际只做了 2 件
+- **`./server &` 后台启动依赖服务**：LLM 不等子进程就绪就开始下一步，必报连接拒绝
+- **Skill 正文 Eager 全部注入**：每个 Skill 的步骤都进 system prompt，挤占 cache 而且多数 Skill 这一 Session 用不到
+- **Session 全局共享一个 WorkDir**：多目录项目混会话、隔离缺失、并发串扰（Claude Code 的设计取舍）
 
-传统的 AI 框架在内存里维护复杂的 State Machine（状态机）或图数据库。但这有两个问题：
+### 轴 2 · 记忆系统
 
-1. **维护成本高**：状态转换的逻辑复杂
-2. **人类无法干预**：藏在黑盒里，开发者调试时看不到
-
-**驾驭工程的解法：Externalized State（状态外部化）**——把状态写入文件系统。
-
-### 标准的外部化文件
-
-顶级 Coding Agent 通常用两个约定俗成的文件：
-
-1. **`PLAN.md`**：宏大的架构设计、重构思路、全局约束
-2. **`TODO.md`**：细颗粒度的待办事项（Checklist）和当前进度
-
-```markdown
-# PLAN.md 示例
-
-# 用户服务重构计划
-
-## 目标
-将基于 Python 的用户服务重构为 Go 语言，补充单元测试和 Makefile。
-
-## 架构决策
-- 使用 Gin 框架处理 HTTP
-- 使用 GORM 操作 PostgreSQL
-- 使用 testify 写单元测试
-
-## 约束
-- 不允许破坏现有 API 兼容性
-- 必须保留所有现有用户数据
-```
-
-```markdown
-# TODO.md 示例
-
-# 用户服务重构任务清单
-
-## 项目初始化
-- [x] 创建 go.mod 文件
-- [x] 创建 main.go 主程序文件
-- [ ] 创建 models/user.go
-- [ ] 创建 routes/user.go
-
-## 核心代码实现
-- [ ] 实现用户注册接口
-- [ ] 实现用户登录接口
-- [ ] 实现用户信息查询接口
-
-## 测试与验证
-- [ ] 编写单元测试
-- [ ] 创建 Makefile
-- [ ] 编译验证
-```
-
-### Plan Mode 的强制 SOP
-
-Plan Mode 开启时，System Prompt 注入强制的执行 SOP：
-
-```python
-PLAN_MODE_SOP = """
-# 长程任务强制规范 (Plan Mode: ON)
-
-**[STEP 1: 强制环境嗅探 (Bootstrapping)]**
-- 收到指令后，使用 bash 检查工作区根目录下是否已存在 PLAN.md 和 TODO.md
-- 分支 A (全新任务)：文件不存在 → 依次创建
-  1. 先创建 PLAN.md，写下你的理解、架构设计、技术选型
-  2. 再创建 TODO.md，拆解具体的可执行步骤
-- 分支 B (断点续传)：文件已存在 → 绝对不要覆盖
-  1. 立即 read_file 阅读 PLAN.md 了解全局目标
-  2. 阅读 TODO.md 找到第一个未完成的 [ ] 任务，从那里继续
-
-**[STEP 2: 严格的单步执行与实时打勾]**
-- 每完成一个子任务，必须立即用 edit_file 将 TODO.md 中对应的行修改为 - [x]
-- 绝对不允许"一口气写完所有代码最后再打勾"
-
-**[STEP 3: 迷失时的自救]**
-- 如果遇到报错或不知道下一步，立即 read_file 重新读取 TODO.md 确认位置
-"""
-```
-
-### 状态外部化 vs 内存状态机
-
-| 对比维度 | 状态外部化（文件） | 内存状态机 |
-|---------|------------------|-----------|
-| 可观测性 | 直接看文件 | 需要打印日志或调试器 |
-| HITL 成本 | 手动改文件保存即可 | 需要调用 API 修改内部状态 |
-| 持久化 | 天然，文件即存储 | 需要额外序列化机制 |
-| Token 成本 | 低，按需 read_file | 高，全量加载到上下文 |
-| 跨进程 | 文件不变即可恢复 | 进程崩溃状态丢失 |
-| 复杂度 | 极低（Markdown 文本） | 高（State Machine 代码） |
-
-文件即状态。Markdown 即协议。这是驾驭工程最反直觉、也最优雅的设计哲学。
-
-### Plan Mode vs 慢思考（Thinking Phase）
-
-这两种机制在初学者看来很像，但其实分属不同维度：
-
-- **Plan Mode 是宏观导航**：解决"战略方向"问题。配合 PLAN.md / TODO.md 等外部记忆文件，保证 Agent 在跨越数十 Turn 的长跑中，不会因上下文压缩导致的失忆而跑偏
-- **Thinking Phase 是微观手术刀**：解决"推理跳步"问题。即使 Agent 已经在 TODO.md 里写好了重构计划，没有每一轮的慢思考约束，它依然可能在选择具体实现路径时走捷径
-
-关掉慢思考只靠 Plan Mode，Agent 会变成"眼高手低"的建筑师——蓝图很漂亮，但每块砖可能砌得歪歪扭扭。
+- 常驻全量长期记忆，100 个 user_role.md 全量塞进 system prompt 挤占 30K+ tokens
+- 记忆无策略只增不减，1000 条记忆里 90% 永远没被召回，污染检索结果
+- 没有用户显式清除接口，用户说"忘掉这条"AI 还在记
+- 记忆按域硬切（user 记忆 = 全局共享），跨用户共享会导致隐私泄露
+- 遗忘是硬删，用户误操作后没法恢复
+- 记忆检索只用单一策略，纯向量召回对精确关键词不敏感
+- **状态只放内存不落盘**：进程崩溃 / 上下文压缩即丢失 Agent 当前位置
+- **TODO.md 沦为摆设不强制更新**：状态外部化但 Agent 不主动维护，等于没外部化
+- **多轮对话不切 Session**：主题切换后旧历史污染新任务，检索精度崩盘
 
 ---
 
-## 维度五：常见陷阱
+## 七、样本索引
 
-### 陷阱 1：ToolResult 孤儿导致的 400 报错
+> 应用笔记目录待建，以下引用路径保留为占位，等目录建好后自动生效。
 
-**症状**：调用 API 时直接报 `400 Bad Request: messages with role 'tool' must be a response to a preceeding message with 'tool_calls'`。
+<details>
+<summary><strong>Claude Code 上下文装配（cc-07-context-assembly.md）</strong>（点击展开）</summary>
 
-**原因**：按条数截断 Working Memory 时，把 ToolCall 截掉了，但 ToolResult 还在。
+- §三 两条 memoize 链路 + Prompt 组装骨架 —— `getSystemContext` / `getUserContext` 用 `lodash memoize` 会话级缓存
+- §四 阶段三 静态段 + 动态段 + 缓存边界 —— 6 个静态段跨用户稳定，`SYSTEM_PROMPT_DYNAMIC_BOUNDARY` 不可移动
+- §四 4.3 自动记忆系统 —— MEMORY.md 索引常驻 + Prefetch 召回全文
+- §四 4.6 主 Agent vs 子 Agent prompt 隔离 —— 子 Agent 复用主线程 queryLoop
+- §六 6 个静态段完整文本 + 9 个 prompt 工程设计技巧 —— 含 negative constraint、behavioral triggers
+- §七 ReAct + CoT 思维链 3 层机制 —— native thinking + 文字声明 + traces 累积
 
-**解决**：在 `get_working_memory` 中做边界处理，丢弃断头的 ToolResult：
+</details>
 
-```python
-while result and result[0].get("role") == "tool" and result[0].get("tool_call_id"):
-    result = result[1:]
-```
+<details>
+<summary><strong>Claude Code 压缩子系统（cc-08-compaction-subsystem.md）</strong>（点击展开）</summary>
 
-### 陷阱 2：单条大文件打穿上下文窗口
+- §二 5 阶段压缩栈在 Agent Loop 的位置 —— 透明性、原地缩减 vs 生成新消息
+- §四 4.1 5 阶段决策链详解 —— Stage 1 持久化超长 tool_result / Stage 2 snip 死分支 / Stage 3 cache-aware microcompact / Stage 4 服务端透明 / Stage 5 autocompact
+- §四 4.3 cache-aware 协作机制 —— cache_edits 不动本地 message、baseline 计算、pinned edits
+- §四 4.4 压缩后状态恢复 —— 7 类附件 + boundary marker + preserved segment DAG 重写
+- §四 4.5 失败回退 —— PTL 重试截断、连续失败熔断、Reactive Compact 响应式兜底
 
-**症状**：Working Memory 只取 6 条，但其中一条是 1MB 的 read_file 返回结果，API 报 OOM。
+</details>
 
-**原因**：按条数截断防不住单条消息暴击。
+<details>
+<summary><strong>Dify Agent 上下文（dify-05-agent-context.md）</strong>（点击展开）</summary>
 
-**解决**：Compactor 的双重降级——远期 ToolResult 全量掩码，短期超长 ToolResult 掐头去尾。
+- §一 历史读取 —— `organize_agent_history` 一次性从 DB 读到内存
+- §二 三条历史通道 —— CoT 折叠为 scratchpad 文本、FC 保留结构化 tool_calls
+- §三 Prompt 每轮重拼 —— 5 段式拼装，scratchpad 每轮增长
+- §四 Token 预算动态残差 + User 边界整轮丢弃 —— `AgentHistoryPromptTransform.get_prompt` 逆序填充
+- §五 MessageAgentThought 占位 → 增量回填
+- §六 parent_message_id 多分支对话
 
-### 陷阱 3：压缩时删掉了 ToolCall 意图
+</details>
 
-**症状**：压缩历史后，模型困惑地重新发起已经调用过的工具，陷入死循环。
+<details>
+<summary><strong>开放 Claw 提示词组装（10）</strong>（点击展开）</summary>
 
-**原因**：压缩 ToolResult 时，连带把 `tool_calls` 字段也删了。
+- §内核（\<1K token）+ AGENTS.md + Skills 三层架构 —— 业务规范交给人类维护、不进代码
+- §SkillLoader 扫描 `.skills/**/SKILL.md` + 手写 YAML Frontmatter 解析
+- §Composer.Build() 每次 Run() 按 WorkDir 重算
+- §Eager Loading vs Lazy Loading 两阶段权衡（read_skill 工具）
 
-**解决**：永远保留 ToolCall 的 `tool_calls` 字段（模型的行动证据），只压缩 `content` 字段。
+</details>
 
-### 陷阱 4：LLM 陷入死循环不退出
+<details>
+<summary><strong>开放 Claw Session 管理（11）</strong>（点击展开）</summary>
 
-**症状**：模型连续 10 次调用同一个工具并失败，Token 烧光。
+- §Session = WorkDir 绑定的隔离上下文内存空间
+- §GlobalSessionMgr 用 `map[string]*Session` + `sync.RWMutex` 并发安全
+- §Session.GetWorkingMemory(limit) 滑动窗口 + Token-aware Truncation
+- §孤儿 ToolResult 防护：截断后首条 `RoleUser + ToolCallID` 必须舍弃
+- §持久化 JSONL：s.history 追加写到 `workDir/.claw/sessions/xxx.jsonl`
+- §Claude Code vs 开放 Claw 工业真相：前者全局共享一个 WorkDir
 
-**原因**：System Prompt 写在最前面，但近因偏差让模型被末尾的错误信息牵引，忽略系统规则。
+</details>
 
-**解决**：ReminderInjector 检测连续失败指纹（`MD5(tool_name + args)`），阈值触发后以 `user` 角色注入打断消息。
+<details>
+<summary><strong>开放 Claw 阶梯降级压缩（12）</strong>（点击展开）</summary>
 
-### 陷阱 5：把 PII 写进了向量数据库
+- §物理防线 > 业务逻辑（双重降级栈）
+- §第一道 Observation Masking：ToolResult 过长 → `…[已被系统清理。原始长度: X 字节]…`
+- §第二道 Head-Tail Truncation：>1000 字符保头 500 + 尾 500
+- §保 ToolCall 意图：保留 `msg.ToolCalls`、只替 Content
+- §字符估算公式：`len(content) + len(tc.Name) + len(tc.Arguments)`
+- §远期 Assistant 推理废话折叠（>200 字符）
 
-**症状**：用户的信用卡号被永久存储在长期记忆里，可能被其他用户召回。
+</details>
 
-**原因**：压缩摘要、存入向量库前没做 PII 脱敏。
+<details>
+<summary><strong>开放 Claw 状态外部化 + 待办管理（13）</strong>（点击展开）</summary>
 
-**解决**：在压缩和入库前调用 `redact_pii` 处理 Email、电话、信用卡、SSN、API Key 等敏感信息。
+- §PLAN.md（宏观）+ TODO.md（Checkbox 颗粒度）
+- §PlanMode 架构开关：简单不开 / 复杂强制
+- §Bootstrapping 分支：嗅文件存在 → A 新建 / B 续传不覆盖
+- §强制单步打勾：完成即 `edit_file - [ ]` → `- [x]`
+- §迷失自救 SOP：报错 / 迷茫主动 read_file TODO.md
+- §多层记忆架构：Working → State → Episodic → Hybrid Retrieval
+- §`./server &` 子进程阻塞陷阱
+- §Provider 1214 报错：assistant 带 tool_calls 须显式传 `""`
 
-### 陷阱 6：缓存命中率归零
+</details>
 
-**症状**：用了 Claude Prompt Cache，但账单没省。
+<details>
+<summary><strong>开放 Claw 错误自愈（14）</strong>（点击展开）</summary>
 
-**原因**：System Prompt 开头放了秒级时间戳，每次请求前缀都不同。
+- §拦截点：`registry.Execute` 返回后、`session.Append(observationMsgs...)` 前
+- §三类工具模式：edit_file / read_file / bash 的典型错误祈使句
+- §30s `context.WithTimeout` Deadline
+- §演示用 `strings.Contains`、生产改领域错误码
+- §"未知错误用 AI 治愈 AI"：GLM-4 Flash 翻译堆栈
 
-**解决**：保持提示前缀稳定——时间戳放到末尾、上下文只追加（Append-Only）、工具定义不动态增删。
+</details>
 
-### 陷阱 7：Session 跨用户串了
+<details>
+<summary><strong>开放 Claw System Reminders（15）</strong>（点击展开）</summary>
 
-**症状**：用户 A 看到了用户 B 的对话历史。
+- §Doom Loop Detection：md5(toolName + args) 指纹，连续失败 ≥3 次触发
+- §滑动窗口失败计数器 + 成功清空
+- §必须 `RoleUser` 注入：Lost in the Middle 近因效应权重
+- §与 Error Recovery 分层：治"错" vs 治"卡"
+- §阈值兜底物理强杀：超阈值 break loop / 转人工
+- §上下文内容分布偏移：相同结构错误堆末尾会牵引模型
 
-**原因**：SessionManager 没有租户隔离检查，或者租户不匹配时返回了 `ErrUnauthorized` 泄露了 Session 存在性。
+</details>
 
-**解决**：统一返回 `ErrSessionNotFound`（不存在），不区分"不存在"和"无权限"，防止攻击者通过错误类型枚举 SessionID。
+<details>
+<summary><strong>上下文工程综合（上下文工程.md）</strong>（点击展开）</summary>
 
-### 陷阱 8：长程任务进程崩溃后全部丢失
+- §工程化通用模式：分层注入 / 滑动窗口 / 阶梯降级 / 显式边界
+- §注意力预算分配：static 高、middle 低、tail 高
+- §缓存命中率 vs 内容动态性的权衡曲线
 
-**症状**：跑了 2 小时的任务，进程崩溃后从零开始。
+</details>
 
-**原因**：Session 只在内存中维护，没做持久化；TODO.md 也没启用。
+<details>
+<summary><strong>多轮对话设计（多轮对话设计.md）</strong>（点击展开）</summary>
 
-**解决**：启用 Plan Mode + 外部化状态（PLAN.md/TODO.md）。进程崩溃 100 次，只要 TODO.md 还在，重启后无缝恢复。
+- §Topic Shift 检测与 Session 分裂
+- §上下文连续性 vs 主题隔离的中间方案
+- §显式边界标记：CONTEXT_BOUNDARY / SESSION_RESTART / FORGET
 
-### 陷阱 9：MMR 参数不当导致检索质量差
+</details>
 
-**症状**：检索到的内容全是一堆重复。
+<details>
+<summary><strong>记忆架构（记忆架构.md）</strong>（点击展开）</summary>
 
-**原因**：相似度阈值太低，或者没用 MMR 重排序。
+- §Working / State / Episodic / Hybrid Retrieval 四层职责切分
+- §MEMORY.md 索引大小上限与压缩策略
+- §向量 + 关键词 + 图谱混合检索
 
-**解决**：相似度阈值从 0.7 开始调，启用 MMR（λ=0.7）平衡相关性和多样性。
-
-### 陷阱 10：把"存了"当成"记住了"
-
-**症状**：把信息存进向量库后，每轮都全量加载到上下文。
-
-**原因**：混淆了"记忆存储"和"上下文使用"。存储是后台行为，上下文是当前轮使用。
-
-**解决**：记忆存储了 ≠ 每一轮都要放进上下文。只放当前任务需要的，分层检索后做 MMR 去重。
-
----
-
-## 设计检查清单
-
-当你设计一个 Agent 的上下文管理系统时，逐一检查以下问题：
-
-1. **Session 是否物理隔离？**（多用户/多终端是否独立存储，租户隔离是否检查）
-2. **Working Memory 是否处理了 ToolResult 孤儿？**（边界处理避免 400 报错）
-3. **是否有 Token 感知的双维度截断？**（条数 + Token 预算）
-4. **Compaction 是否保留 ToolCall 意图？**（绝不删除 tool_calls 字段）
-5. **单条超长消息是否有兜底？**（Compactor 掐头去尾 / Masking）
-6. **PII 脱敏覆盖了哪些类型？**（Email、电话、信用卡、SSN、API Key、密码）
-7. **Prompt Cache 的前缀是否稳定？**（避免秒级时间戳、动态 ID）
-8. **上下文是否 Append-Only？**（不重排历史消息）
-9. **是否有租户隔离检查？**（不泄露 Session 是否存在）
-10. **是否有防死循环机制？**（System Reminders / 连续失败检测）
-11. **错误恢复是否有 Recovery Hints？**（不只是返回原始报错）
-12. **长程任务是否启用了 Plan Mode？**（PLAN.md / TODO.md 外部化记忆）
-13. **跨进程持久化机制是什么？**（文件系统 / Checkpointer / 关系数据库）
-14. **长期记忆检索是否分层？**（Recent + Semantic + Summary 融合）
-15. **是否有 MMR 去重？**（避免相似度检索返回一堆重复内容）
-
----
-
-## 附件：上下文管理的层次全景
-
-把全文涉及的所有上下文层次串起来：
-
-```mermaid
-flowchart TB
-    SP[System Prompt<br/>极简内核 + AGENTS.md + Skills] --> C[每轮 Context]
-    SESS[Session<br/>全量历史 + 物理隔离] --> WM[Working Memory<br/>最近 N 条 + Token 预算]
-    WM --> C
-    C --> COMP[Compaction<br/>远期掩码 + 短期掐头去尾]
-    COMP --> LLM[LLM 调用]
-    LLM --> TR[Tool Results]
-    TR --> REC[Recovery<br/>错误注入]
-    REC --> REM[Reminders<br/>死循环检测]
-    REM --> SESS
-
-    LT[Long-Term Memory<br/>向量库 + 关系库] --> SEL[Select<br/>MMR 重排]
-    SEL --> C
-
-    EXT[Externalized State<br/>PLAN.md / TODO.md] -.->|Plan Mode 时按需 read_file| C
-
-    style SP fill:#e1f5fe,stroke:#0288d1
-    style C fill:#fafafa,stroke:#666
-    style COMP fill:#fff3e0,stroke:#f57c00
-    style REC fill:#ffebee,stroke:#c62828
-    style REM fill:#f3e5f5,stroke:#7b1fa2
-    style EXT fill:#e8f5e9,stroke:#388e3c
-    style LT fill:#e8f5e9,stroke:#388e3c
-```
-
-每一层都有自己的生命周期和管理策略：
-
-- **System Prompt**：每轮必带，前缀稳定（Cache 友好）
-- **Session**：长期持久化，物理隔离
-- **Working Memory**：从 Session 截取最近 N 条 + Token 预算
-- **Compaction**：在 Working Memory 上做物理降级
-- **Tool Results**：短期完整，长期掩码
-- **Recovery**：工具返回时立即注入
-- **Reminders**：Observe 阶段尾部检测，写入 Session 末尾
-- **Long-Term Memory**：跨会话持久，分层检索
-- **Externalized State**：Plan Mode 时按需 read_file
-
-记住一句话：**"Agent 的失败本质上是上下文的失败，而不是模型的失败。"**
-
-每一层都做好了，Agent 才能在长程任务中保持连贯性、可靠性和成本可控。
+</details>
