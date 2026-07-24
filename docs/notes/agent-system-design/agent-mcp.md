@@ -36,14 +36,14 @@ MCP 工具的语义元数据（annotations）必须强制设置，不能信任 s
 
 ## 暂缓页保留的样本索引（待 MCP 真有工程需求时再启用）
 
-- [cc-15 §一 解决什么问题](../application-notes/claude-code-cli/cc-15-mcp-integration.md)
-- [cc-15 §三 3 transport 与配置作用域](../application-notes/claude-code-cli/cc-15-mcp-integration.md)
-- [cc-15 §三 4 注册机制](../application-notes/claude-code-cli/cc-15-mcp-integration.md)
-- [cc-15 §四 5 工具调用执行](../application-notes/claude-code-cli/cc-15-mcp-integration.md)
-- [cc-15 §四 6 断连与重连](../application-notes/claude-code-cli/cc-15-mcp-integration.md)
-- [dify-12 §一 Server 暴露](../application-notes/dify/dify-12-mcp-protocol.md)
-- [dify-12 §二 Streamable HTTP vs SSE](../application-notes/dify/dify-12-mcp-protocol.md)
-- [dify-12 §四 Session 生命周期](../application-notes/dify/dify-12-mcp-protocol.md)
+- [cc-15 §一 解决什么问题](../../application-notes/engineering/claude-code-cli/cc-15-mcp-integration.md)
+- [cc-15 §三 3 transport 与配置作用域](../../application-notes/engineering/claude-code-cli/cc-15-mcp-integration.md)
+- [cc-15 §三 4 注册机制](../../application-notes/engineering/claude-code-cli/cc-15-mcp-integration.md)
+- [cc-15 §四 5 工具调用执行](../../application-notes/engineering/claude-code-cli/cc-15-mcp-integration.md)
+- [cc-15 §四 6 断连与重连](../../application-notes/engineering/claude-code-cli/cc-15-mcp-integration.md)
+- [dify-12 §一 Server 暴露](../../application-notes/engineering/dify/dify-12-mcp-protocol.md)
+- [dify-12 §二 Streamable HTTP vs SSE](../../application-notes/engineering/dify/dify-12-mcp-protocol.md)
+- [dify-12 §四 Session 生命周期](../../application-notes/engineering/dify/dify-12-mcp-protocol.md)
 
 ---
 

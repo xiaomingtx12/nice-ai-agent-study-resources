@@ -1189,7 +1189,7 @@ for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 - **02-entry-and-lifecycle**：`/compact` 命令入口在 `src/commands/compact/compact.ts`，被 REPL 的 slash command 调度。
 - **07-context-assembly**：CLAUDE.md / memory 注入由 `processSessionStartHooks` 触发，本篇 [§4.4 CLAUDE.md / memory 重新注入](#claudemd--memory-重新注入) 描述。
 - **04-streaming-and-rendering**：streaming 路径在 compact 时的退化在 [§4.3 机制 5](#机制-5prompt-cache-sharingfork-路径stage-5) 详述。
-- **12-hook-interception**：PreCompact / PostCompact / SessionStart hook 在 [§3.5 对外接口](#35-对外接口) 与 [收束 模式 7](#模式-7prepost-hooks前后-hook-让外部注入逻辑) 简述。
+- **12-hook-interception**：PreCompact / PostCompact / SessionStart hook 在 [§3.5 对外接口](#35-对外接口) 与 [§收束·设计权衡](#设计权衡) 简述。
 
 ---
 

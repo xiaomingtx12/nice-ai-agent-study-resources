@@ -65,7 +65,7 @@ OpenClaw 和 Hermes 都属于"拿成品 agent 应用改"这一类，但它俩的
 
 ### 路径二：OpenClaw——多渠道助手控制平面
 
-**定位**：一个个人 AI 助手的**控制平面 / 网关**。它把多渠道接入（WhatsApp、Telegram、Slack、Discord）、模型路由、Agent 运行时、工具记忆、Sandbox、Skills、Sub-agent、安全模型放进同一张系统图。仓库里已有 [OpenClaw 源码解析](../../resources/openclaw-book/index.md) 做源码导读。
+**定位**：一个个人 AI 助手的**控制平面 / 网关**。它把多渠道接入（WhatsApp、Telegram、Slack、Discord）、模型路由、Agent 运行时、工具记忆、Sandbox、Skills、Sub-agent、安全模型放进同一张系统图。仓库里已有 [OpenClaw 源码解析](../../resources/systems/openclaw-book/index.md) 做源码导读。
 
 **形态**：真实开源项目（TypeScript 大项目），可二开。它关心的不是"agent 是什么"，而是"一条消息怎么进系统、怎么穿过去、怎么出去"。
 
@@ -106,7 +106,7 @@ OpenClaw 和 Hermes 都属于"拿成品 agent 应用改"这一类，但它俩的
 
 ### 路径四：Dify——低代码 agent + 工作流平台
 
-**定位**：企业级低代码 agent / 工作流编排平台。有 UI、应用配置层、agent runtime、RAG、MCP、多租户、可观测、触发器。仓库里已有 [Dify 架构拆解（v1.15.0）](../../application-notes/dify/index.md) 共 16 篇。
+**定位**：企业级低代码 agent / 工作流编排平台。有 UI、应用配置层、agent runtime、RAG、MCP、多租户、可观测、触发器。仓库里已有 [Dify 架构拆解（v1.15.0）](../../application-notes/engineering/dify/index.md) 共 16 篇。
 
 **形态**：平台型产品。harness 是它提供的可配置能力，你通过 UI 和配置组装应用，而不是写代码拼 loop。
 
@@ -114,12 +114,12 @@ OpenClaw 和 Hermes 都属于"拿成品 agent 应用改"这一类，但它俩的
 
 | 主线 | 在 Dify 里以什么形式存在 |
 |------|----------------------|
-| 主循环 | agent runtime + reasoning（[dify-03](../../application-notes/dify/dify-03-agent-runtime.md) / [dify-04](../../application-notes/dify/dify-04-agent-reasoning.md)）+ workflow engine（[dify-11](../../application-notes/dify/dify-11-workflow-engine.md)） |
-| 上下文装配 | agent context 层（[dify-05](../../application-notes/dify/dify-05-agent-context.md)）+ RAG indexing/retrieval（[dify-09](../../application-notes/dify/dify-09-rag-indexing.md) / [dify-10](../../application-notes/dify/dify-10-rag-retrieval.md)） |
-| 工具系统 | tool registration（[dify-07](../../application-notes/dify/dify-07-tool-registration.md)）+ MCP（[dify-12](../../application-notes/dify/dify-12-mcp-protocol.md)） |
-| 状态与事件 | async tasks/events（[dify-06](../../application-notes/dify/dify-06-async-tasks-and-events.md)）+ trigger system（[dify-15](../../application-notes/dify/dify-15-trigger-system.md)） |
-| 治理边界 | 多租户与安全（[dify-13](../../application-notes/dify/dify-13-multi-tenancy-and-security.md)）+ 可观测（[dify-14](../../application-notes/dify/dify-14-observability.md)） |
-| 额外 | model providers 与扩展（[dify-08](../../application-notes/dify/dify-08-model-providers-and-extensions.md)）、应用配置层（[dify-02](../../application-notes/dify/dify-02-app-config-layer.md)） |
+| 主循环 | agent runtime + reasoning（[dify-03](../../application-notes/engineering/dify/dify-03-agent-runtime.md) / [dify-04](../../application-notes/engineering/dify/dify-04-agent-reasoning.md)）+ workflow engine（[dify-11](../../application-notes/engineering/dify/dify-11-workflow-engine.md)） |
+| 上下文装配 | agent context 层（[dify-05](../../application-notes/engineering/dify/dify-05-agent-context.md)）+ RAG indexing/retrieval（[dify-09](../../application-notes/engineering/dify/dify-09-rag-indexing.md) / [dify-10](../../application-notes/engineering/dify/dify-10-rag-retrieval.md)） |
+| 工具系统 | tool registration（[dify-07](../../application-notes/engineering/dify/dify-07-tool-registration.md)）+ MCP（[dify-12](../../application-notes/engineering/dify/dify-12-mcp-protocol.md)） |
+| 状态与事件 | async tasks/events（[dify-06](../../application-notes/engineering/dify/dify-06-async-tasks-and-events.md)）+ trigger system（[dify-15](../../application-notes/engineering/dify/dify-15-trigger-system.md)） |
+| 治理边界 | 多租户与安全（[dify-13](../../application-notes/engineering/dify/dify-13-multi-tenancy-and-security.md)）+ 可观测（[dify-14](../../application-notes/engineering/dify/dify-14-observability.md)） |
+| 额外 | model providers 与扩展（[dify-08](../../application-notes/engineering/dify/dify-08-model-providers-and-extensions.md)）、应用配置层（[dify-02](../../application-notes/engineering/dify/dify-02-app-config-layer.md)） |
 
 **适合**：企业级、多租户、可视化搭建、业务人员可参与、需要完整平台能力开箱即用。
 

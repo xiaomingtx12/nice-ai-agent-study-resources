@@ -7,7 +7,7 @@ description: LangChain 1.3.7 `create_agent()` 主线拆解。按 factory.py 真�
 
 > **适用版本**：`langchain` **1.3.7**（`libs/langchain_v1/`）
 >
-> **源码入口**：[libs/langchain_v1/langchain/agents/factory.py](libs/langchain_v1/langchain/agents/factory.py)（1981 行）
+> **源码入口**：libs/langchain_v1/langchain/agents/factory.py（1981 行）
 >
 > **阅读路径**：本文按 `create_agent()` **真实执行顺序**展开。先给"代码地图"（§二），再按五个构建阶段逐步深入（§三 ~ §七），最后看使用模式（§八）。每个阶段涉及到的概念都嵌入到该阶段内讲解。
 
@@ -35,7 +35,7 @@ description: LangChain 1.3.7 `create_agent()` 主线拆解。按 factory.py 真�
 
 ### 2.1 顶层代码树
 
-`create_agent` 的所有实现都在一个目录里：[`libs/langchain_v1/langchain/agents/`](libs/langchain_v1/langchain/agents/)。
+`create_agent` 的所有实现都在一个目录里：`libs/langchain_v1/langchain/agents/`。
 
 ```
 libs/langchain_v1/langchain/agents/
@@ -167,7 +167,7 @@ create_agent(model, tools, middleware, response_format, ...)
 
 ### 2.4 工厂入口的三套 `@overload` 签名
 
-`factory.py` 顶端用 `@overload` 写了三份签名（[factory.py:718-784](libs/langchain_v1/langchain/agents/factory.py#L718-L784)），下面再写一份真正实现（[factory.py:787+](libs/langchain_v1/langchain/agents/factory.py#L787)）。这是 Python 静态类型系统的工具——运行时只有最后那份实现干活，前面 `@overload` 签名只给类型检查器看，用来在不同 `response_format` 形态下推断出更精确的返回类型 `ResponseT`。
+`factory.py` 顶端用 `@overload` 写了三份签名（factory.py:718-784），下面再写一份真正实现（factory.py:787+）。这是 Python 静态类型系统的工具——运行时只有最后那份实现干活，前面 `@overload` 签名只给类型检查器看，用来在不同 `response_format` 形态下推断出更精确的返回类型 `ResponseT`。
 
 ```python
 # 三份签名（仅静态类型推断用，运行时是空的）：
@@ -197,7 +197,7 @@ def create_agent(model, tools=..., *, response_format=..., ...):
 
 ### 3.1 model 归一化：`init_chat_model`
 
-工厂第一步（[factory.py:942-943](libs/langchain_v1/langchain/agents/factory.py#L942-L943)）是把字符串形式的 model 解析为 `BaseChatModel` 实例：
+工厂第一步（factory.py:942-943）是把字符串形式的 model 解析为 `BaseChatModel` 实例：
 
 ```python
 if isinstance(model, str):
@@ -208,11 +208,11 @@ if isinstance(model, str):
 
 还有"可配置模型"用法——`init_chat_model(configurable_fields=["model", "model_provider"])` 允许在 `config={"configurable": {"model": ...}}` 中运行时切换。这是 LangGraph 做 A/B 实验与灰度的入口。
 
-> **`BaseChatModel` 的继承层次**：`RunnableSerializable → BaseLanguageModel → BaseChatModel`（[10-chat-model-base-abstractions.md](zread_docs/深入探索/核心抽象_(langchain-core)/10-chat-model-base-abstractions.md)）。Runnable 是 LangChain 的"可调用 + 可流式 + 可批处理"统一接口。`BaseLanguageModel` 是所有语言模型的抽象基类。`BaseChatModel` 在它之上要求按消息列表（`BaseMessage`）输入输出。必选抽象是 `_generate(messages, stop, run_manager) → ChatResult`（同步实际生成方法）和 `_llm_type` 属性（字符串类型标识）。`bind_tools(tools, **kwargs) → Runnable` 是 create_agent 把工具清单钉到模型上的关键钩子。`profile: ModelProfile` 存储 `structured_output` 等能力标志，会被 `response_format` 阶段读取。
+> **`BaseChatModel` 的继承层次**：`RunnableSerializable → BaseLanguageModel → BaseChatModel`。Runnable 是 LangChain 的"可调用 + 可流式 + 可批处理"统一接口。`BaseLanguageModel` 是所有语言模型的抽象基类。`BaseChatModel` 在它之上要求按消息列表（`BaseMessage`）输入输出。必选抽象是 `_generate(messages, stop, run_manager) → ChatResult`（同步实际生成方法）和 `_llm_type` 属性（字符串类型标识）。`bind_tools(tools, **kwargs) → Runnable` 是 create_agent 把工具清单钉到模型上的关键钩子。`profile: ModelProfile` 存储 `structured_output` 等能力标志，会被 `response_format` 阶段读取。
 
 ### 3.2 system_prompt 归一化
 
-[factory.py:946-951](libs/langchain_v1/langchain/agents/factory.py#L946-L951)：
+factory.py:946-951：
 
 ```python
 if system_prompt is not None:
@@ -226,7 +226,7 @@ if system_prompt is not None:
 
 ### 3.3 工具的两类划分
 
-[factory.py:1031-1056](libs/langchain_v1/langchain/agents/factory.py#L1031-L1056) 把用户传入的 `tools` 划分成三类：
+factory.py:1031-1056 把用户传入的 `tools` 划分成三类：
 
 ```python
 built_in_tools = [t for t in tools if isinstance(t, dict)]        # 模型服务端执行
@@ -241,11 +241,11 @@ available_tools = middleware_tools + regular_tools               # 进 ToolNode�
 - **`regular_tools`**（`BaseTool` / callable）：必须注册到 `ToolNode`，在本地执行。`callable` 会被 `ToolNode` 内部转成 `BaseTool`。
 - **中间件声明的 `tools`**（`m.tools`）：和 `regular_tools` 一视同仁进 `ToolNode`。中间件还可以在 `wrap_model_call` 中动态改写 `request.tools`，这部分在阶段 4 谈 `request.override()` 时再展开。
 
-`ToolNode` 只在 `available_tools` 非空 **或** 中间件定义了 `wrap_tool_call` 时才创建（[factory.py:1039-1047](libs/langchain_v1/langchain/agents/factory.py#L1039-L1047)）。即使没有显式工具，只要有中间件想包装工具调用，工厂也会建一个空 ToolNode 作为执行壳。
+`ToolNode` 只在 `available_tools` 非空 **或** 中间件定义了 `wrap_tool_call` 时才创建（factory.py:1039-1047）。即使没有显式工具，只要有中间件想包装工具调用，工厂也会建一个空 ToolNode 作为执行壳。
 
 `default_tools`（line 1053-1056）是 model_node 构造 `ModelRequest` 时塞的默认工具清单。`ToolNode` 已把 callable 转换为 `BaseTool`，所以这里用 `tool_node.tools_by_name.values()` 而不是原始 callable。
 
-> **`BaseTool` 的继承层次**：`RunnableSerializable → BaseTool → Tool / StructuredTool`（[11-tool-definition-framework.md](zread_docs/深入探索/核心抽象_(langchain-core)/11-tool-definition-framework.md)）。三种使用模式：`@tool`（裸装饰器，名字取自函数名）、`@tool("search", return_direct=True)`（名称覆盖 + 直接返回，即调完不进入下一轮模型）、`@tool(response_format="content_and_artifact", parse_docstring=True)`（配置参数）。
+> **`BaseTool` 的继承层次**：`RunnableSerializable → BaseTool → Tool / StructuredTool`。三种使用模式：`@tool`（裸装饰器，名字取自函数名）、`@tool("search", return_direct=True)`（名称覆盖 + 直接返回，即调完不进入下一轮模型）、`@tool(response_format="content_and_artifact", parse_docstring=True)`（配置参数）。
 
 > 关键字段：`name`、`description`、`args_schema`、`handle_tool_error`、`return_direct`、`handle_validation_error`、`extras`。注入机制：`InjectedToolArg`、`InjectedToolCallId` 允许工具读取 graph state 和 tool_call_id 而无需把它们暴露给模型。这样能防止模型误以为这些是可调用参数。
 
@@ -262,7 +262,7 @@ available_tools = middleware_tools + regular_tools               # 进 ToolNode�
 
 ### 4.1 概念：六个钩子点（同步/异步成对）
 
-[types.py:383-811](libs/langchain_v1/langchain/agents/middleware/types.py#L383-L811) 定义 `AgentMiddleware` 六个钩子。每个钩子都有同步/异步变体：
+types.py:383-811 定义 `AgentMiddleware` 六个钩子。每个钩子都有同步/异步变体：
 
 | 钩子 | 风格 | 时机 | 典型用途 |
 |---|---|---|---|
@@ -278,7 +278,7 @@ available_tools = middleware_tools + regular_tools               # 进 ToolNode�
 - **观察者**（`before_*` / `after_*`）：返回一段状态更新字典。它**改不了调用本身**，只能在调用前改上下文、或在调用后读输出。模型该调几次就调几次，无法插手。
 - **拦截器**（`wrap_*`）：拿到一个 `handler` 回调，可以决定**调不调、调几次**。这是中间件能实现"重试 / 缓存 / 回退"的核心机制。同一个 `ModelRequest` 在同一函数栈里可以被复用 n 次：拦截器命中缓存就跳过模型调用直接返回，模型失败就再用同一个 `ModelRequest` 重试一次。这些都是观察者做不到的事。
 
-每个钩子的默认实现都是 `raise NotImplementedError`（[types.py:574-584](libs/langchain_v1/langchain/agents/middleware/types.py#L574-L584)、[types.py:732-742](libs/langchain_v1/langchain/agents/middleware/types.py#L732-L742)）。
+每个钩子的默认实现都是 `raise NotImplementedError`（types.py:574-584、types.py:732-742）。
 
 如果只定义了 `awrap_model_call`（异步版）却用 `agent.invoke()`（同步调用），工厂会立刻抛 NotImplementedError 并打印三种修法：
 
@@ -301,13 +301,13 @@ request.tools = [...]  # 触发 DeprecationWarning（types.py:192-198）
 
 这种不可变模式对**重试安全**至关重要：每次重试都用一个干净的请求快照，前面的层不会污染后面的层。这里的"层"就是 §4.3 要讲的中间件栈：`middleware=[A, B, C]` 意味着 A 是最外层、C 是最内层包住真实模型调用。每一层都基于上一层传下来的 ModelRequest 重写自己关心的字段。
 
-以 `ModelRequest`（[types.py:85-267](libs/langchain_v1/langchain/agents/middleware/types.py#L85-L267)）为例，字段有：`model` / `messages` / `system_message` / `tool_choice` / `tools` / `response_format` / `state` / `runtime` / `model_settings`。`state` 是完整 graph state，`runtime: Runtime[ContextT]` 提供 context / store / stream_writer。
+以 `ModelRequest`（types.py:85-267）为例，字段有：`model` / `messages` / `system_message` / `tool_choice` / `tools` / `response_format` / `state` / `runtime` / `model_settings`。`state` 是完整 graph state，`runtime: Runtime[ContextT]` 提供 context / store / stream_writer。
 
-**返回类型也有三种灵活度**（`ModelCallResult = ModelResponse | AIMessage | ExtendedModelResponse`，[types.py:313-323](libs/langchain_v1/langchain/agents/middleware/types.py#L313-L323)）：
+**返回类型也有三种灵活度**（`ModelCallResult = ModelResponse | AIMessage | ExtendedModelResponse`，types.py:313-323）：
 
-- `ModelResponse`（[types.py:270-285](libs/langchain_v1/langchain/agents/middleware/types.py#L270-L285)）：`result: list[BaseMessage]` + `structured_response`，最通用。
+- `ModelResponse`（types.py:270-285）：`result: list[BaseMessage]` + `structured_response`，最通用。
 - `AIMessage`：简写形式。工厂内部 `ModelResponse(result=[ai_msg], structured_response=None)`。
-- `ExtendedModelResponse`（[types.py:288-310](libs/langchain_v1/langchain/agents/middleware/types.py#L288-L310)）：在 `ModelResponse` 之外多带一个 `Command`（LangGraph 的"告诉图该怎么更新 state"的指令对象）。它用于在模型自己的返回值之外再附一条状态更新——比如顺手记一条日志到 state。
+- `ExtendedModelResponse`（types.py:288-310）：在 `ModelResponse` 之外多带一个 `Command`（LangGraph 的"告诉图该怎么更新 state"的指令对象）。它用于在模型自己的返回值之外再附一条状态更新——比如顺手记一条日志到 state。
 
   `Command` 上的三个字段在 `wrap_model_call` 里还不支持：
 
@@ -315,11 +315,11 @@ request.tools = [...]  # 触发 DeprecationWarning（types.py:192-198）
   - `resume`：从中断恢复
   - `graph`：替换子图
 
-  这三个字段会抛 `NotImplementedError`（[factory.py:215-227](libs/langchain_v1/langchain/agents/factory.py#L215-L227)）。要用的话，改用 `before_model` / `after_model` 钩子里的 `jump_to` 字段即可。
+  这三个字段会抛 `NotImplementedError`（factory.py:215-227）。要用的话，改用 `before_model` / `after_model` 钩子里的 `jump_to` 字段即可。
 
 ### 4.3 代码：拦截器钩子的组合（"列表第一个 = 最外层"）
 
-这是中间件设计中最容易踩坑的规则。看 [factory.py:234-323](libs/langchain_v1/langchain/agents/factory.py#L234-L323) `_chain_model_call_handlers()`：
+这是中间件设计中最容易踩坑的规则。看 factory.py:234-323 `_chain_model_call_handlers()`：
 
 ```python
 # 右到左组合：handlers[-1] 是最内层
@@ -337,15 +337,15 @@ cache (最外层)  →  fallback  →  retry  →  实际模型
    ↑命中即返回      ↑捕获异常切备用  ↑重试瞬时错误
 ```
 
-`ExtendedModelResponse.command` 携带的 `Command` 会按"内层先、外层后"累积应用（`_to_composed_result`，[factory.py:255-271](libs/langchain_v1/langchain/agents/factory.py#L255-L271)）。对于非归约器字段（如 `structured_response`），最外层中间件覆盖内层。
+`ExtendedModelResponse.command` 携带的 `Command` 会按"内层先、外层后"累积应用（`_to_composed_result`，factory.py:255-271）。对于非归约器字段（如 `structured_response`），最外层中间件覆盖内层。
 
-`_chain_tool_call_wrappers()`（[factory.py:605-650](libs/langchain_v1/langchain/agents/factory.py#L605-L650)）结构相同——同步版；异步版在 [factory.py:653-714](libs/langchain_v1/langchain/agents/factory.py#L653-L714)。
+`_chain_tool_call_wrappers()`（factory.py:605-650）结构相同——同步版；异步版在 factory.py:653-714。
 
 ### 4.4 代码：观察者钩子的分类与 traceable 包裹
 
 观察者钩子不需要组合成调用栈，但需要在编译期按钩子类型归类——这样工厂才知道每个 `before_model` 节点要串哪些中间件、每个 `after_model` 节点又要串哪些。
 
-[factory.py:986-1113](libs/langchain_v1/langchain/agents/factory.py#L986-L1113) 按钩子类型归类中间件。检测方式是比较类的 `__dict__` 是否覆盖了基类的 `wrap_tool_call` / `awrap_tool_call` 等方法：
+factory.py:986-1113 按钩子类型归类中间件。检测方式是比较类的 `__dict__` 是否覆盖了基类的 `wrap_tool_call` / `awrap_tool_call` 等方法：
 
 ```python
 middleware_w_wrap_tool_call = [
@@ -357,13 +357,13 @@ middleware_w_wrap_tool_call = [
 
 具体规则是：sync 节点走 `wrap_tool_call` 列表，async 节点走 `awrap_tool_call` 列表。同步/异步任一被实现都会纳入对应栈。这样既保证 `invoke()` 走到同步栈，又避免另一端静默走空。这意味着可以只实现异步版（只写 `awrap_tool_call`），sync 调用方会立刻拿到明确的报错，而不是被悄悄短路。
 
-**traceable 包裹**：每个钩子被 `langsmith.traceable(name=..., process_inputs=_scrub_inputs)` 包裹。`traceable` 是 LangSmith 提供的追踪装饰器，把每次调用上报为 trace span。`_scrub_inputs`（[factory.py:141-150](libs/langchain_v1/langchain/agents/factory.py#L141-L150)）会把 `runtime` 和 `handler` 从 trace inputs 中剥离，避免敏感数据上送。
+**traceable 包裹**：每个钩子被 `langsmith.traceable(name=..., process_inputs=_scrub_inputs)` 包裹。`traceable` 是 LangSmith 提供的追踪装饰器，把每次调用上报为 trace span。`_scrub_inputs`（factory.py:141-150）会把 `runtime` 和 `handler` 从 trace inputs 中剥离，避免敏感数据上送。
 
 ### 4.5 概念：装饰器 API —— 函数即中间件
 
-如果不想写完整的 `AgentMiddleware` 子类，[types.py:867-2161](libs/langchain_v1/langchain/agents/middleware/types.py#L867-L2161) 提供 7 个装饰器：`@before_model` / `@after_model` / `@before_agent` / `@after_agent` / `@dynamic_prompt` / `@wrap_model_call` / `@wrap_tool_call`。装饰器内部用 `type(name, (AgentMiddleware,), {...})()` 动态创建 `AgentMiddleware` 子类（[types.py:1058-1069](libs/langchain_v1/langchain/agents/middleware/types.py#L1058-L1069)），自动检测同步/异步并路由到对应钩子。
+如果不想写完整的 `AgentMiddleware` 子类，types.py:867-2161 提供 7 个装饰器：`@before_model` / `@after_model` / `@before_agent` / `@after_agent` / `@dynamic_prompt` / `@wrap_model_call` / `@wrap_tool_call`。装饰器内部用 `type(name, (AgentMiddleware,), {...})()` 动态创建 `AgentMiddleware` 子类（types.py:1058-1069），自动检测同步/异步并路由到对应钩子。
 
-每个装饰器支持 `can_jump_to=["end" | "tools" | "model"]` 元数据。`_get_can_jump_to()`（[factory.py:490-524](libs/langchain_v1/langchain/agents/factory.py#L490-L524)）会读取这个元数据，在阶段 4 自动建立条件边。
+每个装饰器支持 `can_jump_to=["end" | "tools" | "model"]` 元数据。`_get_can_jump_to()`（factory.py:490-524）会读取这个元数据，在阶段 4 自动建立条件边。
 
 `can_jump_to` 的语义是：本钩子声明自己有权把执行流切到哪几个目标节点。
 
@@ -412,7 +412,7 @@ middleware_w_wrap_tool_call = [
 
 ### 5.1 概念：`AgentState` 的三个字段与归约器
 
-[types.py:347-365](libs/langchain_v1/langchain/agents/middleware/types.py#L347-L365) 定义：
+types.py:347-365 定义：
 
 ```python
 class AgentState(TypedDict, Generic[ResponseT]):
@@ -431,7 +431,7 @@ class AgentState(TypedDict, Generic[ResponseT]):
 
 > "归约器 reducer"是 LangGraph 的术语，指"节点返回状态时如何与已有 state 合并"的策略函数。`add_messages` 是 LangGraph 内置的合并函数，按 `id` 去重、按追加顺序拼接。
 
-`InputAgentState` / `OutputAgentState`（[types.py:355-365](libs/langchain_v1/langchain/agents/middleware/types.py#L355-L365)）把"用户传什么 / 用户拿到什么"做了更严格的收口：
+`InputAgentState` / `OutputAgentState`（types.py:355-365）把"用户传什么 / 用户拿到什么"做了更严格的收口：
 
 - **输入**：允许 `messages: list[AnyMessage | dict]`。也就是说既可以传 `HumanMessage(...)` 这种对象，也可以直接传 `{"role": "user", "content": "..."}` 这种原始 dict，`add_messages` 会强转。
 - **输出**：保证 `messages: list[AnyMessage]`，并把 `structured_response` 暴露出来。
@@ -450,7 +450,7 @@ class AgentState(TypedDict, Generic[ResponseT]):
 
 ### 5.3 代码：合并顺序与 `_resolve_schemas` 的实现
 
-[factory.py:1127-1135](libs/langchain_v1/langchain/agents/factory.py#L1127-L1135)：
+factory.py:1127-1135：
 
 ```python
 base_state = state_schema if state_schema is not None else AgentState
@@ -460,12 +460,12 @@ resolved_state_schema, input_schema, output_schema = _resolve_schemas(state_sche
 
 合并顺序：中间件 schemas 在前（按注册顺序），`base_state` 最后，`base_state` 赢字段冲突。这让调用方的显式 `state_schema` 能覆盖中间件声明的注解（例如一个 `DeltaChannel` 注解能赢过 `BinaryOperatorAggregate` 而无需事后打补丁）。
 
-`_resolve_schemas` 内部对每个 schema 都调用 `_resolve_schema`（[factory.py:438-472](libs/langchain_v1/langchain/agents/factory.py#L438-L472)）。后者做两件事：
+`_resolve_schemas` 内部对每个 schema 都调用 `_resolve_schema`（factory.py:438-472）。后者做两件事：
 
 1. 按 `omit_flag`（`"input"` 或 `"output"`）过滤字段注解。例如生成 input schema 时把 `OmitFromInput` / `PrivateStateAttr` 标过的字段剔除。
 2. 把所有字段合并到一个新生成的 `TypedDict`。
 
-`_get_schema_type_hints`（[factory.py:417-420](libs/langchain_v1/langchain/agents/factory.py#L417-L420)）则用 `lru_cache` 把已解析的 schema 缓存起来，避免每次 invoke 都重新解析。`lru_cache` 是 Python 标准库的"最近最少用"缓存装饰器。
+`_get_schema_type_hints`（factory.py:417-420）则用 `lru_cache` 把已解析的 schema 缓存起来，避免每次 invoke 都重新解析。`lru_cache` 是 Python 标准库的"最近最少用"缓存装饰器。
 
 > 这种"输入宽容、输出严格"的分离让 Agent 在边界上对调用者友好，但执行路径上的每个节点都拿到的是强类型 `AgentState`。如果要扩展状态（例如加上 `todo_list`、`retry_count`），通过中间件声明 `state_schema` 比直接继承 `AgentState` 更能保持作用域局部化。
 
@@ -506,7 +506,7 @@ START → entry_node → before_agent[0..n] → loop_entry_node
 
 `StateGraph` 接收四套独立 schema（内部 state / 用户输入 / 用户输出 / 运行时 context），这样 create_agent 用同一张图既能在边界对调用者友好、又能在内部做强类型校验。
 
-工厂往图里挂三类节点（[factory.py:1476-1564](libs/langchain_v1/langchain/agents/factory.py#L1476-L1564)）：
+工厂往图里挂三类节点（factory.py:1476-1564）：
 
 - `model` 节点：`RunnableCallable(model_node, amodel_node, trace=False)`，同步/异步各一份。
 - `tools` 节点（若需要）：直接挂 `ToolNode` 实例。
@@ -524,7 +524,7 @@ START → entry_node → before_agent[0..n] → loop_entry_node
 
 #### 6.3.1 `_get_bound_model`：四步决策
 
-`_get_bound_model`（[factory.py:1251-1378](libs/langchain_v1/langchain/agents/factory.py#L1251-L1378)）的输入是 `ModelRequest`，输出是一个已经 `bind_tools` 过的 `BaseChatModel`。它做四步：
+`_get_bound_model`（factory.py:1251-1378）的输入是 `ModelRequest`，输出是一个已经 `bind_tools` 过的 `BaseChatModel`。它做四步：
 
 1. **客户端工具校验**：如果没 `wrap_tool_call`，抛 `DYNAMIC_TOOL_ERROR_TEMPLATE`。
 2. **响应格式策略解析**：把原始 schema 包成 `AutoStrategy`，再根据 `_supports_provider_strategy()` 决定走 `ProviderStrategy` 还是 `ToolStrategy`。
@@ -536,7 +536,7 @@ START → entry_node → before_agent[0..n] → loop_entry_node
 
 #### 6.3.2 `_handle_model_output`：如何处理返回
 
-`_handle_model_output`（[factory.py:1147-1249](libs/langchain_v1/langchain/agents/factory.py#L1147-L1249)）根据响应策略与 `tool_calls` 决定后续动作：
+`_handle_model_output`（factory.py:1147-1249）根据响应策略与 `tool_calls` 决定后续动作：
 
 | 输出情形 | 处理 |
 |---|---|
@@ -549,7 +549,7 @@ START → entry_node → before_agent[0..n] → loop_entry_node
 
 #### 6.4.1 `model → tools`
 
-按以下顺序决定（`_make_model_to_tools_edge`，[factory.py:1814-1865](libs/langchain_v1/langchain/agents/factory.py#L1814-L1865)）：
+按以下顺序决定（`_make_model_to_tools_edge`，factory.py:1814-1865）：
 
 1. `jump_to` 优先（中间件显式重定向）
 2. 没有 AIMessage → 退出
@@ -562,7 +562,7 @@ START → entry_node → before_agent[0..n] → loop_entry_node
 
 #### 6.4.2 `tools → model`
 
-`_make_tools_to_model_edge`（[factory.py:1895-1928](libs/langchain_v1/langchain/agents/factory.py#L1895-L1928)）的决策只有三档：
+`_make_tools_to_model_edge`（factory.py:1895-1928）的决策只有三档：
 
 - 所有客户端工具都 `return_direct=True` → 退出
 - 执行了结构化输出工具 → 退出
@@ -570,7 +570,7 @@ START → entry_node → before_agent[0..n] → loop_entry_node
 
 #### 6.4.3 中间件节点的条件边（`can_jump_to`）
 
-中间件的 `before_model` / `after_model` / `before_agent` / `after_agent` 节点走 `_add_middleware_edge`（[factory.py:1931-1976](libs/langchain_v1/langchain/agents/factory.py#L1931-L1976)）：
+中间件的 `before_model` / `after_model` / `before_agent` / `after_agent` 节点走 `_add_middleware_edge`（factory.py:1931-1976）：
 
 - 没声明 `can_jump_to`：直接顺序连到下一个节点。
 - 声明了 `can_jump_to`：建立条件边，按 `state["jump_to"]` 分流到四个目标之一。
@@ -636,7 +636,7 @@ return graph.compile(
 
 1. **`recursion_limit=9_999`** 是 LangGraph 的"图执行最多跨多少节点"的硬上限。LangGraph 默认值是 25。一次正常的 Agent run 很容易就跑出"几十次模型调用 + 工具调用"，远不止 25 步。create_agent 把上限拉到 9_999 是为了避免一次本该成功的 Agent run 因为默认上限被打断（[GitHub issue #7313](https://github.com/langchain-ai/langgraph/issues/7313)）。
 2. **`ls_integration` 标签**让 LangSmith 追踪能识别这个 trace 来自 `create_agent`。如果设置了 `name`，再挂上 **`lc_agent_name`** 用于子图嵌套时父图识别。
-3. **`middleware_transformers` 收集**：通过 `getattr(m, "transformers", ())` 收集每个中间件类声明的 transformer 工厂。`AgentMiddleware.transformers` 是 `Sequence[TransformerFactory]` 字段（[types.py:401-409](libs/langchain_v1/langchain/agents/middleware/types.py#L401-L409)），每个 factory 在每次 invocation 时被调用 `factory(scope)` 生成新实例，保证多 invocation 隔离。
+3. **`middleware_transformers` 收集**：通过 `getattr(m, "transformers", ())` 收集每个中间件类声明的 transformer 工厂。`AgentMiddleware.transformers` 是 `Sequence[TransformerFactory]` 字段（types.py:401-409），每个 factory 在每次 invocation 时被调用 `factory(scope)` 生成新实例，保证多 invocation 隔离。
 4. **Transformer 注册与 `.with_config(config)`**：详见下一节 §7.4。
 
 最终返回的是 `CompiledStateGraph`（不是 `StateGraph`），可以用 `.invoke()` / `.stream()` / `.astream()` / `.batch()` 五种执行模式。因为 LangGraph 节点都是 `Runnable`，所以这五种都直接可用。这一点在 `model_node` 返回 `list[Command[Any]]` 而不是 `AIMessage` 时尤其重要：LangGraph 节点可以返回 `Command(update=...)` 把状态更新合并到图中。
@@ -761,7 +761,7 @@ class DynamicToolsMiddleware(AgentMiddleware):
         return handler(request)
 ```
 
-工厂会在动态工具未注册时报 `DYNAMIC_TOOL_ERROR_TEMPLATE`（[factory.py:114-138](libs/langchain_v1/langchain/agents/factory.py#L114-L138)），但只要定义了 `wrap_tool_call`，工厂会跳过校验（[factory.py:1283](libs/langchain_v1/langchain/agents/factory.py#L1283)）。
+工厂会在动态工具未注册时报 `DYNAMIC_TOOL_ERROR_TEMPLATE`（factory.py:114-138），但只要定义了 `wrap_tool_call`，工厂会跳过校验（factory.py:1283）。
 
 ### 场景 F：可观测性 / 调试（阶段 5）
 

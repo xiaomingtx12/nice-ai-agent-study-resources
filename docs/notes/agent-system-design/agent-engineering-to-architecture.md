@@ -324,7 +324,7 @@ Plan Mode：TODO.md 在文件系统上
 
 ### 1. "两阶段循环（先 Think 再 Act）"为什么能降低幻觉？
 
-**你的工程技巧**：在 Agent Loop 中强制模型先输出 `### Thinking` 块，再输出 `### Action` 块（详见 [Agent Loop 设计篇](agent-loop-design.md)）。
+**你的工程技巧**：在 Agent Loop 中强制模型先输出 `### Thinking` 块，再输出 `### Action` 块。
 
 **架构解释**：
 
@@ -598,7 +598,7 @@ Round 3: Context = [问题, A, B] → 让模型基于 B 改进 A
 
 ## 延伸阅读
 
-- [Agent Loop 设计篇](agent-loop-design.md)——两阶段循环的实现
+- 两阶段循环的实现
 - [工具调用篇](agent-tool-calling.md)——Tool description 的设计原则
 - [上下文管理篇](agent-context-management.md)——Working Memory / Compaction
 - [驾驭工程实践](../evolution-trends/agent-coding-strategy-state-reflect.md)——状态外部化

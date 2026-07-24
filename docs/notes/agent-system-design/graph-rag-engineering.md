@@ -2622,7 +2622,7 @@ GraphRAG 是思路不是框架，本节列出主要开源实现的取舍。
 <details>
 <summary><strong>Dify GraphRAG 集成（待补充）</strong>（点击展开）</summary>
 
-- [dify GraphRAG 节点](../application-notes/dify/)（应用笔记目录待建）
+- [dify GraphRAG 节点](../../application-notes/engineering/dify/)（应用笔记目录待建）
 
 </details>
 

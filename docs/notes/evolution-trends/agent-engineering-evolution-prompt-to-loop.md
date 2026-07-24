@@ -85,7 +85,7 @@ flowchart LR
 
 **关键转变**：从"人发起 → agent 跑一次 → 结束"到"agent 按节奏自驱动 → 跨会话持续推进 → 该叫人时叫人"。
 
-**这里必须区分 loop 的两层含义**，否则会和[Agent Loop 循环设计篇](../agent-system-design/agent-loop-design.md)混：
+**这里必须区分 loop 的两层含义**，否则会混：
 
 - **内层 loop（单 agent 内的 OTA 循环）**：Observe-Think-Act，发生在一个 agent 的一次运行内部，属于 Harness 的组成部分。循环设计篇拆的就是这层。
 - **外层 loop（跨会话的自驱动编排）**：把多次 harness 运行串成一条长线，agent 跨会话持续推进。本文作为演变最外层讲的是这层。
@@ -202,7 +202,6 @@ Prompt 阶段，"每轮该塞什么、怎么写"全靠人现场判断、现场�
 
 - 想看每层"为什么在架构上起作用"：[从 AI 应用开发者的角度理解 Transformer 架构](../agent-system-design/agent-thinking-transformer-from-prompt.md)——把提示词/上下文/驾驭工程技巧逐条对应到 Transformer 的某一层。
 - 想深拆 Context 层的七层结构与策略：[上下文管理篇](../agent-system-design/agent-context-management.md)。
-- 想深拆内层 loop（OTA 循环）的设计与退出条件：[Agent Loop 循环设计篇](../agent-system-design/agent-loop-design.md)。
 - 想看 Harness 作为元认知框架怎么落到 coding agent：[建立 Agent 设计模式元认知](./agent-coding-strategy-state-reflect.md)。
 - 想看四层在真实任务里怎么被用上、踩什么坑：[实操落地篇](../tool-mastery/agent-from-paradigm-to-practice.md)。
 - 想看工具 / Skill / 可观测性这些 Harness 手段的具体设计：[工具调用篇](../agent-system-design/agent-tool-calling.md)、[Skill 经验封装篇](../agent-system-design/agent-skill-design.md)、[可观测性篇](../agent-system-design/agent-observability.md)。

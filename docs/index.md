@@ -56,7 +56,7 @@ flowchart LR
 
 <p className="home-route-meta">内容在，商业项目线刚起步，skill 和工作流还没落地。首页写的是这个站要长成的样子和为什么这么建，等最小这条回线（人定方向 → AI 沿方向拆 → 抽 skill → 下一轮真调用它）跑通一圈，再把 skill 那一步从方向升级成事实。</p>
 
-<p className="home-route-meta">想知道这个站是谁在写，看 <a href="./about/">关于我</a>；想一起补资源或复用写作骨架，看 <a href="./templates/">共建与模板</a>。</p>
+<p className="home-route-meta">想知道这个站是谁在写，看 <a href="./about/">关于我</a>。</p>
 
 ## 这个站怎么写
 

@@ -13,7 +13,6 @@
 - `SITE_STRUCTURE_GUIDE.md`：站点结构、侧栏规则、常见修改路径
 - `docusaurus.config.ts`：顶栏、站点信息、docs 挂载方式
 - `sidebars.ts`：左侧导航的真实来源
-- `docs/templates/how-to-add-resource.md`：新增资源的写法约定
 
 ## 三栏的关系
 
@@ -30,7 +29,6 @@
 - `docs/resources/`：资源导航区，9 条资源分四组（学习地图与路径 / Harness · Coding Agent / 架构与生产化 / 源码与真实系统）
 - `docs/application-notes/`：带着真实问题拆开源项目源码与架构，现有 Dify v1.15.0（16 篇）和 Claude Code CLI（18 篇）两组
 - `docs/notes/`：回喂应用拆解的一栏——跨项目还能复用的判断、模式和技巧，目标是封成 skill
-- `docs/templates/`：共建说明和写法指南
 - `docs/about/`：站点作者和写作背景说明
 - `src/`：站点主题、搜索页、样式和少量交互组件
 - `scripts/`：结构校验和构建辅助脚本
@@ -109,6 +107,30 @@ Claude Code CLI 是闭源商业工具，正文里的 `src/...` 是逆向恢复�
 - `_category_.json` 只在需要目录元数据时用，不是主要导航机制
 - 首页和关于页是纯文档页，不挂 sidebar
 
+## Markdown 链接维护
+
+文档之间互相引用的相对路径、锚点 slug，是结构健康最容易烂的地方。`onBrokenLinks` 和 `onBrokenAnchors` 都设成 `'throw'`，构建会拦住，但靠构建才发现意味着坏链接已经混进 git history。
+
+**改目录结构、搬文件、改 heading 之前，先扫一遍引用面**：
+
+- 改 `docs/` 任意目录的层级或文件名 → `grep -rE "\\]\\(\\./|\\]\\(\\.\\./|\\]\\(#" docs/` 看哪些文件引用了它
+- 改任何 heading（一/二/三级标题）→ 用 `github-slugger` 重新算 slug，文中所有 `#xxx` 引用同步改。中文 heading 的 slug 规则特殊：`六、回放恢复：多分支对话` → `六回放恢复多分支对话`（`、``：`等标点和后续中文直接相连，**不**自动加 `-`）
+- 加新文档 → 如果它会被其它文档引用，记得在新文档里也写链接（双向引用比单向更耐改）
+
+**写链接时**：
+
+- 相对路径深度要数清楚。`docs/notes/agent-system-design/foo.md` 引用 `docs/application-notes/engineering/dify/bar.md` 是 `../../application-notes/engineering/dify/bar.md`，**不是** `../application-notes/engineering/dify/bar.md`
+- 引用站内资源用相对路径，不要写绝对 URL（部署到子路径时会失效）
+- 引用本站点之外的源码（如 LangChain 源码 `libs/langchain_v1/...`）写成纯文字行号（`factory.py:942-1056`），不要写成 markdown 链接——Docusaurus 会把每个非站内链接都当 broken 查
+
+**改完之后**：
+
+```bash
+npm run build  # onBrokenLinks + onBrokenAnchors 都设成 throw，build 失败就是有坏链接
+```
+
+构建失败不要第一时间去怀疑内容逻辑——`grep "Exhaustive\|couldn\|Broken" build.log` 找源头。
+
 ## 前端和样式
 
 - `src/` 里的实现以现有 React / TypeScript / CSS Modules 风格为准
@@ -132,6 +154,8 @@ node scripts/validate-page-redesign.mjs
 npm run build
 npm run start
 ```
+
+改完 markdown 链接或目录结构后，必须跑 `npm run build` 确认无 broken link / anchor（构建配置里两者都设成 `throw`）。
 
 如果你改的是某个资源区，优先再跑对应的结构校验脚本。
 

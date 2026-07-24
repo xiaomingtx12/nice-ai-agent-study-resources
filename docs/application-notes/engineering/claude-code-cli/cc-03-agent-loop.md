@@ -93,7 +93,7 @@ Hook 系统                            持久化层
 
 循环对外只暴露一个核心接口：`query()` 函数（`src/query.ts:276`），返回 `AsyncGenerator`。调用方（REPL 的 `onQuery` 回调、SDK 的 `ask()` 入口）通过 `for await` 消费它 yield 出来的每一条消息——文本增量、工具调用、工具结果、错误信息。（SDK 路径在外层还有 `QueryEngine` 包装，详见 3.4 节。）
 
-（文档中涉及的 AsyncGenerator、async/await 概念，跨语言对照见 [附录](#附录-asyncgenerator-跨语言对照)。）
+（文档中涉及的 AsyncGenerator、async/await 概念，跨语言对照见正文。）
 
 ---
 

@@ -19,12 +19,6 @@ const sidebars: SidebarsConfig = {
       dirName: 'application-notes',
     },
   ],
-  templatesSidebar: [
-    'templates/index',
-    'templates/how-to-add-resource',
-    'templates/human-first-contribution',
-    'templates/ai-assisted-contribution',
-  ],
 };
 
 export default sidebars;

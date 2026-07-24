@@ -9,7 +9,7 @@ description: LangChain 1.3.7 `create_agent()` 源码拆解。从 factory.py 的�
 
 ## 关于版本与源码引用
 
-LangChain v1 仓库下 `libs/langchain_v1/` 是拆分出来的 v1 代码树，`create_agent` 的全部实现集中在 [`libs/langchain_v1/langchain/agents/`](../../../../open_code/ai-native/langchain/libs/langchain_v1/langchain/agents/) 一棵子树里。所有正文里的源码行号以 1.3.7 版本为准，引用格式为 `factory.py:L942-L1056`，可直接在本地仓库打开对照。
+LangChain v1 仓库下 `libs/langchain_v1/` 是拆分出来的 v1 代码树，`create_agent` 的全部实现集中在 `libs/langchain_v1/langchain/agents/` 一棵子树里。所有正文里的源码行号以 1.3.7 版本为准，引用格式为 `factory.py:L942-L1056`，可直接在本地仓库打开对照。
 
 ## 这一组怎么读
 

@@ -105,7 +105,7 @@ def organize_agent_history(self, prompt_messages: list[PromptMessage]) -> list[P
 
 **1. 为什么历史在构造时一次性读取，而不是每轮重新查 DB？** 因为推理循环可能跑 10+ 轮，每轮查一次 DB 会产生 10+ 次 SQL，且历史在单次 Agent 调用内不会变化（没有其他写入者）。一次性读到内存，后续所有裁剪都在内存操作。如果用户在另一个会话里发了新消息，本次调用看不到——这是有意的隔离。
 
-**2. 为什么按 `created_at.desc()` 倒序查再 `reversed` 正序？** 因为 `extract_thread_messages`（详见 [⑥ 回放恢复](#⑥-回放恢复多分支对话)）需要从最新的消息开始回溯 `parent_message_id` 链，所以先倒序查出再交给它处理，最后 `reversed` 恢复时间正序。
+**2. 为什么按 `created_at.desc()` 倒序查再 `reversed` 正序？** 因为 `extract_thread_messages`（详见 [六、回放恢复：多分支对话](#六回放恢复多分支对话)）需要从最新的消息开始回溯 `parent_message_id` 链，所以先倒序查出再交给它处理，最后 `reversed` 恢复时间正序。
 
 **3. `agent_thoughts` 是惰性加载的**：`organize_agent_history` 遍历每个 Message 时访问 `message.agent_thoughts`（model.py:1680），这是一个 `@property`，每次访问都执行一次 SQL 查询：
 
@@ -119,7 +119,7 @@ def agent_thoughts(self) -> Sequence[MessageAgentThought]:
     ).all()
 ```
 
-这意味着 N 条历史 Message 会触发 N 次 agent_thoughts 查询（N+1 查询问题）。在长对话中这会产生性能压力，但 Dify 接受这个折中——因为 `organize_agent_history` 只在构造时调一次，且 500 条 Message 上限（见 [④ Token 预算裁剪](#④-token-预算裁剪滑动窗口)）控制了最坏情况。
+这意味着 N 条历史 Message 会触发 N 次 agent_thoughts 查询（N+1 查询问题）。在长对话中这会产生性能压力，但 Dify 接受这个折中——因为 `organize_agent_history` 只在构造时调一次，且 500 条 Message 上限（见 [四、Token 预算裁剪：滑动窗口](#四token-预算裁剪滑动窗口)）控制了最坏情况。
 
 读取完成后，`self.history_prompt_messages` 成为一个 `list[PromptMessage]`，包含 SystemPromptMessage + 每轮的 User/Assistant/Tool 消息。这个列表是后续所有回放和裁剪的输入。
 
@@ -525,7 +525,7 @@ Dify 的裁剪策略是**只丢弃，不摘要/压缩**。这是一个有意的�
 | `total_price` / `currency` | Decimal / str | 总价 / 币种 |
 | `latency` | float | 单步耗时（秒） |
 
-完整字段表和 ER 关系图见 [附录 A](#附录-a-messageagentthought-数据模型全表)。
+完整字段表和 ER 关系图见 [附录 A · MessageAgentThought 数据模型全表](#a-messageagentthought-数据模型全表)。
 
 **关键关系**：一次 Agent 调用 = 1 条 `Message` + N 条 `MessageAgentThought`（每个推理步骤 1 条）+ M 条 `MessageFile`（用户上传 + 工具产生）。`Message.agent_thoughts`（model.py:1680）按 `position` 升序返回该消息的所有推理步骤。
 

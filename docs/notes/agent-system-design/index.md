@@ -130,7 +130,7 @@ flowchart TB
 
 **与意图识别（5）的边界**：本篇是"中枢"，解决"拿到问题后怎么一步步办完"；意图识别是"入口"，解决"用户说的是哪类问题、要哪些参数"。详见 [§易混淆的两个工程技巧](./index.md)
 
-**样本**：[cc-03 agent-loop](../application-notes/claude-code-cli/cc-03-agent-loop.md) · [dify-04 agent-reasoning](../application-notes/dify/dify-04-agent-reasoning.md)
+**样本**：[cc-03 agent-loop](../../application-notes/engineering/claude-code-cli/cc-03-agent-loop.md) · [dify-04 agent-reasoning](../../application-notes/engineering/dify/dify-04-agent-reasoning.md)
 
 ### 5 · Context（两轴：管理技巧 + 记忆系统）
 
@@ -151,7 +151,7 @@ flowchart TB
 
 **与 Agent 大脑篇（3）的边界**：大脑篇判断 5（压缩对思维链的破坏）是"思考过程视角"，Context 篇展开"压缩算法 / token 预算 / cache 命中"等工程细节。大脑篇判断 3（AI 消息与工具调用结对）是"边界视角"，Context 篇展开"每轮上下文怎么组装"。
 
-**样本**：[cc-07 context-assembly](../application-notes/claude-code-cli/cc-07-context-assembly.md) · [cc-08 compaction-subsystem](../application-notes/claude-code-cli/cc-08-compaction-subsystem.md) · [dify-05 agent-context](../application-notes/dify/dify-05-agent-context.md)
+**样本**：[cc-07 context-assembly](../../application-notes/engineering/claude-code-cli/cc-07-context-assembly.md) · [cc-08 compaction-subsystem](../../application-notes/engineering/claude-code-cli/cc-08-compaction-subsystem.md) · [dify-05 agent-context](../../application-notes/engineering/dify/dify-05-agent-context.md)
 
 ### 6 · 意图识别
 
@@ -192,7 +192,7 @@ flowchart TB
 - HITL 在执行前阻塞？审批超时默认拒绝？审批信息格式化（操作目的 / 影响范围 / 成本预估 / 建议操作）？
 - 工具被禁用用 logit masking（默认）还是删 schema（仅废弃）？
 
-**样本**：[cc-05 tool-execution-pipeline](../application-notes/claude-code-cli/cc-05-tool-execution-pipeline.md) · [dify-07 tool-registration](../application-notes/dify/dify-07-tool-registration.md)
+**样本**：[cc-05 tool-execution-pipeline](../../application-notes/engineering/claude-code-cli/cc-05-tool-execution-pipeline.md) · [dify-07 tool-registration](../../application-notes/engineering/dify/dify-07-tool-registration.md)
 
 ### 8 · Skill
 
@@ -202,7 +202,7 @@ flowchart TB
 - Skill 多了怎么分组、怎么避免上下文过载？
 - Skill 和 prompt template 的边界在哪？
 
-**样本**：[cc-09 skill-system](../application-notes/claude-code-cli/cc-09-skill-system.md)
+**样本**：[cc-09 skill-system](../../application-notes/engineering/claude-code-cli/cc-09-skill-system.md)
 
 ### 9 · 多 Agent 编排
 
@@ -212,7 +212,7 @@ flowchart TB
 - Handoff 时控制权 / 上下文 / 状态各传什么？
 - 一个 Agent 失败时整图怎么继续？
 
-**样本**：[cc-10 subagent-isolation](../application-notes/claude-code-cli/cc-10-subagent-isolation.md)
+**样本**：[cc-10 subagent-isolation](../../application-notes/engineering/claude-code-cli/cc-10-subagent-isolation.md)
 
 ### 10 · RAG 工程技巧
 
@@ -228,7 +228,7 @@ flowchart TB
 - 4 项指标（Context Precision / Recall / Faithfulness / Answer Relevancy）有最小评估集吗？上线前 30 条起步
 - 上线后怎么持续监控（不能用"用户没投诉"当评估）
 
-**样本**：[dify-09 rag-indexing](../application-notes/dify/dify-09-rag-indexing.md) · [dify-10 rag-retrieval](../application-notes/dify/dify-10-rag-retrieval.md) · LangChain / LlamaIndex 公开框架（应用笔记目录待建）
+**样本**：[dify-09 rag-indexing](../../application-notes/engineering/dify/dify-09-rag-indexing.md) · [dify-10 rag-retrieval](../../application-notes/engineering/dify/dify-10-rag-retrieval.md) · LangChain / LlamaIndex 公开框架（应用笔记目录待建）
 
 ### 11 · GraphRAG 工程技巧
 
@@ -290,7 +290,7 @@ flowchart TB
 - 观测对象：核心 token / 决策路径 / 失败模式各埋点没有？
 - 过度观测的真实代价我算过吗（成本 / 噪音 / 隐私）？
 
-**样本**：[cc-18 observability](../application-notes/claude-code-cli/cc-18-observability.md) · [dify-14 observability](../application-notes/dify/dify-14-observability.md)
+**样本**：[cc-18 observability](../../application-notes/engineering/claude-code-cli/cc-18-observability.md) · [dify-14 observability](../../application-notes/engineering/dify/dify-14-observability.md)
 
 ## 复盘回看的硬指标
 

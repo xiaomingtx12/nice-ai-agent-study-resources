@@ -103,7 +103,7 @@ flowchart LR
 | 最容易读错的地方 | 基础不够就从头硬走，到模型层那几周只记住一堆名词 |
 | 建议进入方式 | 先过在线版目录挑缺的段，配 `ai-agent-book-projects` 对应周的项目跑 |
 
-入口：[资源页](./agentbook-bojie/) · [在线版](https://agentbook.minims.cn/#/) · [GitHub 仓库](https://github.com/bojieli/ai-agent-book)
+入口：[资源页](./tutorials/agentbook-bojie/) · [在线版](https://agentbook.minims.cn/#/) · [GitHub 仓库](https://github.com/bojieli/ai-agent-book)
 
 #### HelloAgents
 
@@ -115,7 +115,7 @@ flowchart LR
 | 最容易读错的地方 | 把它当成终局教材，而不是地图 |
 | 建议进入方式 | 先看目录，再优先看工具、上下文、记忆 |
 
-入口：[资源页](./hello-agents/) · [官方入口](https://datawhalechina.github.io/hello-agents/)
+入口：[资源页](./tutorials/hello-agents/) · [官方入口](https://datawhalechina.github.io/hello-agents/)
 
 #### AI Agents From Zero
 
@@ -127,7 +127,7 @@ flowchart LR
 | 最容易读错的地方 | 把“项目做通一次”误解成“已经学会了通用方法” |
 | 建议进入方式 | 先跑一个工作流项目，再补 LangChain / LangGraph 案例 |
 
-入口：[资源页](./ai-agents-from-zero/) · [官方入口](https://didilili.github.io/ai-agents-from-zero/#/)
+入口：[资源页](./tutorials/ai-agents-from-zero/) · [官方入口](https://didilili.github.io/ai-agents-from-zero/#/)
 
 ### 模式与生产参考
 
@@ -144,7 +144,7 @@ flowchart LR
 | 最容易读错的地方 | 把它当成模式背诵表，而不是带着项目问题去查的设计参考 |
 | 建议进入方式 | 先浏览目录建立模式地图，再按当前项目里的具体问题回头细读 |
 
-入口：[资源页](./agentic-design-patterns/) · [官方入口](https://adp.xindoo.xyz/)
+入口：[资源页](./references/agentic-design-patterns/) · [官方入口](https://adp.xindoo.xyz/)
 
 #### AI Agent Book
 
@@ -156,7 +156,7 @@ flowchart LR
 | 最容易读错的地方 | 把它当成一份定型的生产化手册，而不是带着真实问题去查的模式参考 |
 | 建议进入方式 | 先看前言弄清它要回答哪些问题，再按编排、预算、重试、权限抓对应章节 |
 
-入口：[资源页](./ai-agent-book/) · [官方入口](https://www.waylandz.com/ai-agent-book/)
+入口：[资源页](./references/ai-agent-book/) · [官方入口](https://www.waylandz.com/ai-agent-book/)
 
 ### AI 编程上手
 
@@ -173,7 +173,7 @@ flowchart LR
 | 最容易读错的地方 | 误以为前期的产品爽感已经等于后面的系统能力 |
 | 建议进入方式 | 先看 Stage 1 和学习地图，再按需进 Stage 2 |
 
-入口：[资源页](./easy-vibe/) · [官方入口](https://datawhalechina.github.io/easy-vibe/zh-cn/)
+入口：[资源页](./coding/easy-vibe/) · [官方入口](https://datawhalechina.github.io/easy-vibe/zh-cn/)
 
 #### CodexGuide
 
@@ -185,7 +185,7 @@ flowchart LR
 | 最容易读错的地方 | 把它当成命令速查表，而不是使用路径设计 |
 | 建议进入方式 | 先看学习路线和入口地图，再补配置专题和实践方法 |
 
-入口：[资源页](./codex-guide/) · [官方入口](https://codexguide.ai/) · [GitHub 仓库](https://github.com/freestylefly/CodexGuide)
+入口：[资源页](./coding/codex-guide/) · [官方入口](https://codexguide.ai/) · [GitHub 仓库](https://github.com/freestylefly/CodexGuide)
 
 ### Coding Agent 机制拆解
 
@@ -202,7 +202,7 @@ flowchart LR
 | 最容易读错的地方 | 只记住 Claude Code 的形状，没有继续往通用 harness 模式上提炼 |
 | 建议进入方式 | 先看 `s01-s06`，把 loop、tool、todo、compact 这条主线立起来 |
 
-入口：[资源页](./learn-claude-code/) · [官方入口](https://learn.shareai.run/zh/s01/)
+入口：[资源页](./mechanism/learn-claude-code/) · [官方入口](https://learn.shareai.run/zh/s01/)
 
 #### Claude Certified Architect · 认证自测题库（社区非官方）
 
@@ -214,7 +214,7 @@ flowchart LR
 | 最容易读错的地方 | 把它当成新的机制课或入门路径，从而跳过 `Learn Claude Code` / `CCB` 直接看它 |
 | 建议进入方式 | 先用 `Learn Claude Code` 和 `CCB` 立直觉，再来这一条做知识体系梳理和盲点自测 |
 
-入口：[资源页](./claude-certified-architect/) · [官方入口](https://github.com/paullarionov/claude-certified-architect)
+入口：[资源页](./mechanism/claude-certified-architect/) · [官方入口](https://github.com/paullarionov/claude-certified-architect)
 
 #### Claude Code Architecture（CCB）
 
@@ -226,7 +226,7 @@ flowchart LR
 | 最容易读错的地方 | 把它当 Claude Code 说明书补充，而不是一份通用分析框架 |
 | 建议进入方式 | 先看五层架构，再看 QueryEngine、权限和压缩链路 |
 
-入口：[资源页](./claude-code-architecture/) · [官方入口](https://ccb.agent-aura.top/docs/introduction/what-is-claude-code)
+入口：[资源页](./mechanism/claude-code-architecture/) · [官方入口](https://ccb.agent-aura.top/docs/introduction/what-is-claude-code)
 
 ### 真实系统源码
 
@@ -243,4 +243,4 @@ flowchart LR
 | 最容易读错的地方 | 一头扎进模块细节，却没有先抓入口到运行时的主线 |
 | 建议进入方式 | 先抓 Gateway / 控制平面 / Pi 引擎这条主链，再看扩展和安全 |
 
-入口：[资源页](./openclaw-book/) · [官方入口](https://openclaw-book.myhubs.dev/)
+入口：[资源页](./systems/openclaw-book/) · [官方入口](https://openclaw-book.myhubs.dev/)
