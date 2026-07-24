@@ -54,6 +54,20 @@ html[data-site-theme='archive'] {
   --site-code-bg: #ebe7de;
 }
 
+html[data-site-theme='classic'] {
+  --site-bg: #ffffff;
+  --site-surface: #f8f8fa;
+  --site-surface-strong: #f0f0f2;
+  --site-text: #1c1e21;
+  --site-text-muted: #717172;
+  --site-border: #e0e0e2;
+  --site-border-strong: #c8c8ca;
+  --site-accent: #16735b;
+  --site-accent-soft: #4dd4b8;
+  --site-accent-strong: #0f5946;
+  --site-code-bg: #f0f0f2;
+}
+
 html[data-theme='dark'] {
   --site-bg: #10161d;
   --site-surface: #161f28;
@@ -108,6 +122,20 @@ html[data-site-theme='archive'][data-theme='dark'] {
   --site-accent-soft: #aac0a4;
   --site-accent-strong: #789272;
   --site-code-bg: #1b231d;
+}
+
+html[data-site-theme='classic'][data-theme='dark'] {
+  --site-bg: #1b1b1d;
+  --site-surface: #232326;
+  --site-surface-strong: #2c2c2f;
+  --site-text: #e3e3e5;
+  --site-text-muted: #a6a6a8;
+  --site-border: #3a3a3d;
+  --site-border-strong: #4a4a4d;
+  --site-accent: #2dd4ad;
+  --site-accent-soft: #5ee0c0;
+  --site-accent-strong: #1ab592;
+  --site-code-bg: #2c2c2f;
 }
 
 :root {
