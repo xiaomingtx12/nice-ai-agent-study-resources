@@ -114,6 +114,16 @@ const config: Config = {
   themes: ['@docusaurus/theme-mermaid'],
 
   themeConfig: {
+    image: 'img/social-card.png',
+    metadata: [
+      {name: 'description', content: '把优秀学习资源和真实开源项目，变成人能复用、AI 能调用的工程判断。人定方向，AI 铺广度，人验真伪。'},
+      {name: 'keywords', content: 'AI Agent, Claude Code, Dify, LLM, 学习沉淀, 工程判断, 资源导航'},
+      {property: 'og:title', content: 'Nice AI 学习沉淀'},
+      {property: 'og:description', content: '把优秀学习资源和真实开源项目，变成人能复用、AI 能调用的工程判断。'},
+      {property: 'og:type', content: 'website'},
+      {property: 'og:locale', content: 'zh_CN'},
+      {name: 'twitter:card', content: 'summary_large_image'},
+    ],
     navbar: {
       title: 'Nice AI',
       logo: {
