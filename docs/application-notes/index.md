@@ -1,5 +1,5 @@
 ---
-sidebar_position: 1
+sidebar_position: 0
 description: 拆项目不套万能模板——先由人判断这个项目值得拆哪一点（工程实现 / 功能交互 / 商业模式），定下方向，AI 再沿方向深挖，人验真伪。不同价值点走不同拆解骨架，避免千篇一律。
 ---
 
@@ -54,13 +54,13 @@ description: 拆项目不套万能模板——先由人判断这个项目值得�
 
 ## 第一组沉淀：Dify 架构拆解
 
-[./dify/](./dify/index.md) — 基于 Dify v1.15.0 源码。16 篇正文，从六进程拓扑、应用配置层、Agent 运行时、推理策略、上下文记忆、异步事件、工具注册、模型供给与扩展、RAG 索引/检索、Workflow 引擎、MCP 协议、多租户与安全、可观测性、触发器到实战部署，覆盖 Dify 整个工程骨架。属「工程实现」类。
+[./dify/](./engineering/dify/index.md) — 基于 Dify v1.15.0 源码。16 篇正文，从六进程拓扑、应用配置层、Agent 运行时、推理策略、上下文记忆、异步事件、工具注册、模型供给与扩展、RAG 索引/检索、Workflow 引擎、MCP 协议、多租户与安全、可观测性、触发器到实战部署，覆盖 Dify 整个工程骨架。属「工程实现」类。
 
 ## 第二组沉淀：Claude Code CLI 架构拆解
 
-[./claude-code-cli/](./claude-code-cli/index.md) — 基于 Claude Code CLI（Anthropic 官方命令行工具）。18 篇正文，覆盖六层架构、入口生命周期、Agent 主循环、流式渲染、工具管线、权限安全、上下文装配与压缩、Skill 系统、子 Agent 隔离、Plan 模式、Hook 拦截、人在环路、定时任务、MCP 集成、Worktree 隔离、持久化与可观测性。闭源商业 CLI，正文里的 `src/...` 是逆向恢复的内部模块路径，仅标位置、不可点击。属「工程实现」类。
+[./claude-code-cli/](./engineering/claude-code-cli/index.md) — 基于 Claude Code CLI（Anthropic 官方命令行工具）。18 篇正文，覆盖六层架构、入口生命周期、Agent 主循环、流式渲染、工具管线、权限安全、上下文装配与压缩、Skill 系统、子 Agent 隔离、Plan 模式、Hook 拦截、人在环路、定时任务、MCP 集成、Worktree 隔离、持久化与可观测性。闭源商业 CLI，正文里的 `src/...` 是逆向恢复的内部模块路径，仅标位置、不可点击。属「工程实现」类。
 
 ## 第三组沉淀：LangChain 架构拆解
 
-[./langchain/](./langchain/index.md) — 基于 `langchain` 1.3.7（`libs/langchain_v1/`）。从 `create_agent()` 这个最高层入口开始，沿 `factory.py` 真实执行顺序钻进五个构建阶段（归一化 → 中间件组合 → 状态解析 → 图拓扑组装 → 编译配置），逐阶段标位置、讲机制、给边界，最后给出与手写 Agent 循环的工程判断。属「工程实现」类。
+[./langchain/](./engineering/langchain/index.md) — 基于 `langchain` 1.3.7（`libs/langchain_v1/`）。从 `create_agent()` 这个最高层入口开始，沿 `factory.py` 真实执行顺序钻进五个构建阶段（归一化 → 中间件组合 → 状态解析 → 图拓扑组装 → 编译配置），逐阶段标位置、讲机制、给边界，最后给出与手写 Agent 循环的工程判断。属「工程实现」类。
 

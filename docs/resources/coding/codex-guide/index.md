@@ -1,5 +1,5 @@
 ---
-sidebar_position: 1
+sidebar_position: 2
 description: CodexGuide 不给命令速查表，而是把 Codex 从第一次上手带到真实工作流落地。学习路线、入口地图、配置专题、实践方法和团队协作串成一条使用路径，关注怎么开始、交付和沉淀。
 ---
 

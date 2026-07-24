@@ -1,5 +1,5 @@
 ---
-sidebar_position: 1
+sidebar_position: 2
 description: Claude Certified Architect 把 Claude Code / Agent 这套知识按认证考点重新组织一遍，多语言指南 + PDF，覆盖工具设计、MCP、结构化输出这类场景题。它不是新机制，是把 harness 拆解课的零散点串成自测用的知识体系。
 ---
 

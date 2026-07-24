@@ -1,5 +1,5 @@
 ---
-sidebar_position: 1
+sidebar_position: 2
 description: AI Agent Book 是作者从零构建企业级多 Agent 系统（Shannon）时踩坑摸索的产物，专门回答"多 Agent 怎么协作、Token 预算怎么分、出错怎么重试、企业环境怎么做权限审计"这类现成教程答不上的问题。它刻意押注模式而非框架——框架会过时，模式不会。
 ---
 
