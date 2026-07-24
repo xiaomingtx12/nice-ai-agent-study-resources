@@ -1,10 +1,40 @@
-import {themes as prismThemes} from 'prism-react-renderer';
+import type {PrismTheme} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import {
   DEFAULT_SITE_THEME,
   SITE_THEME_PRESETS,
   SITE_THEME_STORAGE_KEY,
 } from './src/lib/siteTheme';
+
+// 暖纸气质的语法高亮：关键词暗红、字符串墨绿、函数深金、注释暖灰，
+// 与 --site-* token 同族；暗色版对应 editorial 深色变量。
+const niceCodeLight: PrismTheme = {
+  plain: {color: '#2C1810', backgroundColor: '#EFE5D0'},
+  styles: [
+    {types: ['comment', 'prolog', 'doctype', 'cdata'], style: {color: '#8A7A66', fontStyle: 'italic'}},
+    {types: ['punctuation'], style: {color: '#5A4530'}},
+    {types: ['keyword', 'rule', 'important', 'tag', 'builtin'], style: {color: '#7B1F2A', fontWeight: 'bold'}},
+    {types: ['string', 'char', 'attr-value', 'regex'], style: {color: '#0E4D3C'}},
+    {types: ['function', 'class-name', 'maybe-class-name'], style: {color: '#8F6E32'}},
+    {types: ['number', 'boolean', 'constant', 'symbol'], style: {color: '#5A2E3A'}},
+    {types: ['attr-name', 'selector', 'property', 'variable'], style: {color: '#5A2E3A'}},
+    {types: ['operator', 'entity', 'url'], style: {color: '#5A4530'}},
+  ],
+};
+
+const niceCodeDark: PrismTheme = {
+  plain: {color: '#F1E6DA', backgroundColor: '#2B221D'},
+  styles: [
+    {types: ['comment', 'prolog', 'doctype', 'cdata'], style: {color: '#8A7A66', fontStyle: 'italic'}},
+    {types: ['punctuation'], style: {color: '#C4B2A2'}},
+    {types: ['keyword', 'rule', 'important', 'tag', 'builtin'], style: {color: '#D98A92', fontWeight: 'bold'}},
+    {types: ['string', 'char', 'attr-value', 'regex'], style: {color: '#AAC0A4'}},
+    {types: ['function', 'class-name', 'maybe-class-name'], style: {color: '#DDBC7E'}},
+    {types: ['number', 'boolean', 'constant', 'symbol'], style: {color: '#C492A3'}},
+    {types: ['attr-name', 'selector', 'property', 'variable'], style: {color: '#C492A3'}},
+    {types: ['operator', 'entity', 'url'], style: {color: '#C4B2A2'}},
+  ],
+};
 
 const siteBaseUrl = process.env.SITE_BASE_URL ?? '/';
 const siteThemeIds = SITE_THEME_PRESETS.map((preset) => preset.id);
@@ -28,6 +58,28 @@ const config: Config = {
       tagName: 'script',
       attributes: {},
       innerHTML: siteThemeBootstrapScript,
+    },
+    {
+      tagName: 'link',
+      attributes: {
+        rel: 'preconnect',
+        href: 'https://fonts.googleapis.com',
+      },
+    },
+    {
+      tagName: 'link',
+      attributes: {
+        rel: 'preconnect',
+        href: 'https://fonts.gstatic.com',
+        crossorigin: 'anonymous',
+      },
+    },
+    {
+      tagName: 'link',
+      attributes: {
+        rel: 'stylesheet',
+        href: 'https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap',
+      },
     },
   ],
 
@@ -125,7 +177,7 @@ const config: Config = {
       {name: 'twitter:card', content: 'summary_large_image'},
     ],
     navbar: {
-      title: 'Nice AI',
+      title: 'Nice AI 学习沉淀',
       logo: {
         alt: 'Nice AI',
         src: 'img/logo.svg',
@@ -187,8 +239,8 @@ const config: Config = {
       },
     },
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: niceCodeLight,
+      darkTheme: niceCodeDark,
     },
   },
 };

@@ -1,29 +1,29 @@
 :root {
-  --site-bg: #f7f1e8;
-  --site-surface: #fffaf2;
-  --site-surface-strong: #f2e7d9;
-  --site-text: #2b241f;
-  --site-text-muted: #6a5f56;
-  --site-border: #d3c3b0;
-  --site-border-strong: #bda88f;
-  --site-accent: #8a5a38;
-  --site-accent-soft: #b8825c;
-  --site-accent-strong: #6f4528;
-  --site-code-bg: #f3eadf;
+  --site-bg: #f1e8d2;
+  --site-surface: #faf5e6;
+  --site-surface-strong: #eadfcc;
+  --site-text: #2c1810;
+  --site-text-muted: #5a4530;
+  --site-border: #cdbfa2;
+  --site-border-strong: #b3a07c;
+  --site-accent: #b8924a;
+  --site-accent-soft: #d3b57c;
+  --site-accent-strong: #8f6e32;
+  --site-code-bg: #eadfcc;
 }
 
 html[data-site-theme='editorial'] {
-  --site-bg: #f7f1e8;
-  --site-surface: #fffaf2;
-  --site-surface-strong: #f2e7d9;
-  --site-text: #2b241f;
-  --site-text-muted: #6a5f56;
-  --site-border: #d3c3b0;
-  --site-border-strong: #bda88f;
-  --site-accent: #8a5a38;
-  --site-accent-soft: #b8825c;
-  --site-accent-strong: #6f4528;
-  --site-code-bg: #f3eadf;
+  --site-bg: #f1e8d2;
+  --site-surface: #faf5e6;
+  --site-surface-strong: #eadfcc;
+  --site-text: #2c1810;
+  --site-text-muted: #5a4530;
+  --site-border: #cdbfa2;
+  --site-border-strong: #b3a07c;
+  --site-accent: #b8924a;
+  --site-accent-soft: #d3b57c;
+  --site-accent-strong: #8f6e32;
+  --site-code-bg: #eadfcc;
 }
 
 html[data-site-theme='signal'] {
@@ -90,9 +90,9 @@ html[data-site-theme='editorial'][data-theme='dark'] {
   --site-text-muted: #c4b2a2;
   --site-border: #5a4738;
   --site-border-strong: #745a45;
-  --site-accent: #cf9b72;
-  --site-accent-soft: #dfb089;
-  --site-accent-strong: #b88359;
+  --site-accent: #c9a35c;
+  --site-accent-soft: #ddbc7e;
+  --site-accent-strong: #a8843f;
   --site-code-bg: #261e19;
 }
 
@@ -230,12 +230,6 @@ html[class~='docs-doc-id-about/index'] article {
   margin-inline: auto;
 }
 
-html[class~='docs-doc-id-index'] article > h1 {
-  margin-bottom: 0.75rem;
-  font-size: clamp(2.4rem, 4vw, 3.4rem);
-  letter-spacing: -0.04em;
-}
-
 html[class~='docs-doc-id-about/index'] article > h1 {
   margin-bottom: 0.9rem;
   font-size: clamp(2.3rem, 3.8vw, 3.1rem);
@@ -268,93 +262,127 @@ html[class~='docs-doc-id-about/index'] article li {
   line-height: 1.8;
 }
 
-html[class~='docs-doc-id-index'] .home-lead {
-  max-width: 43rem;
-  margin-bottom: 2.75rem;
-  padding-bottom: 2rem;
-  border-bottom: 1px solid var(--ifm-color-emphasis-300);
+/* 首页首屏：kicker + 衬线大标题 + 编辑注记栏 */
+html[class~='docs-doc-id-index'] .home-hero {
+  margin-bottom: 1rem;
 }
 
-html[class~='docs-doc-id-index'] .home-lead p {
-  margin: 0;
+html[class~='docs-doc-id-index'] .home-hero-kicker {
+  margin: 0 0 1.4rem;
+  color: var(--site-accent);
+  font-family: var(--site-font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+}
+
+html[class~='docs-doc-id-index'] .home-hero h1 {
+  margin: 0 0 1.4rem;
+  font-size: clamp(2.1rem, 4vw, 2.9rem);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+}
+
+html[class~='docs-doc-id-index'] .home-hero-lead {
+  max-width: 40rem;
+  margin: 0 0 1.6rem;
   color: var(--ifm-color-emphasis-700);
   font-size: 1.05rem;
   line-height: 1.85;
 }
 
-html[class~='docs-doc-id-index'] .home-lead p:first-child {
-  margin-bottom: 0.75rem;
-  color: var(--ifm-heading-color);
-  font-size: 1.2rem;
-  font-weight: 600;
-}
-
-html[class~='docs-doc-id-index'] .home-loop-thesis {
-  margin: 1.75rem 0 2.25rem;
-  padding: 1.1rem 1.3rem 1.2rem;
-  background: var(--site-surface-strong);
-  border-left: 3px solid var(--site-accent);
-  border-radius: 3px;
-}
-
-html[class~='docs-doc-id-index'] .home-loop-thesis-tag {
-  display: inline-block;
-  margin-bottom: 0.55rem;
-  padding: 0.12rem 0.6rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--site-accent-strong);
-  background: color-mix(in srgb, var(--site-accent) 14%, transparent 86%);
-  border-radius: 3px;
-}
-
-html[class~='docs-doc-id-index'] .home-loop-thesis p {
+html[class~='docs-doc-id-index'] .home-hero-meta {
   margin: 0;
-  color: var(--site-text);
-  font-size: 1rem;
-  line-height: 1.82;
+  color: var(--site-accent);
+  font-family: var(--site-font-mono);
+  font-size: 0.82rem;
 }
 
-html[class~='docs-doc-id-index'] .home-loop-thesis p + p {
-  margin-top: 0.65rem;
-  color: var(--ifm-color-emphasis-700);
-  font-size: 0.95rem;
-}
-
-html[class~='docs-doc-id-index'] .home-route-list {
+/* 三栏流程带：定位 + 入口 + 关系 */
+html[class~='docs-doc-id-index'] .home-flow {
   display: grid;
-  gap: 0.95rem;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 1.4rem;
+  align-items: start;
+  margin: 1.75rem 0 1.5rem;
 }
 
-html[class~='docs-doc-id-index'] .home-route-item {
-  padding: 0 0 0.95rem 1rem;
-  border-left: 3px solid var(--ifm-color-emphasis-300);
+html[class~='docs-doc-id-index'] .home-flow-node h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 0.55rem;
+  font-size: 1.15rem;
 }
 
-html[class~='docs-doc-id-index'] .home-route-item h3 {
-  margin: 0 0 0.35rem;
+html[class~='docs-doc-id-index'] .home-flow-no {
+  color: var(--site-accent);
+  font-family: var(--site-font-mono);
   font-size: 1.05rem;
-  letter-spacing: -0.01em;
+  font-weight: 500;
 }
 
-html[class~='docs-doc-id-index'] .home-route-item p,
-html[class~='docs-doc-id-index'] .home-route-meta {
+html[class~='docs-doc-id-index'] .home-flow-node p {
   margin: 0;
   color: var(--ifm-color-emphasis-700);
+  font-size: 0.88rem;
   line-height: 1.75;
 }
 
-html[class~='docs-doc-id-index'] .home-route-item a,
-html[class~='docs-doc-id-index'] .home-route-meta a {
-  font-weight: 600;
+html[class~='docs-doc-id-index'] .home-flow-meta {
+  margin-top: 0.7rem !important;
+  font-family: var(--site-font-mono);
+  font-size: 0.8rem !important;
 }
 
-html[class~='docs-doc-id-index'] .home-route-meta {
-  margin-top: 1rem;
-  font-size: 0.96rem;
+html[class~='docs-doc-id-index'] .home-flow-meta a {
+  color: var(--site-accent);
+  font-weight: 500;
 }
 
+html[class~='docs-doc-id-index'] .home-flow-tag {
+  margin-top: 0.35rem !important;
+  color: var(--site-text-muted);
+  font-family: var(--site-font-mono);
+  font-size: 0.72rem !important;
+}
+
+html[class~='docs-doc-id-index'] .home-flow-tag-pending {
+  color: #7b1f2a;
+}
+
+html[data-theme='dark'][class~='docs-doc-id-index'] .home-flow-tag-pending {
+  color: #d98a92;
+}
+
+html[class~='docs-doc-id-index'] .home-flow-arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding-top: 0.6rem;
+  color: var(--site-border-strong);
+  font-family: var(--site-font-mono);
+  font-size: 0.8rem;
+}
+
+html[class~='docs-doc-id-index'] .home-flow-arrow em {
+  color: var(--site-text-muted);
+  font-family: var(--site-font-sans);
+  font-size: 0.68rem;
+  font-style: normal;
+  line-height: 1.4;
+  text-align: center;
+}
+
+html[class~='docs-doc-id-index'] .home-flow-note {
+  max-width: 46rem;
+  color: var(--ifm-color-emphasis-700);
+  font-size: 0.95rem;
+  line-height: 1.85;
+}
+
+/* 写作原则：¶ 段符 */
 html[class~='docs-doc-id-index'] .home-principles ul {
   margin: 0.8rem 0 0;
   padding-left: 1.2rem;
@@ -364,9 +392,23 @@ html[class~='docs-doc-id-index'] .home-principles li + li {
   margin-top: 0.45rem;
 }
 
+html[class~='docs-doc-id-index'] .home-principles li::marker {
+  content: '¶  ';
+  color: var(--site-accent);
+  font-weight: 700;
+}
+
 @media (max-width: 996px) {
-  html[class~='docs-doc-id-index'] article > h1 {
+  html[class~='docs-doc-id-index'] .home-hero h1 {
     font-size: 2.1rem;
+  }
+
+  html[class~='docs-doc-id-index'] .home-flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  html[class~='docs-doc-id-index'] .home-flow-arrow span {
+    display: none;
   }
 
   html[class~='docs-doc-id-about/index'] article > h1 {
@@ -377,17 +419,326 @@ html[class~='docs-doc-id-index'] .home-principles li + li {
   html[class~='docs-doc-id-about/index'] article > h2 {
     margin-top: 2.75rem;
   }
+}
 
-  html[class~='docs-doc-id-index'] .home-lead {
-    margin-bottom: 2.25rem;
-    padding-bottom: 1.5rem;
-  }
+/* ================= 重设计 2026-07：字体栈与全局元素皮肤 =================
+   只动 token 与全局元素，四套主题 + 暗色模式全部保留；
+   阅读正文用衬线，界面 chrome 用无衬线，代码用等宽。 */
 
-  html[class~='docs-doc-id-index'] .home-lead p {
-    font-size: 1rem;
-  }
+:root {
+  --site-font-serif: 'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
+  --site-font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --site-font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --ifm-font-family-base: var(--site-font-serif);
+  --ifm-heading-font-family: var(--site-font-serif);
+  --ifm-heading-font-weight: 600;
+  --ifm-font-family-monospace: var(--site-font-mono);
+  --prism-background-color: var(--site-surface-strong);
+}
 
-  html[class~='docs-doc-id-index'] .home-route-item {
-    padding-left: 0.85rem;
+html {
+  scroll-behavior: smooth;
+}
+
+.navbar,
+.menu,
+.table-of-contents,
+.pagination-nav,
+.breadcrumbs,
+.theme-doc-breadcrumbs,
+.theme-doc-toc-mobile,
+.theme-footer,
+.theme-edit-this-page,
+.theme-last-updated {
+  font-family: var(--site-font-sans);
+}
+
+a,
+.menu__link,
+.navbar__link,
+.table-of-contents__link {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+/* 刊头：纸底、加高、发丝底线，内容收进文档页网格 */
+:root {
+  --ifm-navbar-height: 4.25rem;
+  --ifm-navbar-background-color: var(--site-bg);
+}
+
+.navbar {
+  box-shadow: none;
+  border-bottom: 1px solid var(--site-border);
+  background: var(--site-bg);
+}
+
+.navbar__inner {
+  max-width: 1240px;
+  margin-inline: auto;
+}
+
+.navbar__items .navbar__link {
+  margin-inline: 0.75rem;
+  padding: 0.2rem 0;
+  color: var(--site-text-muted);
+  font-size: 0.92rem;
+}
+
+.navbar__items .navbar__link:hover {
+  color: var(--site-text);
+}
+
+.navbar__items .navbar__link--active,
+.navbar__items .navbar__link--active:hover {
+  color: var(--site-text);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--site-accent);
+}
+
+.navbar__items--right .navbar__link {
+  color: var(--site-text-muted);
+}
+
+.navbar__items--right .navbar__link:hover {
+  color: var(--site-text);
+}
+
+.navbar__search-input {
+  border-radius: 2px;
+  background: var(--site-surface);
+}
+
+.navbar__title {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  font-family: var(--site-font-serif);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
+}
+
+.navbar__title::after {
+  content: 'STUDY ARCHIVE';
+  margin-top: 2px;
+  color: var(--site-accent);
+  font-family: var(--site-font-mono);
+  font-size: 0.55rem;
+  font-weight: 400;
+  letter-spacing: 0.24em;
+}
+
+/* 文档区收进 1240 网格：侧栏不贴视口边 */
+:root {
+  --doc-sidebar-width: 260px;
+}
+
+@media (min-width: 997px) {
+  html[class*='docs-doc-id-notes'] div[class*='docRoot_'],
+  html[class*='docs-doc-id-resources'] div[class*='docRoot_'],
+  html[class*='docs-doc-id-application-notes'] div[class*='docRoot_'] {
+    max-width: min(1536px, calc(100vw - 64px));
+    margin-inline: auto;
   }
+}
+
+/* 侧栏：当前篇金色左条 */
+.theme-doc-sidebar-container {
+  border-right: 1px solid var(--site-border);
+}
+
+.theme-doc-sidebar-item-category-level-1 > .menu__list-item-collapsible > .menu__link,
+.theme-doc-sidebar-item-category-level-1 > .menu__link {
+  color: var(--site-text-muted);
+  font-family: var(--site-font-sans);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.menu__list .menu__list {
+  padding-inline-start: 0.9rem;
+}
+
+.menu__link {
+  padding: 0.32rem 0.75rem;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  font-size: 0.92rem;
+}
+
+.menu__link:hover {
+  background: var(--site-surface);
+}
+
+.menu__link--active {
+  border-left-color: var(--site-accent);
+  background: var(--site-surface);
+  color: var(--site-text);
+  font-weight: 500;
+}
+
+/* 右栏目录 */
+.table-of-contents {
+  border-left: 1px solid var(--site-border);
+  font-size: 0.88rem;
+}
+
+.table-of-contents__link--active {
+  color: var(--site-accent-strong);
+  font-weight: 500;
+}
+
+/* 正文排版节奏与阅读舒适度 */
+.theme-doc-markdown {
+  font-size: 1.06rem;
+}
+
+.theme-doc-markdown p,
+.theme-doc-markdown li {
+  line-height: 1.9;
+}
+
+.theme-doc-markdown p {
+  margin-bottom: 1.2rem;
+}
+
+/* 正文链接：深金 + 下划线，保证 4.5:1 以上对比度 */
+.theme-doc-markdown a {
+  color: var(--site-accent-strong);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--site-accent) 45%, transparent 55%);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.theme-doc-markdown a:hover {
+  color: var(--site-accent);
+  text-decoration-color: var(--site-accent);
+}
+
+/* 行内代码 */
+.theme-doc-markdown code {
+  padding: 0.15em 0.4em;
+  font-size: 0.88em;
+}
+
+.theme-doc-markdown h2 {
+  margin-top: 3rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--site-border);
+}
+
+.theme-doc-markdown h3 {
+  margin-top: 2.2rem;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: 0.01em;
+}
+
+/* pull-quote：markdown 的 > 引用 */
+.theme-doc-markdown blockquote {
+  border-left: 3px solid var(--site-accent);
+  border-radius: 0 2px 2px 0;
+  background: var(--site-surface);
+  padding: 1rem 1.5rem;
+  color: var(--site-text);
+  font-size: 1.05rem;
+}
+
+/* 「工程判断」callout：:::tip 等 admonition 的皮肤 */
+.theme-admonition {
+  border-left-width: 3px;
+  border-radius: 2px;
+  box-shadow: none;
+  background: var(--site-surface);
+}
+
+.theme-admonition-heading {
+  font-family: var(--site-font-sans);
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* 代码块：深一度的暖纸底 + 发丝描边，零阴影 */
+.theme-code-block,
+.codeBlockContainer {
+  border: 1px solid var(--site-border);
+  border-radius: 2px;
+  box-shadow: none;
+}
+
+.theme-code-block pre {
+  font-size: 0.85rem;
+  line-height: 1.75;
+}
+
+.theme-code-block [class*='codeBlockTitle'] {
+  border-bottom: 1px solid var(--site-border);
+  background: transparent;
+  color: var(--site-text-muted);
+  font-family: var(--site-font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+}
+
+.theme-code-block button {
+  border-radius: 2px;
+  border-color: var(--site-border);
+  background: transparent;
+}
+
+code {
+  border-radius: 2px;
+}
+
+/* 长文导航性能：屏外的重块不做渲染工作，浏览器需要时再展开 */
+@media (min-width: 997px) {
+  .theme-doc-markdown .theme-code-block,
+  .theme-doc-markdown > table,
+  .theme-doc-markdown > figure {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 240px;
+  }
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--site-border);
+}
+
+/* editorial 浅色下的深色胡桃页脚 */
+html[data-site-theme='editorial']:not([data-theme='dark']) .footer,
+html:not([data-site-theme]):not([data-theme='dark']) .footer {
+  --ifm-footer-background-color: #2c1810;
+  --ifm-footer-color: #d8cdb5;
+  --ifm-footer-link-color: #d8cdb5;
+  background: #2c1810;
+  color: #d8cdb5;
+}
+
+html[data-site-theme='editorial']:not([data-theme='dark']) .footer .footer__copyright,
+html:not([data-site-theme]):not([data-theme='dark']) .footer .footer__copyright {
+  color: #8a7a66;
+}
+
+/* 首页与关于页：版心 1120，衬线标题气质 */
+html[class~='docs-doc-id-index'] article,
+html[class~='docs-doc-id-about/index'] article {
+  max-width: 70rem;
+}
+
+html[class~='docs-doc-id-index'] article > h1,
+html[class~='docs-doc-id-about/index'] article > h1 {
+  letter-spacing: 0.01em;
+  font-weight: 600;
 }
