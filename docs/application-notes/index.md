@@ -60,7 +60,11 @@ description: 拆项目不套万能模板——先由人判断这个项目值得�
 
 [./claude-code-cli/](./engineering/claude-code-cli/index.md) — 基于 Claude Code CLI（Anthropic 官方命令行工具）。18 篇正文，覆盖六层架构、入口生命周期、Agent 主循环、流式渲染、工具管线、权限安全、上下文装配与压缩、Skill 系统、子 Agent 隔离、Plan 模式、Hook 拦截、人在环路、定时任务、MCP 集成、Worktree 隔离、持久化与可观测性。闭源商业 CLI，正文里的 `src/...` 是逆向恢复的内部模块路径，仅标位置、不可点击。属「工程实现」类。
 
-## 第三组沉淀：LangChain 架构拆解
+## 第三组沉淀：LangChain 系列框架
 
-[./langchain/](./engineering/langchain/index.md) — 基于 `langchain` 1.3.7（`libs/langchain_v1/`）。从 `create_agent()` 这个最高层入口开始，沿 `factory.py` 真实执行顺序钻进五个构建阶段（归一化 → 中间件组合 → 状态解析 → 图拓扑组装 → 编译配置），逐阶段标位置、讲机制、给边界，最后给出与手写 Agent 循环的工程判断。属「工程实现」类。
+[./langchain-series/](./engineering/langchain-series/index.md) — 基于 LangGraph、LangChain `1.3.7` 与 Deep Agents `0.6.12`，沿 LangGraph 图状态机与运行时、LangChain 核心抽象与最小 Agent、Deep Agents 长任务 Harness 三层递进；重点追踪 Agent loop、工具权限、上下文与记忆、压缩、扩展机制和多 Agent 如何逐层封装。属「工程实现」类。
+
+## 第四组沉淀：Skill 编写应用案例
+
+[./skill编写应用案例拆解/](./engineering/skill编写应用案例拆解) — 以 Anthropic Skills 的真实目录为对象，拆解 Skill 如何被编写、评测、优化和打包。当前先分析 `skill-creator`，后续案例在建。属「工程实现」类。
 
