@@ -1,6 +1,6 @@
 ---
 sidebar_position: 1
-description: 站内资源不是书单而是学习地图，按"拿它干什么"分成五类：通用系统教程、模式与生产参考、AI 编程上手、Coding Agent 机制拆解、真实系统源码。每条给角色卡和阅读路线，先定怎么读再谈读什么。
+description: 站内资源不是书单而是学习地图，按"拿它干什么"分成六类：通用系统教程、模式与生产参考、AI 编程上手、Coding Agent 机制拆解、真实系统源码、Harness Agent 框架。每条给角色卡和阅读路线，先定怎么读再谈读什么。
 ---
 
 # 资源导航
@@ -29,8 +29,9 @@ description: 站内资源不是书单而是学习地图，按"拿它干什么"�
 | 通用 Agent 系统教程 | 通读一本，建立 Agent 全貌 | `AgentBook（新开源）` `HelloAgents` `AI Agents From Zero` |
 | 模式与生产参考 | 模式总结以及作者的踩坑记录 | `Agentic Design Patterns（中文翻译）` `AI Agent Book` |
 | AI 编程上手 | 教你用 AI工具  | `Easy-Vibe` `CodexGuide` |
-| Coding Agent 机制拆解 | 看 coding agent 怎么造出来 | `Learn Claude Code` `Claude Certified Architect · 认证自测题库（社区非官方）` `CCB` |
-| 真实系统源码 | 读完整系统的真实源码 | `OpenClaw 源码解析` |
+| Coding Agent 机制拆解 | 看 coding agent 怎么造出来 | `Learn Claude Code` `Claude Certified Architect · 认证自测题库（社区非官方）` `CCB` `Pi Book` |
+| 真实系统源码 | 读完整系统的真实源码 | `OpenClaw 源码解析` `DeerFlow 二次开发` |
+| Harness Agent 框架 | 查框架怎样组织 Agent harness | `LangChain 官方文档与中文资料` `LangChain 官方文档中文走读` |
 
 ## 常见阅读路线
 
@@ -44,9 +45,13 @@ flowchart LR
   L["Learn Claude Code<br/>拆 harness"]
   CA["Claude Certified Architect<br/>认证自测题库（社区非官方）"]
   C["CCB<br/>看产品级架构"]
+  P["Pi Book<br/>看 coding agent runtime"]
   A["Agentic Design Patterns<br/>模式语言（中文翻译）"]
   B["AI Agent Book<br/>企业级踩坑摸出的模式"]
   O["OpenClaw<br/>读真实系统源码"]
+  D["DeerFlow 二次开发<br/>架构 / 源码 / 二次开发"]
+  LD["LangChain 官方文档与中文资料<br/>官方入口 + 中文辅助"]
+  LW["LangChain 官方文档中文走读<br/>逐段翻译 + Demo"]
 
   H --> Z
   E --> Z
@@ -59,11 +64,16 @@ flowchart LR
   L --> CA
   CA --> C
   L --> C
+  C --> P
   Z --> A
   A --> B
   Z --> B
   B --> O
   C --> O
+  O --> D
+  C --> D
+  Z --> LD
+  LD --> LW
 ```
 
 ## 如果你现在只能先选 1 条
@@ -80,7 +90,10 @@ flowchart LR
 | 我想系统补 Agent 设计模式和模式语言      | [Agentic Design Patterns（中文翻译）](https://adp.xindoo.xyz/) | 因为它是同名书的中文翻译，把模式系统整理成册，不像项目教程那样负责带你从零跑通 |
 | 我卡在多 Agent 协作、预算、重试、权限这类问题上 | [AI Agent Book](https://www.waylandz.com/ai-agent-book/) | 因为它专门回答这些现成教程答不上的工程问题，且模式优先不绑框架，不像 `OpenClaw` 那样更依赖真实源码背景 |
 | 我想拆成熟 coding agent 的产品级边界 | [Claude Code Architecture（CCB）](https://ccb.agent-aura.top/docs/introduction/what-is-claude-code) | 因为它更像逆向架构白皮书，不像 `Learn Claude Code` 那样偏教学 |
+| 我想看一个 coding agent runtime 的架构设计 | [Pi Book](https://zhanghandong.github.io/pi-book/) | 因为它直接围绕 coding agent 的运行时、架构取舍和实现边界展开，不只是使用说明 |
 | 我想看真实大型系统怎么把这些概念落地        | [OpenClaw 源码解析](https://openclaw-book.myhubs.dev/) | 因为它面对的是完整系统，不再只是教学材料或架构总结 |
+| 我想从真实项目源码一路看到二次开发入口 | [DeerFlow 二次开发](./systems/deerflow-book/) | 因为它把理论、架构、源码剖析和 MCP、Skill、Human-in-the-Loop、企业案例串成一条实践路径 |
+| 我想系统补 LangChain Agent 框架 | [LangChain 官方文档与中文资料](./harness-agent/langchain-docs/) | 因为官方文档负责准确性，中文资料和走读页负责降低第一次阅读成本 |
 
 ## 资源角色卡
 
@@ -228,6 +241,18 @@ flowchart LR
 
 入口：[资源页](./mechanism/claude-code-architecture/) · [官方入口](https://ccb.agent-aura.top/docs/introduction/what-is-claude-code)
 
+#### Pi Book
+
+| 槽位 | 内容 |
+| --- | --- |
+| 一句定位 | coding agent runtime 架构资料 |
+| 最适合现在的谁 | 想从一个具体项目理解 coding agent 的运行时、架构决策和扩展边界的人 |
+| 如果你只想拿走 1 个东西 | coding agent 的能力不只来自模型和工具，还取决于运行时怎样组织状态、上下文、执行和交互 |
+| 最容易读错的地方 | 把它当成使用手册，只关注功能入口而忽略运行时结构和实现取舍 |
+| 建议进入方式 | 先看整体架构，再按运行时、工具和扩展相关章节回看具体实现 |
+
+入口：[官方入口](https://zhanghandong.github.io/pi-book/)
+
 ### 真实系统源码
 
 这一组解决“真实大型系统到底怎么把这些概念落到工程里”。  
@@ -244,3 +269,44 @@ flowchart LR
 | 建议进入方式 | 先抓 Gateway / 控制平面 / Pi 引擎这条主链，再看扩展和安全 |
 
 入口：[资源页](./systems/openclaw-book/) · [官方入口](https://openclaw-book.myhubs.dev/)
+
+#### DeerFlow 二次开发
+
+| 槽位 | 内容 |
+| --- | --- |
+| 一句定位 | DeerFlow 2.0 源码级二次开发指南 |
+| 最适合现在的谁 | 想从真实 Agent 项目里看架构、运行时和扩展入口，并准备做功能改造的人 |
+| 如果你只想拿走 1 个东西 | Agent 的可扩展性不只来自工具列表，还取决于状态、上下文、Skill、Sub-Agent、Sandbox 和人工介入怎样接到运行时里 |
+| 最容易读错的地方 | 把它当成 DeerFlow 使用手册，只照着案例操作，却没有回到项目结构和核心运行链路 |
+| 建议进入方式 | 先读理论基础和架构总览，再按目标选择源码剖析或 MCP、Skill、Human-in-the-Loop 章节 |
+
+入口：[资源页](./systems/deerflow-book/) · [在线版](https://hawkli-1994.github.io/deerflow-book/) · [项目仓库](https://github.com/hawkli-1994/deerflow-book)
+
+### Harness Agent 框架
+
+这一组收录面向 Agent harness / runtime 框架的资料，关注模型、工具、消息、状态和编排如何组织成可运行系统。
+LangChain 的官方文档负责确认框架事实，中文资料和中文走读负责降低阅读成本；三者都不替代实际运行和版本核验。
+
+#### LangChain 官方文档与中文资料
+
+| 槽位 | 内容 |
+| --- | --- |
+| 一句定位 | LangChain 英文官方文档 + 中文辅助资料 |
+| 最适合现在的谁 | 想系统使用 LangChain / LangGraph 做 Agent 应用，同时需要中文阅读入口的人 |
+| 如果你只想拿走 1 个东西 | 中文资料可以加速理解，但官方文档才是版本、API 和边界的最终核验入口 |
+| 最容易读错的地方 | 把 `langchain-zh.cn` 当成官方项目，或把中文站的旧示例直接复制到新版本 |
+| 建议进入方式 | 先用中文站浏览，再回官方页面确认当前版本和代码 |
+
+入口：[资源页](./harness-agent/langchain-docs/) · [官方文档](https://docs.langchain.com/) · [中文资料](https://langchain-zh.cn/)
+
+#### LangChain 官方文档中文走读
+
+| 槽位 | 内容 |
+| --- | --- |
+| 一句定位 | 逐段保留原文、逐段中文翻译，并补结构总结与代码 Demo |
+| 最适合现在的谁 | 读英文框架文档较慢、又想同时看原文、结构图和 Python / TypeScript 示例的人 |
+| 如果你只想拿走 1 个东西 | 它提供的是官方文档的中文阅读层，不是另一套 source of truth |
+| 最容易读错的地方 | 只看翻译和 Demo，不回官方页面核对版本、依赖和 API |
+| 建议进入方式 | 先看结构总结，再对照原文和翻译，跑 Demo 后回官方文档复核 |
+
+入口：[资源页](./harness-agent/langchain-docs-walkthrough/) · [中文走读](https://shuaibilx.github.io/langchain-docs/) · [官方文档](https://docs.langchain.com/)
