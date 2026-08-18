@@ -5,6 +5,7 @@ import {
   SITE_THEME_PRESETS,
   SITE_THEME_STORAGE_KEY,
 } from './src/lib/siteTheme';
+import siteStatsPlugin from './src/plugins/siteStats';
 
 // 暖纸气质的语法高亮：关键词暗红、字符串墨绿、函数深金、注释暖灰，
 // 与 --site-* token 同族；暗色版对应 editorial 深色变量。
@@ -36,7 +37,23 @@ const niceCodeDark: PrismTheme = {
   ],
 };
 
-const siteBaseUrl = process.env.SITE_BASE_URL ?? '/';
+const configuredBaseUrl = process.env.SITE_BASE_URL;
+const siteBaseUrl = (() => {
+  if (!configuredBaseUrl) {
+    return '/';
+  }
+
+  // GitHub Pages 的 configure-pages 输出是完整 URL，Docusaurus 的 baseUrl 只接受路径。
+  try {
+    const pathname = new URL(configuredBaseUrl).pathname;
+    return pathname.endsWith('/') ? pathname : `${pathname}/`;
+  } catch {
+    const pathname = configuredBaseUrl.startsWith('/')
+      ? configuredBaseUrl
+      : `/${configuredBaseUrl}`;
+    return pathname.endsWith('/') ? pathname : `${pathname}/`;
+  }
+})();
 const siteThemeIds = SITE_THEME_PRESETS.map((preset) => preset.id);
 const siteThemeBootstrapScript = `(function(){try{var storageKey=${JSON.stringify(
   SITE_THEME_STORAGE_KEY,
@@ -88,6 +105,9 @@ const config: Config = {
     [
       'classic',
       {
+        // The debug plugin is not part of the published site and can be
+        // implicitly enabled when NODE_ENV is unset on Windows.
+        debug: false,
         docs: {
           path: 'docs',
           routeBasePath: '/',
@@ -115,6 +135,32 @@ const config: Config = {
         docsRouteBasePath: ['/'],
       },
     ],
+    function resolveSearchGeneratedModules() {
+      return {
+        name: 'resolve-search-generated-modules',
+        configureWebpack() {
+          const generatedModule = require.resolve(
+            './.docusaurus/@easyops-cn/docusaurus-search-local/default/generated.js',
+          );
+          const generatedConstantsModule = require.resolve(
+            './.docusaurus/@easyops-cn/docusaurus-search-local/default/generated-constants.js',
+          );
+
+          return {
+            resolve: {
+              alias: {
+                [require.resolve(
+                  '@easyops-cn/docusaurus-search-local/dist/client/client/utils/proxiedGenerated',
+                )]: generatedModule,
+                [require.resolve(
+                  '@easyops-cn/docusaurus-search-local/dist/client/client/utils/proxiedGeneratedConstants',
+                )]: generatedConstantsModule,
+              },
+            },
+          };
+        },
+      };
+    },
     function stubLayoutElkPlugin() {
       return {
         name: 'stub-layout-elk',
@@ -143,6 +189,7 @@ const config: Config = {
         },
       };
     },
+    siteStatsPlugin,
   ],
 
   themes: ['@docusaurus/theme-mermaid'],

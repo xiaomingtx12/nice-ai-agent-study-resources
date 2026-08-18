@@ -1,6 +1,5 @@
-// 注意：本文件深路径导入了 @easyops-cn/docusaurus-search-local 的内部文件
-//（dist/client/client/... 与 proxiedGenerated），这些不是插件的公开 API。
-// 升级该插件版本前必须先核对这里的 import 是否仍然存在，升级后回归搜索功能。
+// 注意：本文件深路径导入了 @easyops-cn/docusaurus-search-local 的内部文件。
+// 升级该插件版本前必须先核对这些 import，升级后回归搜索功能。
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import clsx from 'clsx';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
@@ -27,10 +26,10 @@ import {
   searchContextByPaths,
   hideSearchBarWithNoSearchContext,
   useAllContextsWithNoSearchContext,
-} from '@easyops-cn/docusaurus-search-local/dist/client/client/utils/proxiedGenerated';
+} from '@generated/@easyops-cn/docusaurus-search-local/default/generated.js';
 import LoadingRing from '@easyops-cn/docusaurus-search-local/dist/client/client/theme/LoadingRing/LoadingRing';
 import {normalizeContextByPath} from '@easyops-cn/docusaurus-search-local/dist/client/client/utils/normalizeContextByPath';
-import {searchResultLimits} from '@easyops-cn/docusaurus-search-local/dist/client/client/utils/proxiedGeneratedConstants';
+import {searchResultLimits} from '@generated/@easyops-cn/docusaurus-search-local/default/generated-constants.js';
 import styles from '@easyops-cn/docusaurus-search-local/dist/client/client/theme/SearchBar/SearchBar.module.css';
 
 async function fetchAutoCompleteJS() {

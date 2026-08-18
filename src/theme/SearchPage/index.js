@@ -18,7 +18,7 @@ import {
   Mark,
   searchContextByPaths,
   useAllContextsWithNoSearchContext,
-} from '@easyops-cn/docusaurus-search-local/dist/client/client/utils/proxiedGenerated';
+} from '@generated/@easyops-cn/docusaurus-search-local/default/generated.js';
 import styles from '@easyops-cn/docusaurus-search-local/dist/client/client/theme/SearchPage/SearchPage.module.css';
 import {normalizeContextByPath} from '@easyops-cn/docusaurus-search-local/dist/client/client/utils/normalizeContextByPath';
 

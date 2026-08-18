@@ -28,13 +28,14 @@ const forbiddenMarkers = {
   ],
 };
 
-// 资源导航五组分组（目录 -> 期望标签）
+// 资源导航六组分组（目录 -> 期望标签）
 const resourceGroups = {
   tutorials: '通用 Agent 系统教程',
   references: '模式与生产参考',
   coding: 'AI 编程上手',
   mechanism: 'Coding Agent 机制拆解',
   systems: '真实系统源码',
+  'harness-agent': 'Harness Agent 框架',
 };
 
 for (const [relativePath, markers] of Object.entries(requiredMarkers)) {
