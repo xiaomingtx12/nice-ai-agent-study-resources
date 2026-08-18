@@ -237,6 +237,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/ai-relay',
+          label: 'AI 中转',
+          position: 'left',
+        },
+        {
           to: '/about',
           label: '关于我',
           position: 'left',
