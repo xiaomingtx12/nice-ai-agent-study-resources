@@ -5,7 +5,7 @@ description: "梳理 prompt、context、harness、loop 四层工程的演变：�
 
 # 从 Prompt 到 Loop：四层工程的演变脉络
 
-这个站里已经有几篇深拆：[Agent 大脑](../agent-system-design/agent-brain.md)、[上下文管理](../agent-system-design/agent-context-management.md)、[Skill 经验封装](../agent-system-design/agent-skill-design.md)、[可观测性](../agent-system-design/agent-observability.md)。也有一篇把提示词/上下文/驾驭工程技巧逐条对应到 Transformer 架构层、解释"为什么起作用"的[文章](../agent-system-design/agent-thinking-transformer-from-prompt.md)，还有一篇做 [Agent 设计模式元认知](./agent-coding-strategy-state-reflect.md)的文章。
+这个站里已经有几篇深拆：[Agent 大脑](../agent-system-design/04-decision/agent-brain.md)、[上下文管理](../agent-system-design/03-view/agent-context-management.md)、[Skill 经验封装](../agent-system-design/03-view/agent-skill-design.md)、[可观测性](../agent-system-design/06-observation/agent-observability.md)。也有一篇把提示词/上下文/驾驭工程技巧逐条对应到 Transformer 架构层、解释"为什么起作用"的[文章](../agent-system-design/00-prerequisites/agent-thinking-transformer-from-prompt.md)，还有一篇做 [Agent 设计模式元认知](./agent-coding-strategy-state-reflect.md)的文章。
 
 这篇不重复它们。这篇回答一个更靠前的问题：
 
@@ -59,7 +59,7 @@ flowchart LR
 
 **它解决的问题（Prompt 撞的墙）**：Prompt 工程假设输入是静态、一次性的。但 Agent 是多轮的，每一轮该看的不一样——第一轮要看任务描述，中间轮要看上一轮工具结果和剩余计划，快结束时要看完成情况。Context 工程把"写好一段固定输入"升级成"每轮亲手构造一段动态输入"：截断、压缩（Compaction）、Working Memory 滑动窗口、Tool Results 用后掩码、RAG 按需注入、状态外部化到 PLAN.md/TODO.md、System Prompt 模块化编译成"操作系统内核"、Prompt Cache 稳定前缀、分层 token 预算。
 
-**关键转变**：Context 不再是一段字符串，而是分层的——System Prompt（角色规范）/ Conversation History（对话历史）/ Working Memory（短期工作记忆）/ Retrieved Context（检索信息）/ Tool Results（工具返回）/ Externalized State（外部化状态）/ Long-Term Memory（长期记忆），每一层有自己的生命周期和管理策略。详见[上下文管理篇](../agent-system-design/agent-context-management.md)。
+**关键转变**：Context 不再是一段字符串，而是分层的——System Prompt（角色规范）/ Conversation History（对话历史）/ Working Memory（短期工作记忆）/ Retrieved Context（检索信息）/ Tool Results（工具返回）/ Externalized State（外部化状态）/ Long-Term Memory（长期记忆），每一层有自己的生命周期和管理策略。详见[上下文管理篇](../agent-system-design/03-view/agent-context-management.md)。
 
 **它撞到的墙**：Context 只解决了"喂什么信息"，没解决"模型拿到信息后怎么决策、怎么行动、怎么知道该停"。可以塞一段完美的上下文，模型还是可能：该调工具的时候不调、该停的时候不停、跑偏了不自知、错了不回头、乱改不该改的文件。Context 是输入侧的工程，但 Agent 的可靠性还依赖过程侧的控制——谁决定下一步、怎么约束它、错了怎么拉回、越权怎么拦。
 
@@ -200,11 +200,11 @@ Prompt 阶段，"每轮该塞什么、怎么写"全靠人现场判断、现场�
 
 ## 这条线怎么和站里其他文章配合读
 
-- 想看每层"为什么在架构上起作用"：[从 AI 应用开发者的角度理解 Transformer 架构](../agent-system-design/agent-thinking-transformer-from-prompt.md)——把提示词/上下文/驾驭工程技巧逐条对应到 Transformer 的某一层。
-- 想深拆 Context 层的七层结构与策略：[上下文管理篇](../agent-system-design/agent-context-management.md)。
+- 想看每层"为什么在架构上起作用"：[从 AI 应用开发者的角度理解 Transformer 架构](../agent-system-design/00-prerequisites/agent-thinking-transformer-from-prompt.md)——把提示词/上下文/驾驭工程技巧逐条对应到 Transformer 的某一层。
+- 想深拆 Context 层的七层结构与策略：[上下文管理篇](../agent-system-design/03-view/agent-context-management.md)。
 - 想看 Harness 作为元认知框架怎么落到 coding agent：[建立 Agent 设计模式元认知](./agent-coding-strategy-state-reflect.md)。
 - 想看四层在真实任务里怎么被用上、踩什么坑：[实操落地篇](../tool-mastery/agent-from-paradigm-to-practice.md)。
-- 想看工具 / Skill / 可观测性这些 Harness 手段的具体设计：[工具调用篇](../agent-system-design/agent-tool-calling.md)、[Skill 经验封装篇](../agent-system-design/agent-skill-design.md)、[可观测性篇](../agent-system-design/agent-observability.md)。
+- 想看工具 / Skill / 可观测性这些 Harness 手段的具体设计：[工具调用篇](../agent-system-design/05-action/agent-tool-calling.md)、[Skill 经验封装篇](../agent-system-design/03-view/agent-skill-design.md)、[可观测性篇](../agent-system-design/06-observation/agent-observability.md)。
 
 ## 用这个坐标系自检
 

@@ -939,6 +939,6 @@ Claude Code 不是炫技,是把 Agent 理论的所有关键问题(上下文爆�
 ## 相关阅读
 
 - [Claude Code 用户视角使用篇](./agent-claude-code-user-perspective.md) —— 本篇的姊妹篇,从用户能看到什么出发
-- [上下文管理篇](../agent-system-design/agent-context-management.md) —— 上下文的理论框架与分层管理
-- [工具调用篇](../agent-system-design/agent-tool-calling.md) —— 工具的本质与可靠性设计
-- [Skill 经验封装篇](../agent-system-design/agent-skill-design.md) —— Skill 的设计原理
+- [上下文管理篇](../agent-system-design/03-view/agent-context-management.md) —— 上下文的理论框架与分层管理
+- [工具调用篇](../agent-system-design/05-action/agent-tool-calling.md) —— 工具的本质与可靠性设计
+- [Skill 经验封装篇](../agent-system-design/03-view/agent-skill-design.md) —— Skill 的设计原理

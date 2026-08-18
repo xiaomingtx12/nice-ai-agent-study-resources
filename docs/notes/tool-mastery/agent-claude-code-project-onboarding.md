@@ -637,8 +637,8 @@ CLAUDE.md 是**上下文预算**的一部分 —— 越长，每次对话的可�
 ## 相关阅读
 
 - [Claude Code 用户视角使用篇](./agent-claude-code-user-perspective.md) —— 上一篇，从用户视角拆解 `~/.claude/` 目录结构与各能力的协同
-- [Skill 经验封装篇](../agent-system-design/agent-skill-design.md) —— Skill 设计原理的深入解析
-- [Agent 大脑篇](../agent-system-design/agent-brain.md) —— 主循环机制，理解 Hook 为什么"对 Agent 透明"
-- [工具调用篇](../agent-system-design/agent-tool-calling.md) —— 工具的本质，理解 MCP 工具的注册逻辑
-- [上下文管理篇](../agent-system-design/agent-context-management.md) —— CLAUDE.md 的长度预算参考
+- [Skill 经验封装篇](../agent-system-design/03-view/agent-skill-design.md) —— Skill 设计原理的深入解析
+- [Agent 大脑篇](../agent-system-design/04-decision/agent-brain.md) —— 主循环机制，理解 Hook 为什么"对 Agent 透明"
+- [工具调用篇](../agent-system-design/05-action/agent-tool-calling.md) —— 工具的本质，理解 MCP 工具的注册逻辑
+- [上下文管理篇](../agent-system-design/03-view/agent-context-management.md) —— CLAUDE.md 的长度预算参考
 - [AI 工具使用方式的阶段复盘](../evolution-trends/ai-coding-learning-method-stage-review.md) —— 学习方法论层面的复盘

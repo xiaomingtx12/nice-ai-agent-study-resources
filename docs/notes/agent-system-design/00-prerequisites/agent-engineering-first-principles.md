@@ -66,7 +66,7 @@ Agent 系统实际在做两次转换：
 
 执行结果再回到模型，成为下一轮判断的观察。Agent 大脑负责维持这条往返链路，直到任务完成、失败或转人工。
 
-这也是 [Agent 产品功能形态图谱](../agent-product-method/agent-product-functional-form-atlas.md) 与工程技巧图谱的连接点：产品侧描述用户任务如何变化，工程侧解释这条转换链怎样可靠运行。
+这也是 [Agent 产品功能形态图谱](../../agent-product-method/agent-product-functional-form-atlas.md) 与工程技巧图谱的连接点：产品侧描述用户任务如何变化，工程侧解释这条转换链怎样可靠运行。
 
 ## 三、确定性外框与不确定性内核
 
@@ -130,7 +130,7 @@ Agent 组件不是凭空设计出来的，每一类都对应任务链上的一�
 
 ## 五、Agent 大脑是当前模型能力的工程外骨骼
 
-模型一次调用本身不负责长期状态、工具执行、失败恢复和任务问责。当前的 [Agent 大脑](./agent-brain.md) 因此提供：
+模型一次调用本身不负责长期状态、工具执行、失败恢复和任务问责。当前的 [Agent 大脑](../04-decision/agent-brain.md) 因此提供：
 
 - 循环和退出条件
 - 状态保存
@@ -210,7 +210,7 @@ Agent 组件不是凭空设计出来的，每一类都对应任务链上的一�
 
 如果没有评测，既无法证明工程技巧有效，也无法证明它已经可以删除。评测不仅是发布前验收，也是架构减法的依据。
 
-这也是 [Agent 评测](./agent-evaluation.md) 和 [可观测性](./agent-observability.md) 的上游意义：前者判断任务链是否达到产品要求，后者提供失败位置和运行事实。
+这也是 [Agent 评测](../06-observation/agent-evaluation.md) 和 [可观测性](../06-observation/agent-observability.md) 的上游意义：前者判断任务链是否达到产品要求，后者提供失败位置和运行事实。
 
 ## 八、工程技巧如何持续进化
 

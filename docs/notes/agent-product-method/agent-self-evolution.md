@@ -38,7 +38,7 @@ Agent 自进化指：跨任务使用让产品或 harness 状态发生**受控**�
 
 未评判的原始历史、私下修改的小动作、一次性的临时要求都不属于这三类。让这三类资产保持纯净，是自进化能否成立的前提。
 
-详细的产品形态描述见 [功能形态图谱 §7 记忆与个性化](./agent-product-functional-form-atlas.md)；记忆后端和检索实现见 [Context 上下文管理](../agent-system-design/agent-context-management.md)；流程沉淀形式见 [Skill 经验封装](../agent-system-design/agent-skill-design.md)。
+详细的产品形态描述见 [功能形态图谱 §7 记忆与个性化](./agent-product-functional-form-atlas.md)；记忆后端和检索实现见 [Context 上下文管理](../agent-system-design/03-view/agent-context-management.md)；流程沉淀形式见 [Skill 经验封装](../agent-system-design/03-view/agent-skill-design.md)。
 
 ## 三、受控反馈回路
 
@@ -158,9 +158,9 @@ delete_owner # 删除责任方
 |---|---|
 | [功能形态图谱](./agent-product-functional-form-atlas.md) §7 | 用户可见的“记忆与个性化”形态 |
 | [AI Native 产品怎么设计](./ai-native-product-design.md) §6 | 历史如何参与当前任务 |
-| [Context 上下文管理](../agent-system-design/agent-context-management.md) | 记忆如何存储与检索 |
-| [Skill 经验封装](../agent-system-design/agent-skill-design.md) | 流程沉淀如何被调用与维护 |
-| [Agent 评测](../agent-system-design/agent-evaluation.md) | 沉淀后的结果如何被验证 |
+| [Context 上下文管理](../agent-system-design/03-view/agent-context-management.md) | 记忆如何存储与检索 |
+| [Skill 经验封装](../agent-system-design/03-view/agent-skill-design.md) | 流程沉淀如何被调用与维护 |
+| [Agent 评测](../agent-system-design/06-observation/agent-evaluation.md) | 沉淀后的结果如何被验证 |
 | [实操落地篇](../tool-mastery/agent-from-paradigm-to-practice.md) | 真实使用中沉淀与维护的具体做法 |
 | [演变趋势观察：从 Prompt 到 Loop](../evolution-trends/agent-engineering-evolution-prompt-to-loop.md) | 工程层如何随模型能力演进 |
 

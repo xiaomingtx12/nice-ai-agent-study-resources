@@ -599,6 +599,6 @@ Round 3: Context = [问题, A, B] → 让模型基于 B 改进 A
 ## 延伸阅读
 
 - 两阶段循环的实现
-- [工具调用篇](agent-tool-calling.md)——Tool description 的设计原则
-- [上下文管理篇](agent-context-management.md)——Working Memory / Compaction
-- [驾驭工程实践](../evolution-trends/agent-coding-strategy-state-reflect.md)——状态外部化
+- [工具调用篇](../05-action/agent-tool-calling.md)——Tool description 的设计原则
+- [上下文管理篇](../03-view/agent-context-management.md)——Working Memory / Compaction
+- [驾驭工程实践](../../evolution-trends/agent-coding-strategy-state-reflect.md)——状态外部化
