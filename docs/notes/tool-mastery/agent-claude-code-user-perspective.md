@@ -2761,7 +2761,7 @@ mindmap
 
 ## 相关阅读
 
-- [Skill 经验封装篇](../agent-system-design/agent-skill-design.md) —— 本文的上游，更深入讲 Skill 的设计原理
-- [Agent 大脑篇](../agent-system-design/agent-brain.md) —— 主循环的内部机制
-- [工具调用篇](../agent-system-design/agent-tool-calling.md) —— 工具的本质与设计
-- [上下文管理篇](../agent-system-design/agent-context-management.md) —— 上下文压缩与隔离
+- [Skill 经验封装篇](../agent-system-design/03-view/agent-skill-design.md) —— 本文的上游，更深入讲 Skill 的设计原理
+- [Agent 大脑篇](../agent-system-design/04-decision/agent-brain.md) —— 主循环的内部机制
+- [工具调用篇](../agent-system-design/05-action/agent-tool-calling.md) —— 工具的本质与设计
+- [上下文管理篇](../agent-system-design/03-view/agent-context-management.md) —— 上下文压缩与隔离

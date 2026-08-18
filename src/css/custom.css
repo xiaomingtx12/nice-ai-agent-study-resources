@@ -244,7 +244,8 @@ body {
 
 @media (min-width: 997px) {
   html[class~='docs-doc-id-index'] main[class*='docMainContainer'],
-  html[class~='docs-doc-id-about/index'] main[class*='docMainContainer'] {
+  html[class~='docs-doc-id-about/index'] main[class*='docMainContainer'],
+  html[class~='docs-doc-id-ai-relay/index'] main[class*='docMainContainer'] {
     width: calc(100% - var(--doc-sidebar-width));
     max-width: calc(100% - var(--doc-sidebar-width));
     margin-left: var(--doc-sidebar-width);
@@ -253,7 +254,8 @@ body {
 }
 
 html[class~='docs-doc-id-index'] article,
-html[class~='docs-doc-id-about/index'] article {
+html[class~='docs-doc-id-about/index'] article,
+html[class~='docs-doc-id-ai-relay/index'] article {
   max-width: 56rem;
   margin-inline: auto;
 }
@@ -765,7 +767,8 @@ html:not([data-site-theme]):not([data-theme='dark']) .footer .footer__copyright 
 
 /* 首页与关于页：版心 1120，衬线标题气质 */
 html[class~='docs-doc-id-index'] article,
-html[class~='docs-doc-id-about/index'] article {
+html[class~='docs-doc-id-about/index'] article,
+html[class~='docs-doc-id-ai-relay/index'] article {
   max-width: 70rem;
 }
 

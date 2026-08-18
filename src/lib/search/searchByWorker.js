@@ -6,7 +6,7 @@ import {
 import {
   language,
   searchIndexUrl,
-} from '@easyops-cn/docusaurus-search-local/dist/client/client/utils/proxiedGeneratedConstants';
+} from '@generated/@easyops-cn/docusaurus-search-local/default/generated-constants.js';
 import {tokenize} from '@easyops-cn/docusaurus-search-local/dist/client/client/utils/tokenize';
 import {smartQueries} from '@easyops-cn/docusaurus-search-local/dist/client/client/utils/smartQueries';
 import {SearchDocumentType} from '@easyops-cn/docusaurus-search-local/dist/client/shared/interfaces';

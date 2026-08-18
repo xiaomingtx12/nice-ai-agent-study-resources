@@ -89,7 +89,7 @@ flowchart LR
 - 输入转换后的任务范围需要对用户可见。
 - 多模态输入要保留来源与引用位置。
 
-**工程依赖**：[意图识别](../agent-system-design/agent-intent-recognition.md)、[上下文管理](../agent-system-design/agent-context-management.md)、多模态解析。
+**工程依赖**：[意图识别](../agent-system-design/01-task/agent-intent-recognition.md)、[上下文管理](../agent-system-design/03-view/agent-context-management.md)、多模态解析。
 
 **何时不该用**：任务字段少且高度确定时，表单通常比自然语言更快、更可靠。
 
@@ -111,7 +111,7 @@ flowchart LR
 
 **产品要求**：追问只针对会改变结果的信息；可以从上下文确定的内容不再询问；高风险任务不能用低置信度猜测推进。
 
-**工程依赖**：[意图识别](../agent-system-design/agent-intent-recognition.md)、[Agent 大脑](../agent-system-design/agent-brain.md)、[Agent 评测](../agent-system-design/agent-evaluation.md)。
+**工程依赖**：[意图识别](../agent-system-design/01-task/agent-intent-recognition.md)、[Agent 大脑](../agent-system-design/04-decision/agent-brain.md)、[Agent 评测](../agent-system-design/06-observation/agent-evaluation.md)。
 
 **何时不该用**：所有细节都追问会把自然语言入口退化成逐字段表单。
 
@@ -134,7 +134,7 @@ flowchart LR
 
 **产品要求**：结论能回到来源；摘要不能替代事实记录；个性化改变重点但不能改变事实；结果结构要服务后续判断或执行。
 
-**工程依赖**：[上下文管理](../agent-system-design/agent-context-management.md)、[RAG 工程](../agent-system-design/rag-engineering.md)、[GraphRAG 工程](../agent-system-design/graph-rag-engineering.md)、[RAG 评测](../agent-system-design/rag-evaluation.md)。
+**工程依赖**：[上下文管理](../agent-system-design/03-view/agent-context-management.md)、[RAG 工程](../agent-system-design/03-view/rag-engineering.md)、[GraphRAG 工程](../agent-system-design/03-view/graph-rag-engineering.md)、[Agent 评测](../agent-system-design/06-observation/agent-evaluation.md)。
 
 **何时不该用**：精确核对、原文审阅和结构化查询场景不能只给生成式摘要。
 
@@ -156,7 +156,7 @@ flowchart LR
 
 **产品要求**：动作继承真实身份和权限；参数可验证；写操作有幂等与审计；不可逆动作由人明确批准；执行结果必须读回确认。
 
-**工程依赖**：[工具调用](../agent-system-design/agent-tool-calling.md)、[Agent 大脑](../agent-system-design/agent-brain.md)、[Skill](../agent-system-design/agent-skill-design.md)、MCP 与权限机制。
+**工程依赖**：[工具调用](../agent-system-design/05-action/agent-tool-calling.md)、[Agent 大脑](../agent-system-design/04-decision/agent-brain.md)、[Skill](../agent-system-design/03-view/agent-skill-design.md)、MCP 与权限机制。
 
 **何时不该用**：只需要分析和建议时，不要为了体现 Agent 而增加系统写权限。
 
@@ -204,7 +204,7 @@ flowchart LR
 
 **产品要求**：每个任务有明确状态、下一步、退出条件和责任人；后台动作可暂停；上下文过期后重新确认；用户能看到系统为什么仍在运行。
 
-**工程依赖**：[Agent 大脑](../agent-system-design/agent-brain.md)、状态持久化、事件系统、调度和[可观测性](../agent-system-design/agent-observability.md)。
+**工程依赖**：[Agent 大脑](../agent-system-design/04-decision/agent-brain.md)、状态持久化、事件系统、调度和[可观测性](../agent-system-design/06-observation/agent-observability.md)。
 
 **何时不该用**：一次生成即可完成的任务不需要引入长期状态和调度系统。
 
@@ -227,7 +227,7 @@ flowchart LR
 
 **产品要求**：事实、偏好和系统推断分开；每条长期信息有来源和范围；一次性指令不自动固化；用户可以查看、修改和删除。
 
-**工程依赖**：[上下文管理](../agent-system-design/agent-context-management.md)、检索、记忆系统、[Skill](../agent-system-design/agent-skill-design.md) 与隐私机制。
+**工程依赖**：[上下文管理](../agent-system-design/03-view/agent-context-management.md)、检索、记忆系统、[Skill](../agent-system-design/03-view/agent-skill-design.md) 与隐私机制。
 
 **何时不该用**：低频一次性任务或敏感信息无法获得长期保存授权时，不应建立用户画像。
 
@@ -252,7 +252,7 @@ flowchart LR
 
 **产品要求**：确认点放在责任变化处；人工修改能进入后续上下文；接管后不与后台 Agent 并发冲突；操作和批准分别留痕。
 
-**工程依赖**：权限、审批、状态同步、回滚、审计、[可观测性](../agent-system-design/agent-observability.md) 与[多 Agent 编排](../agent-system-design/agent-multi-agent-orchestration.md)。
+**工程依赖**：权限、审批、状态同步、回滚、审计、[可观测性](../agent-system-design/06-observation/agent-observability.md) 与[多 Agent 编排](../agent-system-design/04-decision/agent-multi-agent-orchestration.md)。
 
 **何时不该用**：没有风险或价值判断的机械步骤不需要人工逐项批准。
 

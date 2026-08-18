@@ -29,26 +29,54 @@ description: "方法与复盘栏的定位：从应用拆解里提炼能带到下
 
 ## Agent 系统设计
 
-提炼 Agent 系统会用到的工程技巧，先从产品任务与模型不确定性建立第一性原理，再进入具体组件。工程图谱持续总结完整，单个产品按真实问题选择必要部分。Transformer 架构作为理解模型本身的前置项。
+提炼 Agent Harness 的元组件方法。文章面向人阅读，但按问题选择合适的写法：上下文写装配和预算，记忆写生命周期，RAG 写离线/在线数据链，Skill 写激活与版本。方法正文不复述本地应用拆解，后续可沉淀成 Skill。Transformer 是理解模型本身的前置项，不计入运行时元组件。
 
 - [元组件谱系总览](./agent-system-design/index.md)
-- [从 AI 应用开发者的角度理解 Transformer 架构](./agent-system-design/agent-thinking-transformer-from-prompt.md)
-- [工程技巧 -> 架构层：提示词、上下文、驾驭为什么起作用](./agent-system-design/agent-engineering-to-architecture.md)
-- [Agent 工程的第一性原理：用确定性外框管理不确定性模型](./agent-system-design/agent-engineering-first-principles.md)
-- [Agent 大脑篇](./agent-system-design/agent-brain.md)
-- [意图识别篇](./agent-system-design/agent-intent-recognition.md)
-- [工具调用篇](./agent-system-design/agent-tool-calling.md)
-- [Skill 经验封装篇](./agent-system-design/agent-skill-design.md)
-- [上下文管理篇](./agent-system-design/agent-context-management.md)
-- [多 Agent 编排篇](./agent-system-design/agent-multi-agent-orchestration.md)
-- [RAG 工程篇](./agent-system-design/rag-engineering.md)
-- [GraphRAG 工程篇](./agent-system-design/graph-rag-engineering.md)
-- [RAG 评测篇](./agent-system-design/rag-evaluation.md)
-- [Agent 评测篇（骨架）](./agent-system-design/agent-evaluation.md)
-- [可观测性篇](./agent-system-design/agent-observability.md)
-- [MCP *(暂缓)*](./agent-system-design/agent-mcp.md)
 
-> 暂缓项（MCP / Hooks / 权限 / Agent 行为测评）的工程技巧需要先有真实源码样本才能写，不能凭空立条。详见 [agent-system-design/index.md](./agent-system-design/index.md) 暂缓说明。
+**模型前置知识**
+
+- [从 AI 应用开发者的角度理解 Transformer 架构](./agent-system-design/00-prerequisites/agent-thinking-transformer-from-prompt.md)
+- [工程技巧 -> 架构层](./agent-system-design/00-prerequisites/agent-engineering-to-architecture.md)
+- [Agent 工程的第一性原理](./agent-system-design/00-prerequisites/agent-engineering-first-principles.md)
+
+**Task：任务合同**
+
+- [任务合同与输入路由](./agent-system-design/01-task/agent-intent-recognition.md)
+
+**View：上下文、知识与经验**
+
+- [上下文装配](./agent-system-design/03-view/agent-context-management.md)
+- [记忆设计：存什么，何时读，何时忘](./agent-system-design/03-view/agent-memory-design.md)
+- [上下文压缩与外部化](./agent-system-design/03-view/agent-context-compression.md)
+- [Skill 激活与经验封装](./agent-system-design/03-view/agent-skill-design.md)
+- [RAG 工程：离线建库到在线证据链](./agent-system-design/03-view/rag-engineering.md)
+- [GraphRAG：什么时候值得建图](./agent-system-design/03-view/graph-rag-engineering.md)
+- [知识编译：LLM-Wiki](./agent-system-design/03-view/llm-wiki-knowledge-compilation.md)
+
+**Decision：决策与协作**
+
+- [控制平面：Workflow、Agent Loop 与协作](./agent-system-design/04-decision/agent-vs-workflow-architecture.md)
+- [决策内核：Agent 大脑](./agent-system-design/04-decision/agent-brain.md)
+- [多 Agent 协作：主控-子 Agent、同步/异步与 Agent Team](./agent-system-design/04-decision/agent-multi-agent-orchestration.md)
+
+**Action：能力、权限与执行空间**
+
+- [能力执行：Tool 合同与副作用](./agent-system-design/05-action/agent-tool-calling.md)
+- [权限、审批与结果验收](./agent-system-design/05-action/agent-permission-and-postconditions.md)
+- [Agent 操作空间：沙箱、工作区与资源边界](./agent-system-design/05-action/agent-workspace-sandbox.md)
+
+**Observation：观察与评测**
+
+- [证据与反馈](./agent-system-design/06-observation/agent-observability.md)
+- [Agent 评测](./agent-system-design/06-observation/agent-evaluation.md)
+
+**State：状态与恢复**
+
+- [Agent 状态：事实连续性、恢复与执行边界](pathname:///notes/agent-system-design/state/agent-state-architecture)
+
+**横切概念**
+
+Harness 不单独占一个目录；它把 View、Action、Observation 和 State 中的预算、权限、沙箱、取消、恢复、验收和反馈约束串起来。
 
 ## 工具应用与驾驭
 
@@ -65,6 +93,7 @@ description: "方法与复盘栏的定位：从应用拆解里提炼能带到下
 
 - [构建 Agent Harness 系统：四条引擎路径的对比与企业落地](./market-observation/agent-harness-engine-comparison.md)
 - [拆解 CordysCRM-skills：把企业系统装成 Skill 的一个样本](./market-observation/cordys-crm-skill-breakdown.md)
+- [电商场景的 AI 应用：八个项目其实是一条数据链](./market-observation/ecommerce-ai-application.md)
 
 ## 这一节该看什么
 
