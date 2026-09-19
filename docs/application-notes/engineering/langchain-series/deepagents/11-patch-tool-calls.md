@@ -6,7 +6,7 @@ description: 从源码拆解 PatchToolCallsMiddleware 如何修复缺少 ToolMes
 
 # Deep Agents 源码解析 11：工具调用修补与状态恢复
 
-## 源码定位
+## 一、源码定位
 
 > 主代理装配：`libs/deepagents/deepagents/graph.py` → `create_deep_agent()`
 >
@@ -22,193 +22,54 @@ description: 从源码拆解 PatchToolCallsMiddleware 如何修复缺少 ToolMes
 
 > 测试实现：`libs/deepagents/tests/unit_tests/test_middleware.py` → `TestPatchToolCallsMiddleware`
 
-**阅读基线**：Deep Agents 0.6.12。
+> **阅读基线**：Deep Agents 0.6.12（`libs/deepagents/`）。
+> 源码版本与路径约定见 [源码版本与路径约定](source-baseline.md)。
 
-这篇只解决一个问题：
 
-```text
-AIMessage 声明了 tool call
-但消息历史中没有同一个 tool_call_id 的 ToolMessage
-```
+## 二、缺的是工具结果消息，还是实际执行结果
 
-这种消息历史称为悬空工具调用（dangling tool call）。`PatchToolCallsMiddleware` 会在 Agent 开始执行时补一条合成的 `ToolMessage`，让消息协议重新闭合。
+模型输出的 `AIMessage` 可以携带 `tool_calls`，每项都有工具名、参数和调用 ID。对应的 `ToolMessage` 通过 `tool_call_id` 返回结果。如果历史中有调用却没有对应结果，就形成悬空工具调用，后续模型请求可能被消息协议校验拒绝。
 
-它修补的是消息结构，不是工具业务结果。补出来的消息只告诉模型“这次调用没有正常完成”或“参数已经损坏”，不会重新执行工具，也不会恢复丢失的数据。
+`PatchToolCallsMiddleware` 在 `before_agent()` 入口 hook 中扫描这个缺口，并生成合成的工具消息。它使模型可以继续读取历史，但没有执行、取消或重试实际工具。工具可能从未开始，也可能已经提交外部写入，只是结果未保存。
 
-文章按一次修补的生命周期展开：
+这里有两种 ID：消息自身的 `id` 用来在 State 中追加、替换或删除；`tool_call_id` 用来连接一次工具请求与结果。修补器按后者配对，不能根据工具名称判断是否已有结果，同名工具可以被连续调用多次。
 
-```text
-中间件装配
-  -> Agent 开始执行
-  -> 收集已完成的 tool_call_id
-  -> 找到悬空的 tool call
-  -> 生成合成 ToolMessage
-  -> 用 REMOVE_ALL_MESSAGES 整体重建 messages
-  -> Agent 继续执行
-```
+## 三、先看一份历史怎样被修补
 
-## 这篇要回答的设计问题
-
-恢复流程需要先得到一份语法上完整的消息历史，模型才有机会继续规划。这里的“完整”不是指每个工具都成功，而是指每个带 ID 的工具调用都有对应的工具消息。
-
-| 问题 | `PatchToolCallsMiddleware` 是否处理 |
-| --- | --- |
-| `AIMessage` 缺少对应 `ToolMessage` | 是 |
-| 工具是否执行成功 | 否 |
-| 工具结果正文是否正确 | 否 |
-| 被取消的工具是否需要重试 | 否 |
-| 无效参数能否自动修正 | 否 |
-| 没有 `tool_call_id` 的调用能否配对 | 否 |
-
-用 `REMOVE_ALL_MESSAGES` 整体重建消息，是为了让修补后的历史重新经过同一个 Reducer 语义。这个动作成本更高，但比在并发写入存在时盲目追加几条补丁消息更容易保持顺序和一致性。
-
-## 一、为什么会出现悬空工具调用
-
-正常的工具调用消息应当成对出现：
+假设模型同时请求读取文件与搜索内容，其中读取结果已保存，搜索结果缺失。以下用消息类型和调用 ID 表示输入，不是可执行代码：
 
 ```text
-AIMessage(
-    tool_calls=[{"id": "call_123", "name": "read_file", ...}]
-)
-  -> ToolMessage(tool_call_id="call_123", content="...")
+HumanMessage：读取并检查配置
+AIMessage：tool_calls = [call_read, call_grep]
+ToolMessage：tool_call_id = call_read，内容为真实读取结果
 ```
 
-`AIMessage` 声明了一个工具调用，后面就应该有相同 `tool_call_id` 的 `ToolMessage`。模型继续生成下一轮消息时，通常依赖这组配对判断工具是否完成、返回了什么。
-
-这里的 `ToolMessage` 是 LangChain 中表示工具返回值的消息类型，`tool_call_id` 是它和 `AIMessage` 建立配对的字段。`AIMessage` 中的 `tool_calls` 表示解析成功的调用，`invalid_tool_calls` 表示结构存在但参数无法正常解析的调用。
-
-悬空调用通常来自执行边界：
-
-- 模型刚生成工具调用，Agent 在工具执行前被中断；
-- 工具已经开始执行，但人工审批或外部事件打断了流程；
-- Checkpoint 恢复时只恢复了部分消息；
-- 外部系统裁剪、拼接或写回消息时漏掉了工具结果；
-- 模型输出解析失败，调用进入 `invalid_tool_calls`，没有进入正常工具节点。
-
-这些情况的共同结果是：
+修补器先得到 `answered_ids={"call_read"}`，确认只有 `call_grep` 缺少结果。随后重建成：
 
 ```text
-有 AIMessage.tool_calls
-没有相同 ID 的 ToolMessage
+HumanMessage：读取并检查配置
+AIMessage：tool_calls = [call_read, call_grep]
+ToolMessage：tool_call_id = call_grep，内容为合成的取消说明
+ToolMessage：tool_call_id = call_read，内容为原有读取结果
 ```
 
-如果直接把这份历史交给后续 Agent，模型适配器或消息校验层可能无法继续处理。
+新补丁紧跟产生调用的 AIMessage 插入，原消息的相对顺序保留。已有错误结果也算“有结果”：即使 `call_read` 对应 `status="error"`，修补器也不会再为它补一条消息。
 
-## 二、它在 Agent 栈中的位置
+这个例子说明修补关注的是配对存在性。它不会把旧的错误结果改成成功，也不会检查已有结果正文是否正确、是否重复或是否来自可信执行端。
 
-主代理的核心装配顺序是：
+## 四、识别缺口：有 ID，且没有对应 ToolMessage
 
-```text
-TodoListMiddleware
-  -> SkillsMiddleware（配置 skills 时加入）
-  -> FilesystemMiddleware
-  -> SubAgentMiddleware（存在同步子代理时加入）
-  -> SummarizationMiddleware
-  -> PatchToolCallsMiddleware
-  -> AsyncSubAgentMiddleware（配置异步子代理时加入）
-  -> 用户中间件和 Harness Profile 扩展
-  -> Prompt Caching Middleware
-  -> MemoryMiddleware（配置 memory 时加入）
-  -> HumanInTheLoopMiddleware（配置 interrupt_on 时加入）
-  -> ToolExclusionMiddleware（配置排除工具时加入）
-```
-
-`create_deep_agent()` 会把它和摘要中间件一起加入主代理栈：
+`patch_tool_calls.py` 中的检查分为两步。下面摘录方法开头，省略函数签名：
 
 ```python
-deepagent_middleware.extend(
-    [
-        create_summarization_middleware(model, backend),
-        PatchToolCallsMiddleware(),
-    ]
-)
-```
+messages = state["messages"]
+if not messages:
+    return None
 
-配置通用子代理或声明式子代理时，子代理 Agent 也会获得对应的 `PatchToolCallsMiddleware`。最终这些中间件会随工具、状态 schema 和提示词一起交给 `create_agent()`。
+answered_ids = {msg.tool_call_id for msg in messages if msg.type == "tool"}
 
-### 它使用哪个 Hook
-
-`PatchToolCallsMiddleware` 只实现 `before_agent()`：
-
-```python
-def before_agent(
-    self,
-    state: AgentState,
-    runtime: Runtime[Any],
-) -> dict[str, Any] | None:
-```
-
-这个 Hook 在一次 Agent invocation 开始时检查 State，尤其适合处理从 Checkpoint 恢复后已经存在的消息历史。它不是每次模型调用前执行，也不是工具调用包装器。没有发现悬空调用时返回 `None`，State 不发生变化。
-
-这也是它和相邻中间件的区别：
-
-| 中间件 | Hook | 处理对象 |
-| --- | --- | --- |
-| `SummarizationMiddleware` | `wrap_model_call()` | 当前模型请求的消息视图 |
-| `PatchToolCallsMiddleware` | `before_agent()` | Agent State 中完整的消息协议 |
-| `AsyncSubAgentMiddleware` | `wrap_model_call()` | 当前模型请求中的异步任务工具 |
-
-### 子代理的继承边界
-
-声明式子代理和默认的通用子代理会在 `create_deep_agent()` 中各自装配 `PatchToolCallsMiddleware`。它们拥有自己的 Agent State，因此由各自的中间件检查自己的消息历史。
-
-已经编译好的 `CompiledSubAgent` 不会自动继承主代理的中间件。它是否具备同样的修补能力，取决于编译它时使用的 Agent 配置。
-
-主代理的 Patch 中间件不会跨越 State 边界去读取或修补子代理内部消息。
-
-列表中 `PatchToolCallsMiddleware` 位于摘要之后，只说明装配列表的位置。三个中间件的 Hook 不共享一条相同的运行时调用链。
-
-## 三、`before_agent()` 如何识别缺口
-
-源码按三个动作完成检查：
-
-```text
-读取 messages
-  -> 收集所有 ToolMessage 的 tool_call_id
-  -> 扫描所有 AIMessage 的 tool_calls 和 invalid_tool_calls
-  -> 找出没有对应结果的调用
-```
-
-### 先建立已完成调用集合
-
-源码先收集消息列表中所有工具结果的 ID：
-
-```python
-answered_ids = {
-    msg.tool_call_id
-    for msg in messages
-    if msg.type == "tool"
-}
-```
-
-这里判断的是消息类型和 `tool_call_id`。它不会检查 ToolMessage 的正文，也不会判断工具执行成功还是失败。只要某个 ID 已经出现在工具消息里，这次调用就被视为已经有对应结果。
-
-因此，下面这条消息也会被视为“已回答”：
-
-```python
-ToolMessage(
-    tool_call_id="call_123",
-    content="permission denied",
-    status="error",
-)
-```
-
-PatchToolCallsMiddleware 只负责补齐协议，工具错误的含义由工具调用链和模型自行处理。
-
-### 同时扫描正常和无效调用
-
-判断逻辑会把两种列表合并扫描：
-
-```python
-for tool_call in (*msg.tool_calls, *msg.invalid_tool_calls)
-```
-
-只要调用存在 ID，且这个 ID 不在 `answered_ids` 中，就认为它是悬空调用：
-
-```python
 if not any(
-    tool_call["id"] is not None
-    and tool_call["id"] not in answered_ids
+    tool_call["id"] is not None and tool_call["id"] not in answered_ids
     for msg in messages
     if isinstance(msg, AIMessage)
     for tool_call in (*msg.tool_calls, *msg.invalid_tool_calls)
@@ -216,324 +77,84 @@ if not any(
     return None
 ```
 
-有两个细节：
+`invalid_tool_calls` 是模型适配层未能解析成有效参数的调用记录。它们也可能带调用 ID，因此与正常调用一起检查。没有 ID 的调用无法确定配对身份，这段代码直接跳过，不会猜测一个 ID。
 
-- 没有 ID 的调用无法和 ToolMessage 配对，因此不会生成补丁；
-- 判断依据是 `tool_call_id`，不是工具名称。两个不同调用可以使用同一个工具名，但它们的 ID 必须分别闭合。
+`answered_ids` 从整份历史收集。它只检查工具消息类型和配对 ID，不判断正文、错误状态或排列是否合法。因此已有结果但顺序错误、重复调用 ID、没有 ID 的畸形调用，都不能指望这段检查完整修复。
 
-## 四、补丁消息如何生成
+空历史或没有缺口时返回 `None`，表示不提交 State 更新。这避免正常进入 Agent 时也重写整份历史。
 
-确认存在悬空调用后，源码重新遍历原始消息，并在对应的 `AIMessage` 后面插入合成的 `ToolMessage`：
+## 五、生成补丁：保留原消息，插入合成说明
+
+检测到缺口后，方法重新遍历历史：
 
 ```python
 patched_messages: list[AnyMessage] = []
-
 for msg in messages:
     patched_messages.append(msg)
     if not isinstance(msg, AIMessage):
         continue
-
     for tool_call in (*msg.tool_calls, *msg.invalid_tool_calls):
         tool_call_id = tool_call["id"]
         if tool_call_id is None or tool_call_id in answered_ids:
             continue
-        ...
-        patched_messages.append(
-            ToolMessage(
-                content=content,
-                name=name,
-                tool_call_id=tool_call_id,
-            )
-        )
+        name = tool_call["name"] or "unknown"
+        if tool_call.get("type") == "invalid_tool_call":
+            content = f"Tool call {name} with id {tool_call_id} could not be executed - arguments were malformed or truncated."
+        else:
+            content = f"Tool call {name} with id {tool_call_id} was cancelled - another message came in before it could be completed."
+        patched_messages.append(ToolMessage(content=content, name=name, tool_call_id=tool_call_id))
 ```
 
-插入位置紧跟对应的 `AIMessage`，这样不会把补丁结果放到整段消息历史的末尾，工具调用的局部顺序仍然可读。
+两类文本都是实现中的固定说明：无效调用提示参数损坏或截断，正常调用提示取消。代码没有读取进程状态或业务账本，因此正常调用补丁中的 `cancelled` 不能证明命令已停止、退款未发生或文件未写入。
 
-### 正常 tool call 的补丁内容
+补丁构造时也没有显式设置 `status="error"`。监控若仅凭 ToolMessage 存在，或未带 error 状态，就将动作计为成功，会把协议修补误报为业务完成。应用需要另外记录实际执行结果。
 
-如果调用来自 `AIMessage.tool_calls`，源码生成的内容是：
+## 六、为什么返回整体重建标记
 
-```text
-Tool call <name> with id <tool_call_id> was cancelled
-- another message came in before it could be completed.
-```
-
-这表示调用没有完成，原因是后续消息已经到达或流程在调用完成前被打断。它不是工具成功返回的结果，也不会重新执行该工具。
-
-### invalid tool call 的补丁内容
-
-如果调用来自 `AIMessage.invalid_tool_calls`，源码根据 `type` 判断它是无效调用，并生成：
-
-```text
-Tool call <name> with id <tool_call_id> could not be executed
-- arguments were malformed or truncated.
-```
-
-这表示调用参数在解析阶段就已经损坏或被截断。补丁的作用是让消息结构闭合，不能把它理解成一次真正的工具调用失败响应。
-
-如果调用没有工具名，源码使用：
+方法最后返回的不是新增补丁列表，而是完整更新：
 
 ```python
-name = tool_call["name"] or "unknown"
+return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *patched_messages]}
 ```
 
-因此，补丁始终能携带一个可读的 `name`，但不会凭空推断真实工具名称。
+`RemoveMessage` 表示删除消息的控制对象；`REMOVE_ALL_MESSAGES` 是其中用于整体重置的特殊 ID。主图默认使用的 `_messages_delta_reducer()` 会丢弃旧历史和标记之前的写入，再按后续顺序重建消息。
 
-### 多个并行调用如何处理
+如果只返回新补丁，消息合并通常会把它追加到历史末尾，无法保证放在对应 AIMessage 后面。即使把所有旧消息一起返回，同 ID 消息也只是原位替换，新补丁仍会追加。重置后回填解决的正是插入位置问题，代价是提交一份完整历史。
 
-一条 `AIMessage` 可以带多个 `tool_calls`：
+这次更新写入 State，会影响后续请求与检查点。正常历史摘要主要改 `ModelRequest.messages` 并保存摘要事件，两者不同。自定义 `state_schema` 若改变了消息字段的合并规则，应确认它仍识别这个重置标记，否则不能沿用这里的推导。
 
-```text
-AIMessage(
-    tool_calls=[
-        {"id": "call_a", "name": "read_file"},
-        {"id": "call_b", "name": "grep"},
-    ]
-)
-```
+## 七、恢复与人工审批何时经过修补器
 
-如果只有 `call_a` 已经有 `ToolMessage`，源码只为 `call_b` 补消息。每个调用单独按 ID 判断，不会因为同一条 `AIMessage` 中有一个结果，就把其他调用也视为完成。
+`create_deep_agent()` 把修补器加入主栈，默认通用子代理和声明式子代理也有各自的实例。它们检查自己的消息状态，不会跨图检查另一 Agent 的历史；调用方预先编译的子代理是否具备修补器，取决于其自身装配。
 
-## 五、为什么要用 `REMOVE_ALL_MESSAGES`
+执行时机由图入口决定。带旧历史重新进入 `before_agent`，会发生上述扫描；从检查点或人工审批的暂停节点继续，未必重走入口。正常审批挂起时尚无 ToolMessage，是合法的中间状态，不能直接等同于取消。
 
-补丁列表不是直接追加到旧消息后面，而是这样返回：
-
-```python
-return {
-    "messages": [
-        RemoveMessage(id=REMOVE_ALL_MESSAGES),
-        *patched_messages,
-    ]
-}
-```
-
-### `REMOVE_ALL_MESSAGES` 做什么
-
-`REMOVE_ALL_MESSAGES` 是 LangGraph 消息 Reducer 识别的特殊标记。标准 `add_messages()` 在遇到它时，会丢弃哨兵之前的旧消息；Deep Agents 0.6.12 的 `_messages_delta_reducer()` 也实现了同样的重置语义。
-
-Deep Agents 的 `DeepAgentState.messages` 使用的是：
-
-```python
-DeltaChannel(_messages_delta_reducer, snapshot_frequency=50)
-```
-
-所以这里不能简单理解成“调用了 `add_messages()`”。准确说法是：`REMOVE_ALL_MESSAGES` 被消息 Reducer 当作整体重置标记，随后把完整的 `patched_messages` 重新写入消息通道。
-
-核心分支是：
-
-```python
-if isinstance(m, RemoveMessage) and m.id == REMOVE_ALL_MESSAGES:
-    remove_all_idx = idx
-
-if remove_all_idx is not None:
-    state_msgs = []
-    msgs = msgs[remove_all_idx + 1 :]
-```
-
-最终效果是：
-
-```text
-旧 State messages
-  -> 整体清空
-  -> 写入原消息 + 新补丁 ToolMessage
-```
-
-如果直接返回 `patched_messages`，Reducer 会把它们当成增量写入，无法把补丁放回各自的局部位置。整体清空再写入，保证 State 中只有一份修补后的消息历史。
-
-### 为什么不只返回新增 ToolMessage
-
-补丁消息必须插入对应 `AIMessage` 后面，而不是简单追加到末尾：
-
-```text
-错误：
-AIMessage(call_a)
-AIMessage(call_b)
-ToolMessage(call_a)
-ToolMessage(call_b)
-
-修补后：
-AIMessage(call_a)
-ToolMessage(call_a)
-AIMessage(call_b)
-ToolMessage(call_b)
-```
-
-所以源码需要重建完整列表，再交给 Reducer 整体替换。
-
-### 它修改的是 State，不是请求副本
-
-`before_agent()` 返回的是 State 更新字典，最终由图的消息 Reducer 写回 `state["messages"]`。这和摘要中间件的常规路径不同：
-
-| 机制 | 修改位置 |
-| --- | --- |
-| `PatchToolCallsMiddleware` | State 的 `messages` |
-| 自动摘要 | `ModelRequest.messages`，并保存 `_summarization_event` |
-| 工具可见性过滤 | 当前 `ModelRequest.tools` |
-
-PatchToolCalls 的修补结果会成为后续所有模型请求的消息历史。
-
-## 六、一次完整修补示例
-
-假设 Agent 在恢复后得到以下 State：
-
-```text
-HumanMessage("读取配置文件")
-AIMessage(
-    tool_calls=[
-        {"id": "call_read", "name": "read_file"},
-        {"id": "call_grep", "name": "grep"},
-    ]
-)
-ToolMessage(
-    tool_call_id="call_read",
-    content="..."
-)
-```
-
-`before_agent()` 的判断结果是：
-
-```text
-answered_ids = {"call_read"}
-悬空调用 = "call_grep"
-```
-
-它返回：
-
-```text
-RemoveMessage(REMOVE_ALL_MESSAGES)
-HumanMessage("读取配置文件")
-AIMessage(tool_calls=[call_read, call_grep])
-ToolMessage(tool_call_id="call_read", content="...")
-ToolMessage(
-    tool_call_id="call_grep",
-    content="Tool call grep with id call_grep was cancelled ..."
-)
-```
-
-Reducer 写回后，Agent 再从这份完整消息历史继续运行。模型看到的是一个已经结束的 `grep` 调用，但能从补丁文本知道它没有产生真实结果。
-
-## 七、它和恢复、中断、摘要的关系
-
-### 和 Checkpoint 恢复
-
-Checkpoint 恢复的是 Agent State。只要恢复结果包含未闭合的 `AIMessage.tool_calls`，`before_agent()` 就会再次检查并补齐缺口。
-
-它不会重新推断中断前到底执行到了哪一步。源码只根据当前消息列表中是否存在对应 `ToolMessage` 作判断。
-
-### 和 Human-in-the-Loop
-
-人工审批可能发生在工具真正执行之前。如果流程在审批期间被中断，原来的 `AIMessage` 可能已经写入，但工具结果还不存在。恢复时，PatchToolCallsMiddleware 会把它标记为取消。
-
-它不绕过审批，也不会替审批自动批准工具。人工决定是否重试，应由后续 Agent 流程处理。
-
-### 和 Summarization
-
-摘要和修补处理的是不同问题：
-
-| 中间件 | 解决的问题 | 处理方式 |
+| 场景 | 可以依赖的行为 | 还需要检查 |
 | --- | --- | --- |
-| `PatchToolCallsMiddleware` | AIMessage 缺少对应 ToolMessage | 修改 State，补齐消息协议 |
-| `SummarizationMiddleware` | 消息历史太长 | 压缩模型请求视图，保存摘要事件 |
+| 带悬空调用经过入口 hook | 为有 ID 且缺少结果的调用补消息 | 后续提供商对完整序列的其他约束 |
+| 人工审批恢复 | 按实际恢复位置继续执行 | 审批决定、是否经过入口、工具是否真的执行 |
+| 外部写入成功但响应丢失 | 修补器可能补成取消说明 | 用稳定业务动作 ID 查询执行端，避免重复提交 |
+| 已有 error ToolMessage | 保留原结果，不另补消息 | 是否允许重试以及重试条件 |
 
-如果历史里存在悬空调用，摘要不能替代补丁。模型即使看到了摘要，也仍然可能面对不完整的工具调用结构。
+需要恢复外部动作时，应先查询可信执行记录，再决定继续、重试或补偿。消息 ID 保证的是状态合并，业务动作 ID 才能用于执行端去重；不能用补丁文本代替这份记录。
 
-### 和 SubAgent
+## 八、如何验证修补结果
 
-主代理和子代理都有各自的消息 State。声明式子代理和默认通用子代理会由 `create_deep_agent()` 分别装配该中间件；已编译的 `CompiledSubAgent` 则不会自动继承主代理配置。
+`libs/deepagents/tests/unit_tests/test_middleware.py` 中的 `TestPatchToolCallsMiddleware` 检查无工具调用、部分缺失、全部已有结果和多条缺失调用等情况。核心断言是首项带整体重置标记，原消息顺序保留，新增结果与调用 ID 配对。
 
-主代理的 PatchToolCallsMiddleware 不会读取或修补子代理内部的消息。
+业务回归还应区分“执行前取消”与“外部提交后丢失结果”：两者都可能产生同样的消息缺口，只有后者存在已完成的副作用。对修补后的历史再次执行检查，应不再增加补丁；对执行端则需单独确认动作没有重复。
 
-## 八、它不会做什么
+## 九、延伸阅读
 
-PatchToolCallsMiddleware 的职责边界很窄：
+**下层：LangChain / LangGraph**
 
-- 不重新执行工具；
-- 不验证工具结果内容；
-- 不判断工具是否成功；
-- 不恢复缺失的真实业务数据；
-- 不重试被取消的调用；
-- 不修复没有 `tool_call_id` 的调用；
-- 不把无效参数转换成合法参数。
+- [LangGraph 06：Checkpoint、Store 与恢复](../langgraph/06-checkpoints-store-and-recovery.md)——恢复时消息历史从哪里来
 
-它只把：
+**本系列**
 
-```text
-AIMessage.tool_calls
-  -> 对应 ToolMessage 缺失
-```
+- [03：状态、Reducer 与恢复](./03-state-reducers-and-recovery.md)——消息 ID 与增量 Reducer 的一致性前提
+- [10：Summarization 与上下文卸载](./10-summarization-and-context-offloading.md)——另一类历史改写
 
-修复成：
+**上层：方法论与案例**
 
-```text
-AIMessage.tool_calls
-  -> 合成 ToolMessage
-```
-
-后续是否重新规划、重新调用工具，交给 Agent 的模型循环和业务逻辑。
-
-## 九、测试如何验证这项机制
-
-当前版本没有单独的 `test_patch_tool_calls.py`，相关测试集中在：
-
-```text
-libs/deepagents/tests/unit_tests/test_middleware.py
-```
-
-`TestPatchToolCallsMiddleware` 覆盖了四个关键场景：
-
-| 测试 | 验证点 |
-| --- | --- |
-| `test_first_message` | 没有工具调用时返回 `None` |
-| `test_missing_tool_call` | 缺少结果时插入 `ToolMessage`，并返回整体重置标记 |
-| `test_no_missing_tool_calls` | 已存在同 ID 工具消息时不重复修补 |
-| `test_two_missing_tool_calls` | 多条 AI 消息各自补齐，且补丁紧跟对应调用 |
-
-测试检查的不是工具业务结果，而是消息协议：
-
-1. 第一条更新是 `RemoveMessage(id=REMOVE_ALL_MESSAGES)`；
-2. 原消息顺序保持不变；
-3. 新消息带有正确的 `name` 和 `tool_call_id`。
-
-## 排查恢复异常时的顺序
-
-遇到恢复后模型报工具消息格式错误，可以按这个顺序定位：
-
-```text
-State 中是否存在 AIMessage.tool_calls 或 invalid_tool_calls
-  -> 每个调用是否带有 id
-  -> 是否存在同 id 的 ToolMessage
-  -> 是否执行到 PatchToolCallsMiddleware.before_agent()
-  -> 是否生成 cancelled 或 malformed/truncated 提示
-  -> 是否通过 REMOVE_ALL_MESSAGES 整体写回
-  -> 后续模型是否把补丁消息当作“未产生真实结果”
-```
-
-如果补丁没有出现，优先检查调用是否没有 ID、消息是否不在当前 Agent State、或者使用的是不会自动继承该中间件的编译子代理。
-
-## 读完后的工程判断
-
-PatchToolCallsMiddleware 可以看成 Agent 恢复流程里的消息协议修补器。它的判断依据只有一个：`AIMessage` 中带 ID 的工具调用，是否已经在消息历史里找到同 ID 的工具消息。
-
-源码实现虽然只有一个 Hook，但有三个关键点：
-
-- 正常和无效 tool call 都要检查；
-- 补丁消息要紧跟原始 `AIMessage`；
-- 用 `REMOVE_ALL_MESSAGES` 让 Reducer 整体重建消息列表。
-
-因此，排查恢复后的 Agent 异常时，可以按下面的顺序定位：
-
-```text
-是否存在 AIMessage.tool_calls
-  -> 是否有同 ID 的 ToolMessage
-  -> 是否进入 PatchToolCallsMiddleware.before_agent()
-  -> 是否生成对应的取消或参数损坏提示
-  -> 是否通过 REMOVE_ALL_MESSAGES 整体写回 State
-```
-
-修补完成后，消息协议恢复了，但业务动作并没有被自动补做。这条边界决定了它适合放在恢复入口，却不应该被当成工具重试机制。
-
-**配套阅读**：
-
-- [06 中间件增量与装配顺序](./06-middleware-increments.md)
-- [10 Summarization 与上下文卸载](./10-summarization-and-context-offloading.md)
-- [12 异步 SubAgent](./12-async-subagent.md)
+- [Agent 系统设计 02：State 架构](../../../../notes/agent-system-design/02-state/agent-state-architecture.md)——恢复要还原什么，协议完整算不算还原

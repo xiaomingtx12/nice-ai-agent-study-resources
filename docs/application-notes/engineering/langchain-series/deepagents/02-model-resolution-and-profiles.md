@@ -6,9 +6,10 @@ description: 沿真实源码追踪模型 spec、Provider Profile 和 Harness Pro
 
 # Deep Agents 源码解析 02：模型解析与 Profile
 
-## 源码定位
+## 一、源码定位
 
 > **阅读基线**：Deep Agents 0.6.12（`libs/deepagents/`）。
+> 源码版本与路径约定见 [源码版本与路径约定](source-baseline.md)。
 >
 > - 模型解析：`libs/deepagents/deepagents/_models.py` → `resolve_model()`、`get_model_identifier()`、`get_model_provider()`
 > - Provider Profile：`libs/deepagents/deepagents/profiles/provider/provider_profiles.py` → `ProviderProfile`、`register_provider_profile()`、`get_provider_profile()`、`apply_provider_profile()`、`_merge_provider_profiles()`
@@ -18,7 +19,7 @@ description: 沿真实源码追踪模型 spec、Provider Profile 和 Harness Pro
 > - Agent 消费 Harness Profile：`libs/deepagents/deepagents/graph.py` → `create_deep_agent()`、`_normalize_system_prompt()`、`_assemble_prompt_parts()`
 > - Middleware 过滤：`libs/deepagents/deepagents/_excluded_middleware.py` → `_validate_excluded_middleware_config()`、`_apply_excluded_middleware()`、`_verify_excluded_middleware_coverage()`
 
-## 先看完整链路
+## 二、三种 Profile 分别控制什么
 
 Deep Agents 里有两套同名概念容易混淆：
 
@@ -52,11 +53,13 @@ model spec 或 BaseChatModel
 | `ProviderProfile` | 模型客户端如何初始化 | 字符串模型进入 `init_chat_model()` 之前 |
 | `HarnessProfile` | Agent 如何组织提示词、工具和 Middleware | 模型对象构造完成后，`create_deep_agent()` 装配期间 |
 
-换句话说，Provider Profile 改的是“模型是什么”；Harness Profile 改的是“这个模型在 Agent 里怎么工作”。
+`BaseChatModel` 是 LangChain 的聊天模型接口，统一消息输入、工具绑定与模型响应；`init_chat_model()` 根据模型标识创建对应供应商的客户端。这里的 spec 就是 `provider:model-name` 这样的模型标识字符串。
 
-## 一、模型输入有两条路径
+例如，一个 Provider Profile 为某个标识补充初始化参数，字符串路径会把这些参数交给模型构造函数；传入已经创建好的客户端则跳过这一步。随后 Harness Profile 仍可按模型身份匹配工具描述和中间件。至于摘要要按多大的上下文窗口计算阈值，读取的是 `model.profile` 的能力数据。客户端参数、Agent 策略、模型能力分别影响不同步骤，改动其中一个不会自动改动另外两个。
 
-### 字符串模型：先应用 Provider Profile
+## 三、模型输入有两条路径
+
+### 1. 字符串模型：先应用 Provider Profile
 
 `resolve_model()` 的分支很短：
 
@@ -79,7 +82,7 @@ def resolve_model(model: str | BaseChatModel) -> BaseChatModel:
 
 Provider Profile 只在这条字符串路径生效。它不会重新改写已经构造好的 Chat Model。
 
-### 预构造模型：跳过 Provider Profile
+### 2. 预构造模型：跳过 Provider Profile
 
 如果调用方传入：
 
@@ -95,13 +98,15 @@ agent = create_deep_agent(model=model)
 `create_deep_agent()` 会保留调用方传入的原始字符串：
 
 ```python
+# 只有字符串形态的模型才留下 spec，供后面按名字匹配 Harness Profile
 _model_spec = model if isinstance(model, str) else None
 
 if model is None:
-    model = _build_default_model()
+    model = _build_default_model()   # 未指定模型时退回 SDK 默认
 else:
-    model = resolve_model(model)
+    model = resolve_model(model)     # 字符串走 spec 解析，模型实例原样返回
 
+# Profile 匹配发生在模型解析之后：先拿到模型对象，再决定用哪套 Harness 策略
 _profile = _harness_profile_for_model(model, _model_spec)
 ```
 
@@ -109,7 +114,7 @@ _profile = _harness_profile_for_model(model, _model_spec)
 
 当前 0.6.12 仍支持 `model=None`，内部会构造 `ChatAnthropic(model_name="claude-sonnet-4-6")`，但这条默认模型路径已经标记为废弃。应用代码应显式选择模型，避免默认值变化影响 Agent 行为。
 
-## 二、Provider Profile：只处理模型构造
+## 四、Provider Profile：只处理模型构造
 
 `ProviderProfile` 是一个冻结的数据类，字段只有三个：
 
@@ -129,7 +134,7 @@ class ProviderProfile:
 | `pre_init` | `init_chat_model()` 之前 | 版本检查、凭证检查和其他前置校验 |
 | `init_kwargs_factory` | 每次解析模型时 | 环境变量、租户配置和动态请求头 |
 
-### 参数优先级
+### 1. 参数优先级
 
 真正负责组合参数的是 `apply_provider_profile()`：
 
@@ -140,18 +145,19 @@ def apply_provider_profile(
     *,
     run_pre_init: bool = True,
 ) -> dict[str, Any]:
-    base = dict(kwargs) if kwargs else {}
+    base = dict(kwargs) if kwargs else {}      # 调用方显式传入的参数
     profile = get_provider_profile(spec)
     if profile is None:
-        return base
+        return base                            # 没有匹配的 Profile 就原样返回
 
+    # pre_init 执行调用方注册的前置检查；抛错会阻止后续模型构造
     if run_pre_init and profile.pre_init is not None:
         profile.pre_init(spec)
 
-    merged = dict(profile.init_kwargs)
+    merged = dict(profile.init_kwargs)         # ① 静态默认值
     if profile.init_kwargs_factory is not None:
-        merged.update(profile.init_kwargs_factory())
-    merged.update(base)
+        merged.update(profile.init_kwargs_factory())   # ② 运行期生成的值
+    merged.update(base)                        # ③ 调用方参数最后覆盖
     return merged
 ```
 
@@ -171,11 +177,12 @@ ProviderProfile.init_kwargs
 register_provider_profile(
     "openai",
     ProviderProfile(
-        init_kwargs={"temperature": 0.2},
-        init_kwargs_factory=lambda: {"base_url": os.environ["OPENAI_BASE_URL"]},
+        init_kwargs={"temperature": 0.2},     # 静态默认值
+        init_kwargs_factory=lambda: {"base_url": os.environ["OPENAI_BASE_URL"]},  # 每次调用时求值
     ),
 )
 
+# 调用方传入的 temperature 会覆盖 Profile 的 0.2
 kwargs = apply_provider_profile(
     "openai:gpt-5.5",
     {"temperature": 0.7},
@@ -184,12 +191,13 @@ kwargs = apply_provider_profile(
 
 此时 `temperature` 使用调用方传入的 `0.7`，`base_url` 来自工厂。
 
-### 为什么 `ProviderProfile` 要冻结参数
+### 2. 为什么 `ProviderProfile` 要冻结参数
 
 `@dataclass(frozen=True)` 只能阻止重新绑定属性，不能阻止内部字典被修改。源码在 `__post_init__()` 中做了两层保护：
 
 ```python
 def __post_init__(self) -> None:
+    # frozen 只阻止重新绑定属性，再包一层只读代理才能挡住对字典本身的修改
     if not isinstance(self.init_kwargs, MappingProxyType):
         object.__setattr__(
             self,
@@ -198,13 +206,13 @@ def __post_init__(self) -> None:
         )
 ```
 
-`dict(self.init_kwargs)` 切断调用方原始字典的引用，`MappingProxyType` 则让注册后的映射只读。
+`dict(self.init_kwargs)` 复制最外层字典，`MappingProxyType` 禁止通过该映射增加、删除或重新绑定键。它们是浅层保护：若某个值本身是列表或字典，仍可能与调用方共享内部对象，不能据此断言全部嵌套配置都不可变。
 
 这不是形式上的不可变。Provider Profile 通常保存在进程级注册表中，多个 Agent 都可能读取它。如果外部字典仍能修改注册结果，同一个模型 spec 在不同时间解析出来的客户端参数就会发生漂移，而且没有注册动作可追踪。
 
-## 三、Provider Profile 的注册与合并
+## 五、Provider Profile 的注册与合并
 
-### 两种注册键
+### 1. 两种注册键
 
 Provider Profile 支持两种键：
 
@@ -218,9 +226,10 @@ openai:gpt-5.5
 查询 `openai:gpt-5.5` 时，`get_provider_profile()` 先看完整 spec，再看 Provider 前缀：
 
 ```python
-exact = _PROVIDER_PROFILES.get(spec)
-base = _PROVIDER_PROFILES.get(provider) if sep else None
+exact = _PROVIDER_PROFILES.get(spec)                      # 完整 spec，如 openai:gpt-5.5
+base = _PROVIDER_PROFILES.get(provider) if sep else None   # Provider 前缀，如 openai
 
+# 两层都命中时做字段级合并，精确配置覆盖 Provider 级配置
 if exact is not None and base is not None:
     return _merge_provider_profiles(base, exact)
 if exact is not None:
@@ -239,7 +248,7 @@ return None
 | 两者都有 | Provider 级作为基础，模型级覆盖它 |
 | `openai:` 或包含多个冒号 | 视为非法 spec，不查注册表 |
 
-### 同一个键重复注册是叠加
+### 2. 同一个键重复注册是叠加
 
 `register_provider_profile()` 不是简单覆盖：
 
@@ -285,7 +294,7 @@ register_provider_profile(
 )
 ```
 
-### 字段级合并规则
+### 3. 字段级合并规则
 
 `_merge_provider_profiles()` 对三个字段分别处理：
 
@@ -295,7 +304,7 @@ register_provider_profile(
 | `pre_init` | 基础 Profile 先执行，模型级 Profile 后执行 |
 | `init_kwargs_factory` | 两个工厂每次都执行，基础工厂先执行，后者覆盖同名结果 |
 
-这意味着模型级 Profile 是“在 Provider 默认上加一层”，不是把 Provider Profile 整个替换掉。
+模型级 Profile 保留未冲突的默认参数，并覆盖同名参数；前置检查与动态参数工厂则按顺序组合。注册一个新字段，不会自动删除基础配置里的其他字段。
 
 例如：
 
@@ -323,7 +332,7 @@ pre_init:
 
 任一 `pre_init` 或工厂抛出异常，后续步骤都会停止。
 
-## 四、Harness Profile：模型构造完成后再调整 Agent
+## 六、Harness Profile：模型构造完成后再调整 Agent
 
 `HarnessProfile` 描述的是 Deep Agents 如何使用已经构造好的模型：
 
@@ -353,7 +362,7 @@ class HarnessProfile:
 
 这些字段不会传给 `init_chat_model()`。它们只有在模型对象已经准备好以后，才由 `create_deep_agent()` 消费。
 
-### 提示词覆盖不是简单拼接
+### 1. 提示词覆盖不是简单拼接
 
 对于声明式子代理和默认 `general-purpose` 子代理，Profile 提示词由 `_apply_profile_prompt()` 处理：
 
@@ -362,11 +371,13 @@ def _apply_profile_prompt(
     profile: HarnessProfile,
     base_prompt: str,
 ) -> str:
+    # base 优先用 Profile 提供的，没提供才用调用方或 SDK 的默认值
     prompt = (
         profile.base_system_prompt
         if profile.base_system_prompt is not None
         else base_prompt
     )
+    # suffix 追加在末尾；源码没有解析或裁决指令内容的冲突
     if profile.system_prompt_suffix is not None:
         prompt = prompt + "\n\n" + profile.system_prompt_suffix
     return prompt
@@ -382,15 +393,15 @@ system_prompt_suffix
   -> 追加到结果末尾
 ```
 
-主代理的 `system_prompt` 还支持 `prefix`、`base`、`suffix` 三段结构，因此由 `graph.py` 的 `_normalize_system_prompt()` 和 `_assemble_prompt_parts()` 负责更细的拼接。两者的覆盖原则相同，但实现入口不同：
+主代理的 `system_prompt` 还支持 `prefix`、`base`、`suffix` 三段结构，因此由 `graph.py` 的 `_normalize_system_prompt()` 和 `_assemble_prompt_parts()` 负责更细的拼接。主代理和子代理的优先级需分别看：
 
-- 主代理：调用方的 `system_prompt` 先被拆成结构化配置，再叠加 Harness Profile；
+- 主代理：调用方显式给出的 `base` 优先于 Profile；包括 `base=None` 这个删除主体的值。
 - 声明式子代理：Profile 直接覆盖或追加其 `system_prompt`；
 - 默认 `general-purpose` 子代理：Profile 可以单独设置自己的 system prompt，且 GP 专属设置优先于主 Profile 的 `base_system_prompt`。
 
 完整提示词装配见 [01：create_deep_agent() 总装配](./01-create-deep-agent-assembly.md)。
 
-### 工具描述、工具排除和 Middleware 排除不是一回事
+### 2. 工具描述、工具排除和 Middleware 排除不是一回事
 
 这三个配置的作用层次不同：
 
@@ -412,6 +423,7 @@ _tools = _apply_tool_description_overrides(
 工具排除放到所有工具注入之后，由 `_ToolExclusionMiddleware` 统一处理：
 
 ```python
+# 工具排除放在所有工具注入之后，避免自定义 Middleware 又把被禁的工具暴露给模型
 if _profile.excluded_tools:
     deepagent_middleware.append(
         _ToolExclusionMiddleware(
@@ -424,7 +436,7 @@ if _profile.excluded_tools:
 
 `excluded_middleware` 按具体类或 Middleware 的 `.name` 匹配。它不能移除 `FilesystemMiddleware` 和 `SubAgentMiddleware`，因为这两个组件是 Deep Agents 的必需脚手架。想隐藏文件工具或 `task`，应分别使用 `excluded_tools`，或者关闭默认 `general-purpose` 子代理。
 
-## 五、Harness Profile 的 `extra_middleware` 到底插在哪里
+## 七、Harness Profile 的 `extra_middleware` 到底插在哪里
 
 `extra_middleware` 是模型级扩展，适合放“只对某个模型或 Provider 有意义”的请求修补。例如工具调用格式兼容、推理标签清理或特定模型的重试策略。
 
@@ -465,9 +477,9 @@ Profile 扩展只作用于 Deep Agents 自己会组装的运行栈：
 
 它不会注入 `CompiledSubAgent` 的已有 Runnable，也不会影响 `AsyncSubAgent` 连接的远程图。前者已经完成编译，后者的 Middleware 应在远程部署侧配置。
 
-## 六、Harness Profile 如何匹配模型
+## 八、Harness Profile 如何匹配模型
 
-### 字符串模型：原始 spec 直接查找
+### 1. 字符串模型：原始 spec 直接查找
 
 当调用方传入 `"openai:gpt-5.5"` 时，`create_deep_agent()` 把原始字符串保存在 `_model_spec`，随后调用：
 
@@ -492,7 +504,7 @@ if spec is not None:
 
 如果完整模型 Profile 和 Provider Profile 都存在，二者按字段合并，模型级值的优先级更高。
 
-### 预构造模型：从实例反查 Provider 和标识
+### 2. 预构造模型：从实例反查 Provider 和标识
 
 预构造模型没有原始 spec，源码需要从对象中提取两部分信息：
 
@@ -513,9 +525,9 @@ Provider 则来自 LangChain 的追踪参数：
 ```python
 def get_model_provider(model: BaseChatModel) -> str | None:
     try:
-        ls_params = model._get_ls_params()
+        ls_params = model._get_ls_params()   # LangChain 的追踪参数里带着 provider
     except (AttributeError, TypeError, NotImplementedError):
-        return None
+        return None                          # 模型没实现这个方法时静默返回
 
     if not isinstance(ls_params, Mapping):
         return None
@@ -537,27 +549,11 @@ provider:identifier
 
 这条反查路径对自定义模型有一个实际要求：模型最好能提供稳定的模型标识，并实现可用的 `_get_ls_params()`。否则模型本身可以正常调用，但 Harness Profile 可能匹配不到，源码会回退到空 Profile。
 
-## 七、两套 Profile 的字段级合并
+## 九、Harness Profile 的字段级合并
 
-### Provider Profile：模型级覆盖 Provider 级
+### 1. Harness Profile：不同字段采用不同合并规则
 
-Provider Profile 的合并语义可以概括成：
-
-```text
-Provider Profile
-  -> init_kwargs 合并
-  -> pre_init 依次执行
-  -> init_kwargs_factory 依次执行
-Model Profile
-  -> 同名字段覆盖
-  -> 新字段追加
-```
-
-它的目标是让 Provider 提供安全默认值，具体模型只补充差异。例如所有 OpenAI 模型默认启用某项 API，只有某个模型需要额外的 `reasoning_effort`，就注册一个模型级 Profile。
-
-### Harness Profile：不同字段采用不同合并规则
-
-`_merge_profiles()` 不是统一的“后者覆盖前者”，而是按字段类型处理：
+`_merge_profiles()` 按字段类型分别处理，没有统一的“后者覆盖前者”：
 
 | 字段 | 合并规则 |
 | --- | --- |
@@ -584,7 +580,7 @@ override: [A_new, C]
 
 这里 `A_new` 替换 `A` 的位置，`C` 追加到末尾。Profile 注册表因此可以安全地先提供一套通用 Middleware，再由模型级 Profile 替换其中一个实例的参数。
 
-## 八、Profile 注册表的惰性加载
+## 十、Profile 注册表的惰性加载
 
 Provider Profile 和 Harness Profile 都通过注册表保存，但内置 Profile 不是在模块导入时一次性全部注册。第一次查询或注册时，入口会触发：
 
@@ -608,9 +604,9 @@ _ensure_builtin_profiles_loaded()
 - Deep Agents 自己的内置 Profile 注册失败，应直接暴露；
 - 第三方插件的加载或注册失败，源码记录日志并跳过，避免一个插件阻塞整个 Profile 系统。
 
-调用方重复注册同一个键时，结果不是清空旧配置，而是进入前面介绍的字段级合并流程。
+调用方重复注册同一个键时，旧配置不会被清空，重复部分进入前面介绍的字段级合并流程。
 
-## 九、`HarnessProfileConfig` 与运行时 Profile
+## 十一、`HarnessProfileConfig` 与运行时 Profile
 
 `HarnessProfileConfig` 是给 YAML/JSON 工作流准备的声明式子集：
 
@@ -646,7 +642,7 @@ general_purpose_subagent:
 - 配置文件适合保存提示词、工具描述、排除项和默认子代理设置；
 - 需要注入 Middleware 实例、工厂或精确类匹配时，应使用 Python 代码构造 `HarnessProfile`。
 
-## 十、如何选择配置位置
+## 十二、如何选择配置位置
 
 可以按“配置影响的对象”判断：
 
@@ -663,21 +659,27 @@ general_purpose_subagent:
 | 业务侧日志、审批或状态逻辑 | `create_deep_agent(middleware=...)` | 这是当前 Agent 的局部扩展 |
 | 业务任务的动态上下文 | `system_prompt`、State 或 Backend | 不属于模型 Profile |
 
-## 工程判断
+## 十三、注册范围与替换规则的工程边界
 
-两套 Profile 的价值不在于增加一层配置对象，而在于把两个变化频率不同的问题拆开：
+Profile 注册表属于进程级配置。应在应用初始化阶段登记模型适配，再创建 Agent；不要为了某次请求修改共享注册表中的租户配置，否则其他 Agent 的后续构造也可能受到影响。动态工厂按模型解析时机求值，并不保证每轮推理前重新读取。
 
-- Provider 变化时，模型客户端的初始化参数跟着变化；
-- Harness 变化时，提示词、工具和 Middleware 跟着模型变化。
+两个合并入口尤其容易混淆。`HarnessProfile.extra_middleware` 的字段合并按具体类型识别；`create_deep_agent(middleware=...)` 合并用户实例时按 `.name` 识别。一个自定义中间件改了名称，可能影响后者的替换行为，却不改变前者按类型去重的规则。
 
-例如 OpenAI 的模型级 Profile 可以为一个具体模型追加 `reasoning_effort`，而同一个模型的 Harness Profile 可以改写 `task` 描述或追加兼容 Middleware。前者只影响 `init_chat_model()`，后者只影响 Agent 装配。
+模型包装器中，位于后面的 Profile 中间件通常能看到前面已传下来的请求改写；响应返回时顺序反转。若要分析状态 hook，则应查看对应 hook 链，不能从同一份列表直接推断所有回调的先后。位置与执行阶段的关系见 [06](06-middleware-increments.md)。
 
-读这部分源码时，最容易出现三个误判：
+相关测试位于 `libs/deepagents/tests/unit_tests/test_models.py` 和 `test_harness_profiles.py`，分别覆盖模型识别、注册与合并。排查时先确认输入是字符串还是客户端实例，再核对命中的键及具体字段规则，比反复调整提示词更直接。
 
-1. **把 Provider Profile 当成 Agent 行为配置。** 它只在字符串模型创建阶段生效。
-2. **把 `model.profile` 当成 Deep Agents 的 Harness Profile。** 前者描述能力元数据，后者控制装配行为。
-3. **把 Profile 注册理解成覆盖。** 同键注册和 Provider/模型双层匹配都采用字段级合并，集合还会取并集。
+## 十四、延伸阅读
 
-把这三条边界守住，后面阅读 `create_deep_agent()` 就不会把模型创建、模型识别和 Agent 运行配置混在一起。`create_deep_agent()` 先把模型变成可调用对象，再根据模型选择 Harness Profile，最后才把这些配置交给 Middleware 和 `create_agent()`。
+**下层：LangChain / LangGraph**
 
-**相关测试**：`tests/unit_tests/test_models.py` · `tests/unit_tests/test_harness_profiles.py` · `tests/unit_tests/test_nemotron_ultra_profile.py`
+- [LangChain 02：核心抽象](../langchain/02-core-abstractions.md)——模型对象与 Runnable 接口，Provider Profile 适配的基础
+
+**本系列**
+
+- [01：`create_deep_agent()` 总装配](./01-create-deep-agent-assembly.md)——Profile 在装配链上的位置
+- [17：Prompt Caching 中间件](./17-prompt-caching.md)——Profile 通过 `extra_middleware` 插入的又一类能力
+
+**上层：方法论与案例**
+
+- [Agent 系统设计 00：工程第一性原理](../../../../notes/agent-system-design/00-prerequisites/agent-engineering-first-principles.md)——模型差异为什么要收敛到适配层

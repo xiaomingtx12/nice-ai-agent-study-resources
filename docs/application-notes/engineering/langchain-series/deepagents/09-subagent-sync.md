@@ -6,9 +6,10 @@ description: 从 task 工具调用出发，理解同步 SubAgent 的装配、独
 
 # Deep Agents 源码解析 09：同步 SubAgent：装配、上下文隔离与结果回写
 
-## 源码定位
+## 一、源码定位
 
 > **阅读基线**：Deep Agents 0.6.12（`libs/deepagents/`）。
+> 源码版本与路径约定见 [源码版本与路径约定](source-baseline.md)。
 >
 > 主代理装配子代理：`libs/deepagents/deepagents/graph.py` → `create_deep_agent()`
 >
@@ -26,7 +27,7 @@ description: 从 task 工具调用出发，理解同步 SubAgent 的装配、独
 >
 > 私有 State 字段收集：`libs/deepagents/deepagents/middleware/subagents.py` → `private_state_keys`；`libs/deepagents/deepagents/middleware/_state.py` → `private_state_field_names()`
 
-同步 SubAgent 的核心不是“在父 Agent 里再调用一次模型”，而是把一个独立 Agent 图包装成 `task` 工具：
+同步 SubAgent 的核心是把一个独立 Agent 图包装成 `task` 工具。把它理解成“在父 Agent 里再调用一次模型”，会漏掉子代理自带的模型、提示词、工具和 State：
 
 ```text
 create_deep_agent()
@@ -42,6 +43,10 @@ create_deep_agent()
   -> 提取最终结果
   -> Command 写回父 Agent 的 ToolMessage
 ```
+
+![task 是委派入口；门后是另一间完整的办公室](./img/09-01-task-is-a-separate-graph.png)
+
+*图：task 是委派入口；门后是另一间完整的办公室——独立的模型、提示词、工具和 State。*
 
 这里的“创建子 Agent”和“调用子 Agent”是两个阶段，不能都归到 `task` 工具上：
 
@@ -61,11 +66,23 @@ SubAgent spec
   -> 把结果写回父 Agent
 ```
 
+![机器人提前编译好、挂上编号；运行时只取用，不重新创建](./img/09-02-compile-then-pick.png)
+
+*图：机器人提前编译好挂上编号；运行时只取用，不重新创建。*
+
 `task` 是模型可调用的委派入口，不是每次调用都重新创建一套 Agent。它之所以设计成工具，是因为父 Agent 的模型只能通过工具调用表达“我要把这项工作交给某个子 Agent”；工具函数再负责选择 runnable、准备独立 State、执行子 Agent，并把结果包装成 `ToolMessage` 返回。
 
 子代理只在当前 `task` 调用期间运行，完成后把一次结果交回父 Agent。它不会自动拿到父 Agent 的完整消息历史，也不会把每个中间工具结果都展开到父 Agent。
 
-## 这篇要回答的设计问题
+## 二、委派的输入、运行与返回契约
+
+同步子代理被建模成 `task` 工具：装配期把子代理 spec 编译成独立 runnable，运行后把允许传播的状态字段写回父 Agent。消息结果优先取 `structured_response`，否则取最后一条非空 AIMessage 文本，再包装成 ToolMessage。
+
+父子之间是 State 隔离；文件、凭证和 Backend 能力仍由子代理自己的配置决定，委派不额外带来资源隔离。
+
+同步调用占住父 Agent 当前循环，适合短而明确的委派；长时间运行或跨请求管理的任务交给异步子代理。
+
+## 三、这篇要回答的设计问题
 
 读这篇源码时，可以先抓住四个问题：
 
@@ -76,13 +93,21 @@ SubAgent spec
 | 子 Agent 的中间过程为什么不会回到父 Agent？ | `_return_command_with_state_update()` |
 | 什么情况下不该使用同步子代理？ | `task()` 的同步 `invoke()` 与异步子代理的职责边界 |
 
-同步 SubAgent 被建模成 `task` 工具，关键在于把“父 Agent 决定委派什么”和“子 Agent 怎样完成任务”分开。子代理拥有自己的模型、提示词、工具和 State，父代理只拿到一个结构化结果或摘要消息。这样可以限制上下文传播，也让子代理的装配配置独立演进。
+同步调用只适合父 Agent 需要立即拿到结果的任务。同步 task 也可由工具执行层并行调度，但父调用仍等待这批委派结束；跨请求管理的远程任务见 [12：异步 SubAgent](./12-async-subagent.md)。
 
-这条边界并不自动带来资源隔离：文件、凭证和 Backend 能力仍由子代理自己的配置决定；同步调用还会占住父 Agent 当前循环。适合短而明确的委派，不适合需要长时间运行或跨请求管理的任务。
+### 1. 一次委派中，父子消息怎样变化
 
-同步调用只适合父 Agent 需要立即拿到结果的任务。后台运行、并行执行和中途干预属于异步 SubAgent 的问题，留到 [12：异步 SubAgent](./12-async-subagent.md) 讨论。
+假设父状态包含十条对话消息和普通业务字段 `project_id`，模型发起调用 ID 为 `call_review` 的 `task`，描述为“检查报告中的引用”。`Runnable` 是可通过 `invoke()` 调用的执行对象，此处指选中的子 Agent 图。
 
-## 一、`create_deep_agent()` 什么时候装配同步 SubAgent
+| 阶段 | 子 Agent 收到或生成什么 | 父 Agent 保存什么 |
+| --- | --- | --- |
+| 准备输入 | 筛选允许传入的字段；`messages` 换成一条任务描述 | 原有对话及这次 `task` 调用 |
+| 子图运行 | 自己的模型消息和工具结果不断累积 | 等待该工具调用结束 |
+| 子图返回 | 提供最终状态；提取结构化结果或最后一条非空 AI 文本 | 增加配对 `call_review` 的 ToolMessage，并合并允许回写的状态字段 |
+
+`Command` 是交给图执行器的更新指令。工具返回 `Command(update=...)` 后，父状态各字段按自己的合并规则更新；不是把子图的整个消息列表复制回去。子图读取共享 Backend 产生的资源访问，也不会因消息列表分开而自动隔离。
+
+## 四、`create_deep_agent()` 什么时候装配同步 SubAgent
 
 主代理的核心装配顺序是：
 
@@ -112,11 +137,13 @@ general-purpose 子代理关闭
 
 如果只是不想让模型看到 `task`，可以使用 `Profile.excluded_tools`；这会隐藏工具，但不会移除 `SubAgentMiddleware` 实例。装配和工具可见性的区别见 [06：中间件增量与装配顺序](./06-middleware-increments.md)。
 
-关闭子代理不要走 `excluded_middleware` 去移除 `SubAgentMiddleware`：它是同步子代理的必备脚手架，写进排除列表会直接抛 `ValueError`。关掉委派能力的唯一正路是 `general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False)`，再配合不传任何同步 `subagents`。
+关闭子代理不要走 `excluded_middleware` 去移除 `SubAgentMiddleware`：它是同步子代理的必备脚手架，写进排除列表会直接抛 `ValueError`。
 
-## 二、两种子代理输入
+关掉委派能力的唯一正路是 `general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False)`，再配合不传任何同步 `subagents`。
 
-### `SubAgent`：声明如何装配 Agent
+## 五、两种子代理输入
+
+### 1. `SubAgent`：声明如何装配 Agent
 
 声明式 `SubAgent` 是一个配置字典，描述如何装配一套新的 Agent。它是框架在装配阶段交给 `create_sub_agent()` 的输入，不是运行时传给 `task` 后才开始解析的任务对象：
 
@@ -152,7 +179,7 @@ subagent_middleware = spec.get("middleware", [])                   # 完全不�
 
 继承里最容易踩的是 `tools` 的整体覆盖：给子代理写一个工具清单，得到的是「只有这些工具」，不是「父工具 + 这些工具」。子代理若需要主代理的某个工具，必须显式再写一遍。
 
-### `CompiledSubAgent`：直接提供可运行对象
+### 2. `CompiledSubAgent`：直接提供可运行对象
 
 `CompiledSubAgent` 已经包含 `runnable`：
 
@@ -170,9 +197,10 @@ subagent_middleware = spec.get("middleware", [])                   # 完全不�
 
 ```python
 compiled = cast("CompiledSubAgent", spec)
+# 调用方编译好的 runnable 只补元数据，不会被 Deep Agents 重新装配
 runnable = compiled["runnable"].with_config(
     {
-        "metadata": {"lc_agent_name": spec["name"]},
+        "metadata": {"lc_agent_name": spec["name"]},   # 追踪时用来区分父子运行
         "run_name": spec["name"],
     }
 )
@@ -185,16 +213,17 @@ return {
 
 `CompiledSubAgent` 已经是调用方负责的 Agent。它不会因为被 `create_deep_agent()` 注册，就自动获得 Deep Agents 的默认中间件。
 
-## 三、声明式子代理怎样交给 `create_agent()`
+## 六、声明式子代理怎样交给 `create_agent()`
 
 这条链分成两段。`graph.py` 先准备子代理的配置和 Middleware，`create_sub_agent()` 再调用 `create_agent()` 生成 runnable；之后 `SubAgentMiddleware` 才把这些 runnable 暴露给父 Agent 的 `task` 工具。
 
-### `graph.py` 先准备子代理 Middleware
+### 1. `graph.py` 先准备子代理 Middleware
 
 用户传入声明式 spec 后，`create_deep_agent()` 先解析模型和 Profile，再创建子代理自己的基础栈：
 
 ```python
 subagent_permissions = spec.get("permissions", permissions)
+# 声明式子代理有一套独立栈，用的是子代理自己的 Profile 与权限
 subagent_middleware = [
     TodoListMiddleware(),
     FilesystemMiddleware(
@@ -202,10 +231,11 @@ subagent_middleware = [
         custom_tool_descriptions=_subagent_profile.tool_description_overrides,
         _permissions=subagent_permissions,
     ),
-    create_summarization_middleware(subagent_model, backend),
+    create_summarization_middleware(subagent_model, backend),   # 用子代理自己的模型算阈值
     PatchToolCallsMiddleware(),
 ]
 
+# 子代理的 Skill 必须显式声明，不继承主代理的 skills 配置
 subagent_skills = spec.get("skills")
 if subagent_skills:
     subagent_middleware.append(
@@ -231,7 +261,7 @@ if subagent_skills:
 
 这里的 `spec.middleware` 不是替换整套默认栈。名称匹配已有 Middleware 时原位替换，新名称 Middleware 插入核心栈之后、Profile 和缓存尾部之前。子代理自己的栈里不会再装 `SubAgentMiddleware`，因此不会自动拥有 `task` 工具；同步委派入口只挂在父 Agent 上。
 
-### `create_sub_agent()` 最终调用 `create_agent()`
+### 2. `create_sub_agent()` 最终调用 `create_agent()`
 
 `graph.py` 完成子代理 spec 处理后，`_compile_spec()` 调用：
 
@@ -250,44 +280,22 @@ return {
 `create_sub_agent()` 的职责很窄：
 
 ```python
-def create_sub_agent(
-    spec,
-    *,
-    state_schema=None,
-    response_format=None,
-):
-    if "model" not in spec:
-        raise ValueError(...)
-    if "tools" not in spec:
-        raise ValueError(...)
+# ……省略 model/tools 必填校验、模型解析和 HITL 装配……
+selected_response_format = response_format if response_format is not None else spec.get("response_format")
+create_agent_kwargs: dict[str, Any] = {
+    "system_prompt": spec["system_prompt"],
+    "tools": spec["tools"],
+    "middleware": middleware,
+    "name": spec["name"],
+    "response_format": selected_response_format,
+}
+if state_schema is not None:
+    create_agent_kwargs["state_schema"] = state_schema
 
-    model = resolve_model(spec["model"])
-    middleware = list(spec.get("middleware", []))
-
-    interrupt_on = spec.get("interrupt_on")
-    if interrupt_on:
-        middleware.append(
-            HumanInTheLoopMiddleware(
-                interrupt_on=interrupt_on
-            )
-        )
-
-    return create_agent(
-        model,
-        system_prompt=spec["system_prompt"],
-        tools=spec["tools"],
-        middleware=middleware,
-        name=spec["name"],
-        response_format=(
-            response_format
-            if response_format is not None
-            else spec.get("response_format")
-        ),
-        state_schema=state_schema,
-    )
+return create_agent(model, **create_agent_kwargs)
 ```
 
-代码中的省略部分只包含参数字典的条件组装。关键边界是：
+片段保留了参数字典的条件组装。显式传入 state_schema 时才会传给子图；未传时沿用 LangChain 工厂的默认 schema，不能假设主图的全部状态声明已被复制。职责分别是：
 
 - `graph.py` 负责 Deep Agents 默认 Middleware 和 Profile；
 - `create_sub_agent()` 负责把已经准备好的 spec 交给 LangChain `create_agent()`；
@@ -295,7 +303,7 @@ def create_sub_agent(
 
 因此，`create_sub_agent()` 是“声明式 spec 到 LangChain Agent”的转换点，不是 `SubAgentMiddleware` 的运行时工具函数。运行时真正被调用的是已经编译好的 runnable。
 
-## 四、`SubAgentMiddleware.__init__()` 如何创建 `task`
+## 七、`SubAgentMiddleware.__init__()` 如何创建 `task`
 
 `SubAgentMiddleware` 构造时接收一组已经准备好的 subagent spec：
 
@@ -321,8 +329,9 @@ def __init__(
     self._state_schema = state_schema
     self.subagent_names = frozenset(
         spec["name"] for spec in subagents
-    )
+    )   # 模型可以委派的名字集合
 
+    # task 工具在构造阶段就建好，运行期只做选择
     task_tool = _build_task_tool(
         self._subagents,
         task_description,
@@ -349,7 +358,7 @@ def wrap_model_call(self, request, handler):
         return handler(
             request.override(
                 system_message=new_system_message
-            )
+            )   # 只改请求副本
         )
     return handler(request)
 ```
@@ -365,7 +374,7 @@ def wrap_model_call(self, request, handler):
 
 `task_description` 可以覆盖工具说明。源码不会强制检查自定义文本是否包含 `{available_agents}`；如果省略这个占位符，工具仍然会注册，但模型看不到运行时生成的子代理名称和描述。除非你在自定义文本里自己维护这份列表，否则应保留占位符。
 
-## 五、一次 `task` 调用如何运行
+## 八、一次 `task` 调用如何运行
 
 父 Agent 的模型生成类似调用：
 
@@ -394,6 +403,7 @@ task()
 `_select_subagent()` 根据 `subagent_type` 找到已经编译好的 runnable：
 
 ```python
+# 构造 task 时准备常规调用的子图；动态响应 schema 另有重编译分支
 compiled_subagents = [
     _compile_spec(spec)
     for spec in subagents
@@ -429,12 +439,12 @@ subagent, subagent_state = _validate_and_prepare_state(
 
 subagent_config = {
     "configurable": {
-        "ls_agent_type": "subagent",
+        "ls_agent_type": "subagent",    # 只补追踪标记，其余配置由 LangGraph 自动传播
     }
 }
 
 with _subagent_tracing_context():
-    result = subagent.invoke(
+    result = subagent.invoke(      # 同步阻塞：父 Agent 停在这里等结果
         subagent_state,
         subagent_config,
     )
@@ -449,7 +459,9 @@ return _return_command_with_state_update(
 
 父配置中的 callbacks、tags 和 configurable 会由 LangGraph 的运行时配置传播；源码只额外写入 `ls_agent_type="subagent"`，用于追踪子代理运行。
 
-## 六、父子 Agent 的上下文传播不是一条链
+这段阻塞调用对流式输出的影响（token 如何穿透、子代理流如何单独消费）在 [18：流式输出与子代理流](./18-streaming-output.md) 中展开。
+
+## 九、父子 Agent 的上下文传播不是一条链
 
 同步子代理调用里有两条传播链，不能用“子代理继承了父 Agent 上下文”一句话概括：
 
@@ -480,7 +492,9 @@ result = subagent.invoke(
 )
 ```
 
-这不是遗漏。`subagent_state` 只负责传递经过筛选的 State；父图的 callbacks、tags、metadata、configurable 和运行时依赖由 LangGraph 在嵌套 Runnable 调用中从 ambient parent config/runtime 继承。源码注释也说明，父配置会自动进入子代理，显式重复传递会造成 tags 等字段重复合并。
+这不是遗漏。`subagent_state` 只负责传递经过筛选的 State；父图的 callbacks、tags、metadata、configurable 和运行时依赖由 LangGraph 在嵌套 Runnable 调用中从 ambient parent config/runtime 继承。
+
+源码注释也说明，父配置会自动进入子代理，显式重复传递会造成 tags 等字段重复合并。
 
 两条链的可见性不同：
 
@@ -494,9 +508,11 @@ result = subagent.invoke(
 
 `Runtime.context` 会传播，也不等于子代理模型会自动看到市场和客户信息。子代理只有在自己的 Middleware、模型请求 Hook 或工具中读取 `runtime.context`，才能使用这些值；如果没有代码读取，它们不会进入子代理的 system message。
 
-同步嵌套调用拿到的是同一份父 context。若不同子代理需要不同配置，可以使用带子代理名前缀的扁平键（如 `researcher:max_depth`），也可以在 context 类型中直接声明各自的字段。工具若要判断当前调用来自哪个子代理，可以读取 `runtime.config` 的 `metadata["lc_agent_name"]`。这个值由装配阶段的 `with_config()` 写入（见第二节 `CompiledSubAgent` 的代码），声明式子代理也会获得同样的标识；流式事件和 LangSmith 追踪可以据此区分父子运行。
+同步嵌套调用拿到的是同一份父 context。若不同子代理需要不同配置，可以使用带子代理名前缀的扁平键（如 `researcher:max_depth`），也可以在 context 类型中直接声明各自的字段。
 
-### 声明式、Compiled 和远程子代理的差异
+工具若要判断当前调用来自哪个子代理，可以读取 `runtime.config` 的 `metadata["lc_agent_name"]`。这个值由装配阶段的 `with_config()` 写入（见“CompiledSubAgent：直接提供可运行对象”中的代码），声明式子代理也会获得同样的标识；流式事件和 LangSmith 追踪可以据此区分父子运行。
+
+### 1. 声明式、Compiled 和远程子代理的差异
 
 三种子代理形态的上下文边界并不相同：
 
@@ -508,25 +524,36 @@ result = subagent.invoke(
 
 `CompiledSubAgent` 不会因为被注册到 `SubAgentMiddleware` 就自动获得主 Agent 的 `state_schema` 或 Deep Agents 默认中间件。它能不能消费自定义 State、能不能按类型读取 Context，取决于调用方编译它时的配置。
 
-异步子代理跨越了服务边界，本地 `runtime.context` 不会自动出现在远程 Agent 中。跨服务传播需要业务接入层显式设计：把经过校验的业务参数交给远程任务，把租户身份放进可信认证上下文，或让远程服务根据可信身份重新构造自己的 `Runtime.context`。不要把原始客户凭证直接拼进自然语言任务描述。具体的启动、查询、更新和取消流程留给第 12 篇。
+异步子代理跨越了服务边界，本地 `runtime.context` 不会自动出现在远程 Agent 中。
 
-## 七、子代理拿到什么 State
+跨服务传播需要业务接入层显式设计：把经过校验的业务参数交给远程任务，把租户身份放进可信认证上下文，或让远程服务根据可信身份重新构造自己的 `Runtime.context`。
+
+不要把原始客户凭证直接拼进自然语言任务描述。具体的启动、查询、更新和取消流程留给第 12 篇。
+
+## 十、子代理拿到什么 State
+
+![只有盖了章的字段能出房间；文件和钥匙都留在屋里](./img/09-03-only-allowed-fields-return.png)
+
+*图：只有盖了章的字段能出房间；文件和钥匙都留在屋里。*
 
 `_validate_and_prepare_state()` 不复制父 Agent 的完整消息历史，而是从父 State 中筛选可共享字段：
 
 ```python
+# 先排除框架约定的字段
 subagent_state = {
     key: value
     for key, value in runtime.state.items()
     if key not in _EXCLUDED_STATE_KEYS
 }
 
+# 再排除标记为私有的字段
 subagent_state = {
     key: value
     for key, value in subagent_state.items()
     if key not in private_state_keys
 }
 
+# 消息从零开始：子代理只拿到任务描述，看不到父 Agent 的历史
 subagent_state["messages"] = [
     HumanMessage(content=description)
 ]
@@ -552,7 +579,9 @@ _EXCLUDED_STATE_KEYS = {
 
 这里的“独立 State”不是完全没有共享。文件 Backend、Store 和普通自定义 State 是否共享，取决于装配配置。消息历史和 Deep Agents 内部状态会被明确隔离。
 
-## 八、`private_state_keys` 如何建立边界
+**源码事实**：`_validate_and_prepare_state()`（`libs/deepagents/deepagents/middleware/subagents.py:658-669`）新建字典并筛掉固定排除字段与私有字段，随后用任务描述建立新的 `HumanMessage`。这是浅层字段筛选，没有深拷贝所有值，也没有为子代理创建进程、文件系统或凭证隔离。普通自定义 State 仍可下传；`_return_command_with_state_update()`（同文件613行）还会把未排除字段回写父 State。共享 Backend、Store 和外部工具仍须各自控制访问和并发。
+
+## 十一、`private_state_keys` 如何建立边界
 
 主代理装配完成自己的 State schema 后，`graph.py` 会收集带有 `PrivateStateAttr` 的字段：
 
@@ -571,6 +600,7 @@ if sub_agent_middleware is not None:
 @private_state_keys.setter
 def private_state_keys(self, value):
     self._private_state_keys = value
+    # 排除集变了必须重建 task 工具，否则运行期仍用旧集合
     task_tool = _build_task_tool(
         self._subagents,
         task_description=self._task_description,
@@ -580,7 +610,7 @@ def private_state_keys(self, value):
     self.tools = [task_tool]
 ```
 
-这比在 `_validate_and_prepare_state()` 中维护一份固定字段表更稳妥。新增一个标记为私有的 Middleware State 字段后，字段名会自动进入子代理输入和输出的过滤集合。
+setter 重建工具是因为 `_build_task_tool()` 的内部函数捕获了构造时的排除集合；只修改中间件属性不会更新原闭包。该重建还会重新准备声明式子图，因此装配中可能多次经过编译，不能把它描述为整个工厂严格只编译一次。
 
 需要分清两个边界：
 
@@ -594,17 +624,19 @@ Backend / permissions
 
 私有 State 不会自动隔离文件。父子 Agent 使用同一个 Backend 时，仍可能看到同一组文件，具体能否访问由 FilesystemMiddleware 和 Backend 决定。
 
-## 九、子代理结果如何回到父 Agent
+## 十二、子代理结果如何回到父 Agent
 
 `_return_command_with_state_update()` 返回的是 `Command`，而不是把子代理完整 State 直接塞回父 Agent：
 
 ```python
+# 子代理必须返回带 messages 的 State，否则无法构造 ToolMessage
 if "messages" not in result:
     raise ValueError(
         "CompiledSubAgent must return a state "
         "containing a 'messages' key."
     )
 
+# 回写父 State 前同样过滤：框架字段与私有字段都不出去
 state_update = {
     key: value
     for key, value in result.items()
@@ -615,7 +647,7 @@ state_update = {
 
 子代理的可共享 State 字段会进入 `state_update`。`messages`、`todos`、`structured_response` 和私有字段不会按普通 State 字段回写。
 
-### 结构化结果优先
+### 1. 结构化结果优先
 
 如果子代理返回了 `structured_response`，源码会优先把它序列化成 JSON：
 
@@ -624,7 +656,7 @@ structured = result.get("structured_response")
 if structured is not None:
     if hasattr(structured, "model_dump_json"):
         content = structured.model_dump_json()
-    elif dataclasses.is_dataclass(structured):
+    elif dataclasses.is_dataclass(structured) and not isinstance(structured, type):
         content = json.dumps(dataclasses.asdict(structured))
     else:
         content = json.dumps(structured)
@@ -632,9 +664,13 @@ if structured is not None:
 
 父 Agent 收到的是 JSON 文本形式的 `ToolMessage`，不是直接共享子代理的结构化对象。
 
-`response_format` 是打开这条路径的开关，接受 Pydantic 模型、`ToolStrategy(...)`、`ProviderStrategy(...)` 或原始 schema（与 `create_agent` 一致，源码 `subagents.py` 的 `SubAgent` TypedDict 里字段注释也如此）。不设 `response_format` 时，父 Agent 拿到的是子代理最后一条 `AIMessage` 的原文；设定后，父 Agent 拿到的是符合 schema 的 JSON 字符串。需要父代理程序化处理结果，或把结果交给下游工具时，结构化输出比自由文本更稳定。结构化输出要求 `deepagents>=0.5.3`，本文基线 0.6.12 已满足。
+`response_format` 是打开这条路径的开关，接受 Pydantic 模型、`ToolStrategy(...)`、`ProviderStrategy(...)` 或原始 schema（与 `create_agent` 一致，源码 `subagents.py` 的 `SubAgent` TypedDict 里字段注释也如此）。
 
-### 没有结构化结果时取最后一条非空 `AIMessage`
+返回状态中有非空 `structured_response` 时优先序列化；否则倒序寻找最后一条非空 AI 文本。配置 `response_format` 通常用于生成这个结构化字段，但最终分支检查的是实际返回值，而非只看配置是否存在。
+
+需要父代理程序化处理结果，或把结果交给下游工具时，结构化输出比自由文本更稳定。结构化输出要求 `deepagents>=0.5.3`，本文基线 0.6.12 已满足。
+
+### 2. 没有结构化结果时取最后一条非空 `AIMessage`
 
 没有 `structured_response` 时，源码从结果消息尾部向前找一条有文本的 `AIMessage`：
 
@@ -654,6 +690,7 @@ for msg in reversed(result["messages"]):
 Command(
     update={
         **state_update,
+        # 子代理结果只以一条 ToolMessage 回到父 Agent，中间过程不展开
         "messages": [
             ToolMessage(
                 content,
@@ -666,51 +703,61 @@ Command(
 
 父 Agent 看到的是一条与原始 `tool_call_id` 对应的工具结果。子代理的中间思考、工具结果和过程消息不会全部展开到父 Agent 对话中。
 
-## 十、同步 SubAgent 的边界
+## 十三、同步 SubAgent 的边界
 
-### 一次调用是无状态的
+### 1. 新任务描述不等于所有状态都重置
 
-每次 `task()` 都会新建一份任务输入并调用子代理。子代理不会记住前一次 `task()` 的消息历史。需要连续完成的工作，应在一次任务描述中写清楚目标、上下文、产物位置和返回格式。
+默认委派输入会用一条任务描述替换父消息列表，普通 task 调用不把上次子代理对话原样接续。但其他业务字段、Backend 文件和 Store 仍可能在多次委派间传递；自行编译的 runnable 还可能带自己的持久化逻辑。因此应明确本次输入、产物路径和返回格式，不能将这条消息隔离规则扩大为“子代理完全无状态”。
 
-### Skills 不会自动从主代理复制
+### 2. Skills 不会自动从主代理复制
 
 声明式子代理只有在 spec 自己提供 `skills` 时，`graph.py` 才会为它加入 `SkillsMiddleware`。主代理的 Skills 配置不会因为存在 `task` 调用就自动注入到任意声明式子代理。
 
 自动创建的 general-purpose 子代理是一个特殊路径：它使用主代理的 `skills` 配置。不能把这个特例推广到所有自定义子代理。
 
-### 权限是子代理自己的装配配置
+### 3. 权限是子代理自己的装配配置
 
 声明式子代理显式提供 `permissions` 时，使用自己的完整规则；未提供时才继承父规则。审批配置也会在子代理 spec 内合并，子代理可以拥有与父代理不同的 `interrupt_on`。
 
-### `CompiledSubAgent` 的能力由调用方负责
+### 4. `CompiledSubAgent` 的能力由调用方负责
 
 已经编译好的 runnable 不会自动获得 Deep Agents 的 Filesystem、Summarization、PatchToolCalls 或 Skills。需要这些能力时，必须在编译 runnable 时自行装配。
 
-### 同步执行会阻塞父 Agent 当前循环
+### 5. 同步执行会阻塞父 Agent 当前循环
 
 父 Agent 会等待子代理 `invoke()` 完成后再继续。适合需要立即拿到结果、希望隔离上下文的独立任务；长时间远程任务应使用异步 SubAgent，避免占住当前执行链。
 
-## 十一、使用落点：什么时候委派、怎么让委派生效
+## 十四、使用落点：什么时候委派、怎么让委派生效
 
 源码边界前面已经讲完，这里补三个使用层面的判断，每个都对应源码里的某个机制。
 
-### 什么时候该用、什么时候不该用
+### 1. 什么时候该用、什么时候不该用
 
 子代理解决的是上下文隔离（context quarantine）：中间工具调用留在子代理内部，主代理只收最终结果。适合多步任务、需要专门指令或工具、需要不同模型能力、想让主代理专注高层协调；不适合简单单步任务、需要保留中间上下文、委派开销大于收益的场景。
 
-### 怎么让子代理被正确调用
+### 2. 怎么让子代理被正确调用
 
-主代理靠 `description` 决定什么时候委派，这一行写得好不好直接决定子代理会不会被用起来。要写具体、动作导向：`"Analyzes financial data and generates investment insights with confidence scores"` 有用，`"Does finance stuff"` 没用。两个子代理职责接近时，用 description 拉开差异（`quick-researcher` 对 `deep-researcher`），否则主代理会选错。
+主代理靠 `description` 决定什么时候委派，这一行写得好不好直接决定子代理会不会被用起来。要写具体、动作导向：
+
+- `"Analyzes financial data and generates investment insights with confidence scores"` 有用；
+- `"Does finance stuff"` 没用。
+
+两个子代理职责接近时，用 description 拉开差异（`quick-researcher` 对 `deep-researcher`），否则主代理会选错。
 
 另一个抓手是主代理自己的 `system_prompt`：明确写「复杂任务用 `task()` 委派」，比只靠 description 暗示更可靠。
 
-### 返回值也要控制，否则上下文照样膨胀
+### 3. 返回值也要控制，否则上下文照样膨胀
 
-隔离只挡得住中间过程，挡不住子代理的返回值。子代理若把原始数据、中间计算、工具输出全吐回来，主代理上下文一样会爆。两个配合手段：在子代理 `system_prompt` 里写死返回格式（只返回摘要、置信度、下一步，禁止原始数据）；大结果先写到文件（如 `/data/raw_results.txt`），只把分析摘要带回主代理。前者是提示词约定，后者靠 Filesystem 的 Backend 能力（见 [08：Filesystem 与权限](./08-filesystem-middleware-and-permissions.md)）。
+隔离只挡得住中间过程，挡不住子代理的返回值。子代理若把原始数据、中间计算、工具输出全吐回来，主代理上下文一样会爆。两个配合手段：
 
-观察子代理进度可以使用 `stream_events` 的 `subagents` 迭代器。每个 handle 暴露 `.name`、`.messages`、`.tool_calls`、`.output`，配合第六节讲的 `lc_agent_name`，就能在流式事件和 LangSmith 追踪中区分主代理与子代理。
+- 在子代理 `system_prompt` 里写死返回格式（只返回摘要、置信度、下一步，禁止原始数据）；
+- 大结果先写到文件（如 `/data/raw_results.txt`），只把分析摘要带回主代理。
 
-## 读完后的工程判断
+前者是提示词约定，后者靠 Filesystem 的 Backend 能力（见 [08：Filesystem 与权限](./08-filesystem-middleware-and-permissions.md)）。
+
+观察子代理进度可以使用 `stream_events` 的 `subagents` 迭代器。每个 handle 暴露 `.name`、`.messages`、`.tool_calls`、`.output`，配合“父子 Agent 的上下文传播不是一条链”一节讲的 `lc_agent_name`，就能在流式事件和 LangSmith 追踪中区分主代理与子代理。
+
+## 十五、工程判断
 
 同步 SubAgent 可以看成四个明确边界：
 
@@ -736,11 +783,31 @@ _return_command_with_state_update()
 - `create_sub_agent()` 负责把声明式 spec 交给 `create_agent()`，默认 Deep Agents Middleware 由 `graph.py` 预先装配；
 - State 过滤只隔离消息和标记为私有的字段，文件隔离仍要看 Backend 和权限。
 
+### 1. 怎么用
+
+| 场景 | 是否适合同步子代理 | 理由 |
+| --- | --- | --- |
+| 明确的子任务，父代理等结果继续 | 适合 | 调用即返回，结果直接进父 State |
+| 子任务需要几十轮工具调用 | 慎用 | 占住父代理当前循环，阻塞主流程 |
+| 跨请求管理的长任务 | 不适合 | 用 [12：异步 SubAgent](./12-async-subagent.md) 的远程任务 |
+| 子代理写共享文件 | 可用，须加权限 | State 隔离不含文件隔离，Backend 仍共享 |
+
+**避免使用**：不要靠子代理隔离不可信代码——`_validate_and_prepare_state()` 是浅层字段筛选，不创建进程或凭证隔离。**改造要点**：子代理的 `structured_response` 不会回写父 State（在 `_EXCLUDED_STATE_KEYS` 中），需要结构化结果时用 `result["structured_response"]` 在 `task()` 返回前自行处理，或让子代理把结果写进 Backend 文件。
+
 **相关测试**：`libs/deepagents/tests/unit_tests/test_subagents.py`、`libs/deepagents/tests/integration_tests/test_subagent_middleware.py`
 
-**配套阅读**：
+## 十六、延伸阅读
 
-- [06 中间件增量与装配顺序](./06-middleware-increments.md)
-- [08 Filesystem 与权限](./08-filesystem-middleware-and-permissions.md)
-- [10 Summarization 与上下文卸载](./10-summarization-and-context-offloading.md)
-- [12 异步 SubAgent](./12-async-subagent.md)
+**下层：LangChain / LangGraph**
+
+- [LangGraph 05：子图与跨图控制](../langgraph/05-subgraphs-and-cross-graph-control.md)——子图的状态隔离与结果回写
+
+**本系列**
+
+- [12：异步 SubAgent](./12-async-subagent.md)——同一委派目标的另一套生命周期管理
+- [22：动态子代理与 QuickJS 代码工作流](./22-dynamic-subagents-and-quickjs-workflows.md)：在 JavaScript 中复用 task 工具，以及与普通工具路径不同的状态回传和审批边界。
+- [06：中间件增量与装配顺序](./06-middleware-increments.md)——子代理栈与主代理栈的差异
+
+**上层：方法论与案例**
+
+- [Agent 系统设计 04：多 Agent 编排](../../../../notes/agent-system-design/04-decision/agent-multi-agent-orchestration.md)——什么时候该拆子代理，边界画在哪

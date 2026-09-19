@@ -6,9 +6,10 @@ description: 从源码拆解 RubricMiddleware 如何调用独立 grader 评估 A
 
 # Deep Agents 源码解析 14：RubricMiddleware 与运行时自评循环
 
-## 源码定位
+## 一、源码定位
 
 > **阅读基线**：Deep Agents 0.6.12（`libs/deepagents/`）。官方文档目前将 `RubricMiddleware` 标为 beta，最低版本要求为 0.6.5。
+> 源码版本与路径约定见 [源码版本与路径约定](source-baseline.md)。
 >
 > - 自定义中间件装配：`libs/deepagents/deepagents/graph.py` → `create_deep_agent()`、`_apply_custom_middleware()`
 > - 状态初始化：`libs/deepagents/deepagents/middleware/rubric.py` → `RubricMiddleware.before_agent()`、`_reset_for_new_rubric()`
@@ -19,7 +20,7 @@ description: 从源码拆解 RubricMiddleware 如何调用独立 grader 评估 A
 > - 评分输入：`libs/deepagents/deepagents/middleware/rubric.py` → `_build_grader_payload()`、`_build_grader_transcript()`
 > - 相关测试：`libs/deepagents/tests/unit_tests/middleware/test_rubric_middleware.py`、`libs/deepagents/tests/unit_tests/test_end_to_end.py`
 
-## 先给结论
+## 二、自然结束之后怎样决定是否修订
 
 `RubricMiddleware` 把 Agent 的自然结束改造成一个运行时的“评估—修订”循环：
 
@@ -42,7 +43,15 @@ description: 从源码拆解 RubricMiddleware 如何调用独立 grader 评估 A
 
 这套机制仍然是 LLM-as-a-judge（让一个模型评估另一个模型的输出）。`satisfied` 表示 grader 在当前证据下通过了 rubric，不等于编译器、测试程序或业务数据库已经证明结果正确。需要确定性结论时，grader 应该配合真实验证工具，业务侧还应保留独立 Verifier。
 
-## 怎么用
+`rubric` 是调用方提供的验收标准；`grader` 是按标准评分的独立 Agent；`transcript` 是从主 Agent 消息整理出的评分材料。grader 的结论由 `GraderResponse` 约束为结构化结果，再由中间件决定是否继续主图。评分器本身不直接改写主 Agent 的代码或文件。
+
+以 `max_iterations=3` 为例：第一次评分前 `_rubric_iterations=0`；判为 `needs_revision` 后计数变为 1，反馈写成 HumanMessage，并返回 `jump_to="model"` 让主图继续。第二次评分若为 `satisfied`，计数变为 2，不再跳转。若连续三次需要修订，第三次会改记 `max_iterations_reached` 并结束，所以这里最多允许两次反馈后的修订，不是“先评分一次，再修订三次”。
+
+![评分修订环](./img/14-01-grade-revise-loop.png)
+
+*图：终点线后面还有评分闸门——不通过就计数加一并绕回起点，三格走完就终止。*
+
+## 三、怎么用
 
 `RubricMiddleware` 可以无条件放进自定义 Middleware 列表。只有本次调用的 State 中存在 `rubric` 时，它才会介入：
 
@@ -77,6 +86,8 @@ result = agent.invoke(
 )
 ```
 
+上例没有给 grader 配置验证工具，因此它只能根据收到的材料评判“pytest 是否通过”，不能亲自运行测试。若这条标准决定交付，需提供可访问正确工作区的验证工具，并由应用检查实际测试结果。
+
 这里有三个配置边界：
 
 - `model` 是 grader 使用的模型，可以和主 Agent 使用不同模型；
@@ -85,7 +96,7 @@ result = agent.invoke(
 
 `checkpointer` 不是创建 Middleware 的硬性参数，但要观察私有评分状态、跨调用继续使用同一个 rubric，或在中断后恢复线程时，需要使用 Checkpointer。
 
-## 一、它怎样进入 Deep Agent
+## 四、它怎样进入 Deep Agent
 
 ### 1. RubricMiddleware 不在默认栈里
 
@@ -147,7 +158,7 @@ model
 
 这和在 system prompt 中加一句“请检查自己的答案”不同。RubricMiddleware 真正改变了图的结束边，并引入一个独立的评分 Agent。
 
-## 二、State 合约：公开 rubric，私有评分账本
+## 五、State 合约：公开 rubric，私有评分账本
 
 ### 1. `RubricState` 保存哪些字段
 
@@ -204,9 +215,9 @@ class RubricState(AgentState):
   -> iteration 重置为 0
 ```
 
-这样可以区分“同一次修订循环”和“同一线程上的下一次独立调用”。
+这样可以区分同一次修订循环与后续独立评分。重置字典没有清空 `_rubric_evaluations`，历史评分仍可保留；读取账本时应按 grading_run_id 分组，不能用评分列表总长度代替当前预算计数。
 
-## 三、`before_agent()`：识别新一轮 rubric
+## 六、`before_agent()`：识别新一轮 rubric
 
 `before_agent()` 不执行评分，它只负责决定是否重置评分账本：
 
@@ -254,7 +265,7 @@ _TERMINAL_RESULTS = frozenset({
 
 这也是为什么文章开头的示例使用固定 `thread_id`：线程标识决定是否恢复同一份状态。
 
-## 四、独立 grader：不是主 Agent 的自我提醒
+## 七、独立 grader：不是主 Agent 的自我提醒
 
 ### 1. grader 延迟构造
 
@@ -316,7 +327,11 @@ graded = result.get("structured_response")
 
 如果 grader 没有返回 `structured_response`，或返回了无法转换成 `GraderResponse` 的对象，Middleware 会把它归入 `grader_error`，而不是把普通文本猜成评分结果。
 
-## 五、`GraderResponse`：评分结果的信任边界
+## 八、`GraderResponse`：评分结果的信任边界
+
+![评分通过不等于业务事实](./img/14-02-satisfied-is-not-fact.png)
+
+*图：盖章的评分表和真实的检测仪器之间隔着一个问号，satisfied 不是业务事实。*
 
 ### 1. 顶层 verdict 和逐条 criterion
 
@@ -352,15 +367,18 @@ class GraderResponse(BaseModel):
 
 ### 2. Pydantic 校验拦截自相矛盾的结果
 
+Pydantic 是这里用于校验结构化数据的库。下面保留实际校验函数，省略文档字符串：
+
 ```python
 @model_validator(mode="after")
-def _check_result_consistency(self):
+def _check_result_consistency(self) -> GraderResponse:
     has_fail = any(not c["passed"] for c in self.criteria)
-
     if self.result == "satisfied" and has_fail:
-        raise ValueError(...)
+        msg = "GraderResponse: result='satisfied' but at least one criterion has passed=False."
+        raise ValueError(msg)
     if self.result == "needs_revision" and self.criteria and not has_fail:
-        raise ValueError(...)
+        msg = "GraderResponse: result='needs_revision' but every criterion has passed=True."
+        raise ValueError(msg)
     return self
 ```
 
@@ -368,7 +386,7 @@ LLM 可能生成“顶层说 satisfied，某条 criterion 却是 passed=False”
 
 需要注意，空的 `criteria` 列表不会自动证明所有标准都通过。`GraderResponse` 只校验结构一致性，rubric 是否真的被充分检查，仍取决于 grader 的提示词和证据。
 
-## 六、grader 看到什么：payload 与 transcript
+## 九、grader 看到什么：payload 与 transcript
 
 ### 1. rubric 和 transcript 使用随机 nonce 分隔
 
@@ -429,7 +447,7 @@ _MAX_TRANSCRIPT_CHARS_PER_MESSAGE = 4_000
   -> 超过 4,000 个字符时截断
 ```
 
-这样既保留原始任务，又控制 grader 的输入成本。代价是更早的工具证据可能被窗口裁掉。
+这个窗口控制 grader 的输入成本，但更早的工具证据可能被裁掉。同一线程承载多个任务时，“首条真实用户消息”还可能来自旧任务；调用方应让当前 rubric 明确指向本次产物，并提供可查询的新证据，不能默认窗口代表完整的当前任务记录。
 
 ### 4. 中间件反馈不会被整体删除
 
@@ -458,7 +476,7 @@ additional_kwargs={
 
 原始图片字节和 provider 特有的复杂对象不会直接复制进 grader prompt。评估器能看到“发生过某类内容”，但不一定能判断其中的具体视觉或推理细节。
 
-## 七、`after_agent()`：评分、回注和跳转
+## 十、`after_agent()`：评分、回注和跳转
 
 同步主流程是：
 
@@ -547,7 +565,11 @@ max_iterations=3
   -> iteration 2 仍需修改时，记录 max_iterations_reached
 ```
 
-## 八、终止状态和观测方式
+`max_iterations` 计的是一次 rubric 运行进入评分器的次数。一次 `_grade()` 会调用一个可使用工具的 grader Agent（`libs/deepagents/deepagents/middleware/rubric.py:522-550`），内部可能发生多次模型请求；主代理两次评分之间也可以走多轮模型与工具。因而 `max_iterations=3` 既不是三次模型 API 请求，也不限定 token 或金额。`_compose_update()`（`rubric.py:643-662`）仅在结果仍为 `needs_revision` 时追加反馈消息并回跳到 `model`，其他状态直接结束本轮评分。
+
+评分控制是否正确与评分结论是否可靠，需要分别验证。现有 `test_max_iterations_reached` 用假主模型和假 grader 断言评分记录依次为 `needs_revision`、`max_iterations_reached`，证明回跳和停止行为；它不证明真实 grader 会判断正确。验收应用时还应注入「grader 返回 `satisfied`，但产物缺失或数据库值错误」的用例，由独立程序阻断后续交付。grader 超时必须标为评分失败，不能只凭最后 AIMessage 里的「完成」放行。
+
+## 十一、终止状态和观测方式
 
 | 状态 | 是否跳回模型 | 谁产生 | 含义 |
 | --- | --- | --- | --- |
@@ -602,7 +624,7 @@ RubricMiddleware 提供三类观测方式：
 
 `KeyboardInterrupt` 和 `asyncio.CancelledError` 不属于普通 `Exception`，不会被转换成 `grader_error`，可以继续向上抛出，保留中断和取消语义。
 
-## 九、运行时 Rubric 与离线评估不是一回事
+## 十二、运行时 Rubric 与离线评估不是一回事
 
 评估工程里需要把四个对象分开：
 
@@ -633,9 +655,9 @@ grader
 
 如果 rubric 只写“代码质量高”，grader 即使返回 `satisfied` 也没有可复核的通过标准。把评价词改成可观察条件，或者把确定性检查移到工具和独立 Verifier 中，结果才更稳定。
 
-## 十、适用边界
+## 十三、适用边界
 
-### 适合使用
+### 1. 适合使用
 
 - 任务有明确、可观察的完成标准；
 - 失败成本高于额外一次或几次 grader 调用；
@@ -643,7 +665,7 @@ grader
 - grader 可以通过 transcript 或工具获得必要证据；
 - 业务能够处理未通过和评分错误状态。
 
-### 不适合直接使用
+### 2. 不适合直接使用
 
 - rubric 只有“写得专业”“质量要高”；
 - 任务需要强确定性证明，但没有测试、编译器或业务查询工具；
@@ -651,7 +673,7 @@ grader
 - 业务只处理 `satisfied`，忽略 `failed`、`grader_error` 和 `max_iterations_reached`；
 - 把共享文件、权限变更或支付操作交给 LLM 自己判定完成。
 
-### 主要取舍
+### 3. 主要取舍
 
 | 设计 | 得到什么 | 付出什么 |
 | --- | --- | --- |
@@ -661,7 +683,7 @@ grader
 | 私有状态保存评分账本 | 不污染普通 Agent 输出 | 业务需要显式读取状态或事件 |
 | 结构化输出校验 | 拦截评分结果自相矛盾 | provider 必须支持或适配结构化输出 |
 
-## 十一、测试覆盖了哪些源码契约
+## 十四、测试覆盖了哪些源码契约
 
 对应测试：
 
@@ -670,7 +692,7 @@ libs/deepagents/tests/unit_tests/middleware/test_rubric_middleware.py
 libs/deepagents/tests/unit_tests/test_end_to_end.py
 ```
 
-测试关注的不是某个模型能否稳定打分，而是 Middleware 的控制协议是否可预测：
+测试关注的是 Middleware 的控制协议是否可预测，不依赖某个模型能否稳定打分：
 
 | 契约 | 测试内容 |
 | --- | --- |
@@ -691,44 +713,25 @@ libs/deepagents/tests/unit_tests/test_end_to_end.py
 
 其中最值得保留的是端到端测试：它用真实 `create_deep_agent()` 和假模型跑完整的自然结束、评分、回注、跳转链路，能发现只测试单个 Hook 时看不到的图边问题。
 
-## 工程判断
+## 十五、工程判断
 
-`RubricMiddleware` 的核心价值不在于“让模型多想几遍”，而在于把完成标准变成了一个可观测的控制点：
+接入 Rubric 时，应设计两条结果通路：一条将反馈交回主 Agent 修订，另一条把评分状态与真实产物检查交给业务流程。主 Agent 最后的文本不会因为 grader_error 自动变成报错，业务若只展示最终文本，就可能漏掉评分未完成。
 
-```text
-主 Agent 负责完成任务
-grader 负责按 rubric 检查
-Middleware 负责控制是否重做
-业务 Verifier 负责确认最终结果
-```
+`on_evaluation` 适合观测，其异常会被压制，不能用“在回调里抛错”实现可靠的交付阻断。需要门禁时，应由调用方读取终止状态并核验文件、测试或业务记录，再执行交付动作。
 
-读源码时可以沿着下面这条链追踪：
+调高 max_iterations 只增加允许的评分尝试。grader 内部可能多次调用模型与工具，主 Agent 也可能在两次评分之间运行很久；总时间和费用仍需覆盖整条调用树。若反馈反复指出同一个 gap，应检查主 Agent 是否具备修复工具、grader 是否缺证据，而不只是继续增加迭代次数。
 
-```text
-middleware=[RubricMiddleware(...)]
-  -> _apply_custom_middleware()
-  -> before_agent()
-  -> _reset_for_new_rubric()
-  -> 主 Agent model/tool 循环
-  -> after_agent()
-  -> _build_grader_payload()
-  -> 独立 grader
-  -> GraderResponse
-  -> _compose_update()
-      -> END
-      -> 或 HumanMessage + jump_to="model"
-```
+## 十六、延伸阅读
 
-最重要的判断边界只有一句：**`satisfied` 是一次运行时评分通过，不是系统已经证明任务正确。** 只要 rubric 依赖文件、测试、数据库或权限等外部事实，就应该让 grader 读取可验证证据，并在 Agent 外部保留独立的最终检查。
+**下层：LangChain / LangGraph**
 
-**相关测试**：
+- [LangChain 04：中间件控制面](../langchain/04-middleware-control-plane.md)——`after_agent` 等 Hook 的插入方式
 
-- `libs/deepagents/tests/unit_tests/middleware/test_rubric_middleware.py`
-- `libs/deepagents/tests/unit_tests/test_end_to_end.py`
+**本系列**
 
-**配套阅读**：
+- [19：循环预算与终止控制](./19-loop-budget-and-termination.md)——评分器之外的终止责任
+- [16：Evals 评测体系](./16-deepagents-evals.md)——运行内自评与离线评测的分工
 
-- [06：中间件增量与装配顺序](./06-middleware-increments.md)
-- [08：Filesystem 与权限](./08-filesystem-middleware-and-permissions.md)
-- [10：Summarization 与上下文卸载](./10-summarization-and-context-offloading.md)
-- [13：MemoryMiddleware 与长期上下文装配](./13-memory-middleware.md)
+**上层：方法论与案例**
+
+- [Agent 系统设计 06：评测](../../../../notes/agent-system-design/06-observation/agent-evaluation.md)——验收标准该由谁裁决

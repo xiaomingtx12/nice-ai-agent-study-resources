@@ -6,9 +6,10 @@ description: 从源码拆解 AsyncSubAgentMiddleware 如何启动、查询、更
 
 # Deep Agents 源码解析 12：异步子代理任务生命周期
 
-## 源码定位
+## 一、源码定位
 
 > **阅读基线**：Deep Agents 0.6.12（`libs/deepagents/`）。
+> 源码版本与路径约定见 [源码版本与路径约定](source-baseline.md)。
 >
 > - 主代理装配：`libs/deepagents/deepagents/graph.py` → `create_deep_agent()`
 > - 异步中间件：`libs/deepagents/deepagents/middleware/async_subagents.py` → `AsyncSubAgentMiddleware.__init__()`、`wrap_model_call()`、`awrap_model_call()`
@@ -20,9 +21,9 @@ description: 从源码拆解 AsyncSubAgentMiddleware 如何启动、查询、更
 > - 客户端缓存：`libs/deepagents/deepagents/middleware/async_subagents.py` → `_ClientCache._cache_key()`、`get_sync()`、`get_async()`
 > - 相关测试：`libs/deepagents/tests/unit_tests/test_async_subagents.py`
 
-## 先看结论
+## 二、一个远端任务需要三种身份
 
-异步子代理不是把同步 `task` 工具改成 `async def`，而是把一次子代理执行提升为一个可以跨多次主 Agent 请求管理的远程任务。
+异步子代理把一次子代理执行提升为一个可以跨多次主 Agent 请求管理的远程任务，把同步 `task` 工具改成 `async def` 达不到这个效果。
 
 主 Agent 本地保存任务索引，远程服务保存真正的执行状态：
 
@@ -33,7 +34,7 @@ description: 从源码拆解 AsyncSubAgentMiddleware 如何启动、查询、更
 | `run_id` | 远程服务，同时复制到本地 State | 标识当前一次执行，更新任务时替换 |
 | `status` | 本地缓存和远程 Run | 本地是最近一次已知状态，实时值需要重新查询 |
 
-因此，启动、查询、更新和取消不是四个互不相关的工具，而是一组围绕同一 `task_id` 的生命周期操作。
+启动、查询单个任务、列出任务、更新和取消共五个工具，围绕同一份调用方任务索引协作。
 
 正文沿着源码的数据流推进：
 
@@ -52,7 +53,11 @@ create_deep_agent()
 
 本文所说的 Agent Protocol，是远程 Agent 服务暴露的一组统一接口约定。源码通过 LangGraph SDK 调用这些接口创建 Thread、启动 Run、查询状态和读取结果；远程服务可以是 LangGraph/LangSmith Deployment，也可以是兼容这套协议的自托管服务。
 
-## 这篇要回答的设计问题
+`Thread` 是保存远端对话状态的会话容器；`Run` 是在这个 Thread 上发起的一次执行。假设启动得到 `Thread=T1`、`Run=R1`，主 Agent 保存 `task_id=T1`。后续 `update_async_task` 在同一个 T1 上提交新输入并创建 R2，所以任务 ID 不变，索引中的当前 Run 改为 R2。
+
+启动工具返回的 `ToolMessage` 只表示启动请求已经获得响应。与它一起返回的 `Command` 是状态更新指令，由图把任务索引写入 `async_tasks`。远端随后完成 R1，并不会主动改写这份 State；主 Agent 必须走查询路径才能获得更新。保存索引失败、远端响应丢失和结果读取失败，也因此是三个不同的故障窗口。
+
+## 三、这篇要回答的设计问题
 
 阅读这段源码时，需要同时看三条边界：
 
@@ -62,9 +67,9 @@ create_deep_agent()
 
 本地 State 更像控制面索引，不是远程任务的事实来源。这个选择允许主 Agent 立即返回、稍后继续管理任务，但也要求每次查询都处理远程失败、状态过期和本地回写顺序。
 
-## 一、它如何进入主 Agent
+## 四、它如何进入主 Agent
 
-### `subagents` 中用什么区分异步 SubAgent
+### 1. `subagents` 中用什么区分异步 SubAgent
 
 `create_deep_agent()` 接收的 `subagents` 同时支持声明式同步 SubAgent、已经编译好的 SubAgent，以及远程异步 SubAgent。源码通过 `graph_id` 区分异步规格：
 
@@ -101,7 +106,7 @@ for spec in subagents or []:
 
 `graph_id` 不是本地同步 SubAgent 的 `name` 替代品。它告诉远程服务运行哪个 graph，`name` 则是本地任务工具识别的异步 Agent 类型。`url` 和 `headers` 决定客户端连接哪个服务以及如何附带认证信息。
 
-### 主栈中的实际位置
+### 2. 主栈中的实际位置
 
 当前源码把主 Agent 的核心中间件按下面的顺序累积：
 
@@ -157,9 +162,9 @@ return create_agent(
 
 因此，异步 SubAgent 不是独立于主 Agent 的第二套执行图。`AsyncSubAgentMiddleware` 作为中间件进入 `create_agent()`，它的工具、提示词和 State 扩展都由同一个 Agent 装配过程接管。
 
-## 二、中间件初始化时做了什么
+## 五、中间件初始化时做了什么
 
-### `__init__()` 校验配置并创建工具
+### 1. `__init__()` 校验配置并创建工具
 
 `AsyncSubAgentMiddleware.__init__()` 做三件事：
 
@@ -198,7 +203,7 @@ def __init__(
 
 工具不是在 `wrap_model_call()` 中动态添加的。它们在初始化时挂到中间件的 `self.tools`，`create_agent()` 装配中间件时读取这些工具。这个区分很重要：工具的存在属于 Agent 装配阶段，模型请求 Hook 只负责在请求中补充使用说明。
 
-### `wrap_model_call()` 只追加系统提示词
+### 2. `wrap_model_call()` 只追加系统提示词
 
 初始化时，源码把默认工作流和可用异步 Agent 的名称、描述拼进 `self.system_prompt`：
 
@@ -230,9 +235,9 @@ def wrap_model_call(self, request, handler):
 
 这段 Hook 不启动远程任务，也不查询任务状态。模型产生工具调用后，LangChain 的工具执行流程才会进入五个工具对应的函数。
 
-## 三、`async_tasks` 为什么要放进 State
+## 六、`async_tasks` 为什么要放进 State
 
-### `AsyncTask` 保存的是远程任务索引
+### 1. `AsyncTask` 保存的是远程任务索引
 
 异步任务真正运行在远程 Agent Protocol 服务中。主 Agent 本地至少要记住以下关系：
 
@@ -271,7 +276,7 @@ task_id = thread["thread_id"]
 
 `status` 是本地最后一次已知状态，不是远程服务器主动推送过来的实时值。想得到实时状态，仍要调用查询工具。
 
-### `AsyncSubAgentState` 扩展主 Agent State
+### 2. `AsyncSubAgentState` 扩展主 Agent State
 
 中间件声明了自己的状态字段：
 
@@ -292,9 +297,9 @@ tracked = tasks.get(task_id.strip())
 
 如果只把 `task_id` 放在上一条 `ToolMessage` 里，后续就只能从消息文本中猜任务；现在它是结构化 State，工具可以按 key 精确定位，也能随 checkpoint 一起保存和恢复。
 
-这个设计的真正动机，和上下文压缩有关：Deep Agents 在上下文窗口快满时会 compact 消息历史（summarization，见 [10：Summarization 与上下文卸载](./10-summarization-and-context-offloading.md)）。如果任务索引只存在于 `ToolMessage` 里，压缩历史时就会被一起抹掉，主代理再也找不到自己启动过的任务。独立 `async_tasks` channel 保证即使经过多轮摘要，`list_async_tasks` 仍能召回全部任务。
+任务索引独立于模型的消息视图。正常摘要并不删除全部原始 ToolMessage，但模型下一轮可能只看到摘要，不能保证仍记住准确 task_id。`list_async_tasks` 读取 `async_tasks` 字段，因此无需从摘要文本中猜测任务身份。索引能否跨请求恢复，仍取决于主图的状态持久化配置。
 
-### `_tasks_reducer()` 是覆盖式合并
+### 3. `_tasks_reducer()` 是覆盖式合并
 
 ```python
 def _tasks_reducer(
@@ -317,9 +322,9 @@ def _tasks_reducer(
 
 它不是消息追加，也不是整张任务表替换。多个异步任务可以并存；启动、查询、更新或取消某个任务时，只提交对应的 `{task_id: task}`，其他任务继续保留。
 
-## 四、启动任务：先远程成功，再写本地 State
+## 七、启动任务：先远程成功，再写本地 State
 
-### `_build_start_tool()` 绑定了同步和异步实现
+### 1. `_build_start_tool()` 绑定了同步和异步实现
 
 `_build_async_subagent_tools()` 把配置转换成 `agent_map`，创建一个共享的 `_ClientCache`，再构造五个 `StructuredTool`：
 
@@ -341,7 +346,7 @@ def _build_async_subagent_tools(
 
 每个工具都同时提供 `func` 和 `coroutine`。模型执行同步 Agent 时使用同步函数；异步 Agent 调用时使用对应的协程函数。两套实现的远程步骤相同，只是 SDK 调用是否使用 `await` 不同。
 
-### `start_async_task()` 的执行顺序
+### 2. `start_async_task()` 的执行顺序
 
 同步版本的核心逻辑是：
 
@@ -377,7 +382,7 @@ except Exception as e:
 
 Thread 是远程对话容器，Run 是在这个容器中执行一次 Agent。源码先拿到 Thread ID，才能把 Run 绑定到正确的 Thread。
 
-### 远程成功后才生成 `AsyncTask`
+### 3. 远程成功后才生成 `AsyncTask`
 
 远程 Run 创建成功后，源码才组装本地任务记录：
 
@@ -411,9 +416,11 @@ return Command(
 
 `ToolMessage` 让当前模型循环知道工具已经返回，并拿到完整的 `task_id`；`async_tasks` 则让后续工具可以结构化查询任务。
 
-如果创建 Thread 或 Run 失败，函数直接返回错误字符串，不写入新的 `async_tasks`。这样本地 State 不会出现一个实际上没有远程 Run 的“运行中”任务。
+如果创建 Thread 或 Run 失败，函数直接返回错误字符串，不写入新的 `async_tasks`。这避免在没有取得成功响应时主动写入 running 索引；它不能证明远端没有接受请求。
 
-### “立即返回”不等于任务完成
+**源码事实**：`start_async_task()`（`libs/deepagents/deepagents/middleware/async_subagents.py:295-324`）依次创建远程 Thread、Run，拿到返回后才生成本地 `Command`。两个远程请求与本地 checkpoint 不在同一事务里：Thread 创建成功而 Run 创建失败会留下无本地索引的 Thread；远程 Run 已接受、响应丢失时，本地可能只拿到错误字符串。因此“未写本地 State”不能反推“远程没有开始执行”。恢复时先向远端查询业务动作是否发生，再决定重试、认领任务或人工处理。
+
+### 4. “立即返回”不等于任务完成
 
 `runs.create()` 返回的是远程 Run 已经被创建，而不是 Run 已经执行结束。工具随后返回 `Launched async subagent`，主 Agent 可以继续处理当前对话。
 
@@ -425,11 +432,11 @@ return Command(
 只有用户要求状态或结果时才查询。
 ```
 
-这不是代码层面的轮询锁，而是 Agent 工作流约定。工具本身允许再次调用，是否立即查询取决于模型是否遵守提示词。
+这是 Agent 工作流约定，代码层面没有轮询锁。工具本身允许再次调用，是否立即查询取决于模型是否遵守提示词。
 
-## 五、查询任务：用远程状态覆盖本地缓存
+## 八、查询任务：用远程状态覆盖本地缓存
 
-### `check_async_task()` 先从 State 取任务
+### 1. `check_async_task()` 先从 State 取任务
 
 查询工具不会接受任意 Thread/Run ID 直接访问远程服务，而是先调用 `_resolve_tracked_task()`：
 
@@ -447,7 +454,7 @@ def _resolve_tracked_task(
 
 因此，`check_async_task` 使用的是 `start_async_task` 返回的完整 `task_id`。任务不在当前主 Agent State 中时，即使远程服务上存在同名 Thread，也不会被当作当前 Agent 负责的任务。
 
-### 先查 Run，再在成功时查 Thread
+### 2. 先查 Run，再在成功时查 Thread
 
 拿到本地索引后，源码查询当前 Run：
 
@@ -475,7 +482,7 @@ if run["status"] == "success":
 
 成功任务没有消息时，源码返回 `"(completed with no output messages)"`，避免把空列表误解成远程调用失败。
 
-### 查询结果同时回写 State
+### 3. 查询结果同时回写 State
 
 查询不会只返回一段工具文本，还会调用 `_build_check_command()` 生成 `Command`：
 
@@ -496,7 +503,7 @@ updated_task = AsyncTask(
 
 查询 Run 失败时，工具返回错误字符串，不生成这次 State 更新。旧的本地状态会保留，不能把网络错误直接写成 `error`。
 
-### `list_async_tasks()` 有两级状态处理
+### 4. `list_async_tasks()` 有两级状态处理
 
 列表工具的实现和单任务查询不完全相同：
 
@@ -514,13 +521,13 @@ updated_task = AsyncTask(
 list_async_tasks(status_filter="running")
 ```
 
-一个任务在本地仍是 `running`，但远程已经变成 `success`，它会先被筛选出来，再在输出中显示为 `success`。相反，本地已经是 `success` 的任务不会因为远程状态变化重新进入 `running` 筛选。
+一个任务在调用方缓存中仍是 `running`，但远端已经变成 `success`，它会先被筛选出来，再在输出中显示为 `success`。相反，缓存中已经是 `success` 的任务不会因为远端状态变化重新进入 `running` 筛选。
 
 `_fetch_live_status()` 对 `cancelled`、`success`、`error`、`timeout`、`interrupted` 这些终态跳过远程请求；非终态才向远程服务刷新状态。异步列表版本会用 `asyncio.gather()` 并发刷新多个任务。
 
-## 六、更新任务：保留 Thread，替换 Run
+## 九、更新任务：保留 Thread，替换 Run
 
-### `update_async_task()` 不创建新的 task_id
+### 1. `update_async_task()` 不创建新的 task_id
 
 更新工具先从 State 找出旧任务，然后在同一个 Thread 上创建新 Run：
 
@@ -565,7 +572,7 @@ task: AsyncTask = {
 
 如果远程创建新 Run 失败，工具返回错误字符串，旧的 `run_id` 保留。只有新 Run 创建成功后，才通过 `_tasks_reducer()` 覆盖同一个 `task_id`。
 
-## 七、取消任务：远程成功后标记本地终态
+## 十、取消任务：远程成功后标记本地终态
 
 `cancel_async_task()` 的流程比更新简单：
 
@@ -590,9 +597,11 @@ client.runs.cancel(
 
 这里的“成功”只表示取消请求没有抛出异常。源码没有在取消后再次调用 `runs.get()` 校验远程最终状态；如果业务需要强一致的最终状态，仍应随后调用 `check_async_task`。
 
-## 八、客户端缓存与连接边界
+**源码事实**：`cancel_async_task()`（同文件623-645行）在取消API未抛异常后就写入 `cancelled`；`_fetch_live_status()` 会跳过这类缓存终态，随后 `list_async_tasks` 也不会再次确认。需要确认停机时应显式 `check_async_task`，并独立查询已发生的业务副作用；取消请求不会回滚退款或文件写入。
 
-### 一个中间件实例共享一组客户端
+## 十一、客户端缓存与连接边界
+
+### 1. 一个中间件实例共享一组客户端
 
 `_build_async_subagent_tools()` 只创建一个 `_ClientCache`，五个工具共用它：
 
@@ -612,7 +621,7 @@ class _ClientCache:
 
 这样不会在每次工具调用时重新构造 SDK 客户端。同步工具只取 `_sync`，协程工具只取 `_async`。
 
-### 缓存键包含 URL 和请求头
+### 2. 缓存键包含 URL 和请求头
 
 ```python
 def _cache_key(
@@ -633,7 +642,7 @@ headers["x-auth-scheme"] = "langsmith"
 
 如果配置中已经明确提供同名请求头，源码保留用户配置，不覆盖它。
 
-### `url=None` 只适用于异步客户端路径
+### 3. `url=None` 只适用于异步客户端路径
 
 `get_async()` 允许 `url=None`，交给 LangGraph SDK 使用本地 ASGI transport：
 
@@ -656,7 +665,7 @@ if spec.get("url") is None:
 
 所以省略 `url` 并不表示同步和异步调用都能连接本地服务。只有 Agent 的协程工具路径可以使用这种 transport；同步调用必须提供明确的远程 URL。
 
-## 九、失败处理和状态边界
+## 十二、失败处理和状态边界
 
 这套实现把远程动作和本地 State 更新放在一个明确的先后关系中：
 
@@ -671,9 +680,28 @@ if spec.get("url") is None:
 
 列表刷新和单任务查询的失败策略略有不同：`list_async_tasks()` 的 `_fetch_live_status()` 会在获取实时状态失败时返回任务原来的缓存状态，因此仍能生成列表并回写 `last_checked_at`；`check_async_task()` 获取 Run 失败时直接返回错误字符串，不写入一次不完整的查询结果。
 
-这套策略解决的是本地索引不能先于远程事实变化的问题，但它不提供远程服务断线后的自动恢复。远程任务是否最终完成，仍要依赖下一次查询。
+这套策略把调用方收到的响应写成缓存，不提供两端一致性事务。取消响应可能早于远端完全停机，列表刷新失败又可能保留旧值；最终状态与可用产物仍需明确查询。
 
-## 十、与同步 SubAgent 的边界
+## 十三、与同步 SubAgent 的边界
+
+```mermaid
+sequenceDiagram
+    participant P as 主 Agent
+    participant T as task 工具 + 同步子代理
+    participant M as AsyncSubAgentMiddleware
+    participant R as 远程 Thread / Run
+    P->>T: task：description + subagent_type
+    T->>T: 准备独立 State 并同步 invoke
+    T-->>P: ToolMessage 写回父 State，父循环被占住
+    P->>M: start_async_task
+    M->>R: 先创建 Thread 与 Run
+    R-->>M: task_id / thread_id / run_id
+    M-->>P: 本地 Command 记录索引，主循环立即返回
+    P->>M: check / list / update / cancel
+    M->>R: 按 task_id 操作远端
+    R-->>M: 远端终态与结果
+```
+
 
 同步 `SubAgentMiddleware` 的 `task` 工具会在当前 Agent 调用中等待子 Agent 返回结果；异步中间件则把远程 Run 的引用写入 `async_tasks`，立即把控制权交还给主 Agent。
 
@@ -685,36 +713,31 @@ if spec.get("url") is None:
 | 并发 | 可并行但阻塞 | 并行且不阻塞 |
 | 中途改任务 | 不支持 | `update_async_task` 发 follow-up 指令 |
 | 取消 | 不支持 | `cancel_async_task` 取消运行中的任务 |
-| 有无状态 | 无状态，调用之间不保留 | 有状态，在远程 Thread 上持续 |
+| 会话状态 | 默认 task 以新描述开始；可共享业务字段和 Backend | 在远端 Thread 上保存会话，更新创建新 Run |
 | State 重点 | 子 Agent 调用上下文 | `async_tasks` 任务索引 |
 | 适合场景 | 需要马上拿到子任务结果 | 长耗时、并发或需要中途接管的任务 |
 
 异步工具并不会把远程 Agent 的完整消息 State 同步到主 Agent。主 Agent 本地只保存 ID、状态和时间戳；成功结果要到 `check_async_task()` 查询时，才从远程 Thread 的最后一条消息读取。
 
-## 十一、使用落点：transport、扩容和几个常见故障
+## 十四、连接、缓存与并发操作的排查顺序
 
-### 选 transport：ASGI 还是 HTTP
+`_ClientCache` 缓存连接客户端，任务身份保存在 State；二者生命周期不同。`url=None` 的进程内传输只适用于源码支持的异步客户端路径，同步工具路径要求显式 URL。使用进程内传输还需要可用的同部署运行环境，仅省略地址并不能创建远端服务。
 
-`url` 字段决定 transport。省略 `url` 用 ASGI，SDK 调用走进程内函数而不是网络，延迟和认证配置更少，但要求所有 graph 注册在同一个 `langgraph.json` 里（co-deployed）。设置 `url` 则切到 HTTP，SDK 调用经过网络访问远程 Agent Protocol 服务，适合子代理需要独立扩容、独立资源或独立团队维护的情况。
+查询失败时应按所处阶段定位：
 
-部署拓扑对应三种：单部署（全部 co-deploy + ASGI，推荐起步）、拆分部署（supervisor 一个服务、子代理另一个，走 HTTP）、混合（部分 ASGI、部分 HTTP）。LangGraph 部署的认证由 SDK 用 `LANGSMITH_API_KEY`（或 `LANGGRAPH_API_KEY`）环境变量处理；自托管服务可能用别的机制，通过 `headers` 传自定义认证。
-
-### 本地开发要扩 worker pool
-
-本地 `langgraph dev` 时每个活跃 Run 占一个 worker 槽。supervisor 并发启动 3 个子代理任务，需要 4 个槽（1 个 supervisor + 3 个 subagent），槽不够时 launch 会排队而不是并发跑。用 `langgraph dev --n-jobs-per-worker 10` 扩容。
-
-### 几个常见故障的解法
-
-| 症状 | 根因 | 解法 |
+| 现象 | 检查顺序 | 不宜直接推断 |
 | --- | --- | --- |
-| 启动后立刻轮询 `check` | 把异步用成了阻塞 | 中间件系统提示词已约束；仍发生就在 supervisor `system_prompt` 重申「启动后立即交还控制权，不要马上 check」 |
-| 报的状态是旧的 | 模型用了对话历史里的旧状态 | 提示词已说明「历史里的任务状态永远过期」；必要时明确「报告状态前先 check 或 list」 |
-| `check`/`cancel` 找不到任务 | 模型截断或改写了 task ID | 提示词要求「用完整 task_id，不截断不缩写」；持续发生通常是模型问题，换模型 |
-| launch 排队不执行 | worker 池耗尽 | `--n-jobs-per-worker` 扩容 |
+| 找不到 task_id | 当前线程是否恢复、async_tasks 是否含完整 ID、索引是否提交成功 | 不一定是模型选错任务，也可能是 State 不在当前线程 |
+| 启动报错后远端仍有任务 | Thread/Run 创建响应与远端记录 | 报错不等于远端回滚，立即重试可能重复启动 |
+| 列表显示旧状态 | 是否命中缓存终态、实时查询是否失败 | last_checked_at 更新不保证此次取得了新远端状态 |
+| success 却没有输出 | Thread values 是否读取成功、是否有消息 | Run 成功不保证产物可读取或满足业务要求 |
+| 更新后结果与预期 Run 不符 | 索引 run_id、Thread 最新 values、并发更新顺序 | 从 Thread 读出的最新值不天然等于不可变的某次 Run 产物 |
 
-用 LangSmith 追踪时，每个异步子代理 Run 都是标准 LangGraph Run，`thread_id`（即 task_id）把 supervisor 的编排 trace 和子代理执行 trace 关联起来，便于对照排查。
+`_tasks_reducer()` 以 task_id 覆盖整条记录，没有比较 Run 代次或版本。同一任务上的查询、更新、取消若并发提交，应由调用方串行协调或增加版本校验；否则较旧操作生成的记录可能覆盖新记录。这是根据覆盖式合并推导出的接入约束。
 
-## 十二、测试如何验证这项机制
+远端并发额度和 worker 配置属于部署层，本文的五个工具不负责扩容。应通过部署日志区分请求未被接受、已排队和已运行，而不是仅通过主 Agent 的自然语言输出判断。
+
+## 十五、测试如何验证这项机制
 
 当前版本的核心测试集中在：
 
@@ -739,39 +762,28 @@ libs/deepagents/tests/unit_tests/test_async_subagents.py
 
 异步工具路径还由 `TestAsyncTools` 覆盖，确认 `coroutine` 使用异步 SDK，并返回与同步路径一致的 `Command` 结构。
 
-这些测试说明了一个重要约束：远程调用成功和 State 更新必须成对出现。SDK 调用失败时，工具返回错误字符串，不能把本地任务伪装成 `running`、`success` 或 `cancelled`。
+这些测试覆盖客户端响应到工具返回值的映射，不等于两端提交原子性测试。尤其是远端接受请求后响应丢失、Command 已生成但尚未持久化的窗口，需要额外的故障注入与对账。
 
-## 读完后的工程判断
+## 十六、工程判断
 
-`AsyncSubAgentMiddleware` 可以分成三层：
+远端子代理适合需要跨主 Agent 请求继续管理的任务。启动工具只等待服务接受启动，不等待任务完成；后续查询、更新和取消都依赖保存下来的索引。因此应用至少需要定义索引持久化、未知结果处理和任务回收策略。
 
-```text
-装配层：创建五个工具，并把使用说明追加到系统提示词
-索引层：在 async_tasks 中保存 task_id、thread_id、run_id 和状态
-远程层：通过 LangGraph SDK 创建、查询、更新和取消 Run
-```
+“取消已确认”“远端已停止”“结果已取回”“业务产物通过”应分别记录。当前 cancelled 缓存会让列表跳过刷新，需要确认终态时应显式查询；查询也不能回滚已经发生的文件或业务写入。
 
-真正的任务生命周期是：
+短任务若必须立即取得结果，远端生命周期管理可能增加不必要的连接与状态成本。需要长期运行、跨请求查询或独立部署时，则应把 Thread/Run 与业务任务身份关联起来。第 [21 篇](21-production-failure-validation.md) 的启动响应丢失场景用于检查这一边界。
 
-```text
-start
-  -> Thread + Run
-  -> async_tasks[task_id] = running
-  -> check/list 刷新状态
-  -> update 在同 Thread 创建新 Run，替换 run_id
-  -> cancel 成功后写入 cancelled
-```
+## 十七、延伸阅读
 
-阅读或改造这段源码时，最容易出错的地方有三个：
+**下层：LangChain / LangGraph**
 
-- 把 `task_id` 当成每一次 Run 的 ID。当前实现中它实际索引 Thread，更新任务只替换 `run_id`；
-- 把本地 `status` 当成实时状态。实时值只能通过远程查询获得；
-- 把 `wrap_model_call()` 当成工具注册点。工具在中间件初始化时生成，Hook 只追加系统提示词。
+- [LangGraph 05：子图与跨图控制](../langgraph/05-subgraphs-and-cross-graph-control.md)——跨执行单元的边界控制
+- [LangGraph 06：Checkpoint、Store 与恢复](../langgraph/06-checkpoints-store-and-recovery.md)——远程任务索引与本地检查点的分工
 
-**相关测试**：`libs/deepagents/tests/unit_tests/test_async_subagents.py`
+**本系列**
 
-**配套阅读**：
+- [09：同步 SubAgent](./09-subagent-sync.md)——同一问题的同步解法，两者边界对照
+- [22：动态子代理与 QuickJS 代码工作流](./22-dynamic-subagents-and-quickjs-workflows.md)：一次 eval 内的并发编排，与远程任务生命周期的区别。
 
-- [06 中间件增量与装配顺序](./06-middleware-increments.md)
-- [09 同步 SubAgent](./09-subagent-sync.md)
-- [11 PatchToolCalls](./11-patch-tool-calls.md)
+**上层：方法论与案例**
+
+- [Agent 系统设计 04：多 Agent 编排](../../../../notes/agent-system-design/04-decision/agent-multi-agent-orchestration.md)——远程任务的生命周期该由谁持有

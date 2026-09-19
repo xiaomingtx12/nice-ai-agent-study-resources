@@ -6,9 +6,10 @@ description: 从源码拆解 Deep Agents 如何压缩模型上下文、归档旧
 
 # Deep Agents 源码解析 10：上下文压缩与卸载
 
-## 源码定位
+## 一、源码定位
 
 > **阅读基线**：Deep Agents 0.6.12（`libs/deepagents/`）。
+> 源码版本与路径约定见 [源码版本与路径约定](source-baseline.md)。
 >
 > 主代理装配：`libs/deepagents/deepagents/graph.py` → `create_deep_agent()`、`create_summarization_middleware()`
 >
@@ -35,19 +36,25 @@ description: 从源码拆解 Deep Agents 如何压缩模型上下文、归档旧
 | 本地 token 估算不准，provider 仍拒绝请求怎么办？ | `ContextOverflowError` 触发溢出回退 |
 | 模型能不能主动结束当前阶段、压缩旧上下文？ | `SummarizationToolMiddleware` 注册的 `compact_conversation` |
 
-`state["messages"]` 是图状态里的消息记录，`ModelRequest.messages` 是当前这一轮真正交给模型的消息列表。在本文基线版本的正常摘要路径中，主要改造的是第二份：`wrap_model_call()` 先用 `request.override(messages=...)` 生成本轮请求副本，模型调用完成后，再通过 `Command(update=...)` 保存摘要事件。下一轮请求读取这个事件，重新构造“摘要消息 + State 中尚未被覆盖的尾部消息”。只有进入溢出回退时，源码才可能额外用 `Command` 更新已经被裁剪的尾部工具消息。
+`state["messages"]` 是图状态里的消息记录，`ModelRequest.messages` 是当前这一轮真正交给模型的消息列表。在本文基线版本的正常摘要路径中，主要改造的是第二份：`wrap_model_call()` 先用 `request.override(messages=...)` 生成本轮请求副本，模型调用完成后，再通过 `Command(update=...)` 保存摘要事件。
 
-下面按一轮 Agent 调用的生命周期展开：先看装配和四类压缩入口，再看阈值、有效消息和历史摘要；随后处理工具结果卸载与 provider 溢出回退，最后说明主动压缩工具以及它和 FilesystemMiddleware 的边界。
+下一轮请求读取这个事件，重新构造“摘要消息 + State 中尚未被覆盖的尾部消息”。只有进入溢出回退时，源码才可能额外用 `Command` 更新已经被裁剪的尾部工具消息。
 
-## 这篇要回答的设计问题
+## 二、保留执行记录，压缩本轮工作视图
 
-上下文管理的核心不是“把旧消息删掉”，而是把完整记录和模型工作视图分开。State 保留恢复、审计和后续处理需要的证据；`ModelRequest.messages` 只携带这一轮足够完成任务的内容。摘要、文件卸载和溢出回退分别处理历史、单条大结果和 provider 拒绝，不能用一个“截断函数”替代。
+正常历史摘要改变本轮模型请求视图，并把摘要事件写回 State；被摘要的消息仍保留在 State 中，配置 Checkpointer 后可随状态保存。工具结果卸载、超大用户消息处理和溢出回退还可能改写消息，需分别看各自的状态更新。
 
-这套设计保留了可恢复性，却引入了路径、摘要事件和切点一致性等额外状态。读源码时要确认每次压缩之后，模型还能通过什么路径找回原文，以及这个路径是否和当前 Backend、权限和线程生命周期一致。
+三类压缩各管一段：FilesystemMiddleware 卸载单条大结果，SummarizationMiddleware 摘要历史，`ContextOverflowError` 触发的溢出回退处理 provider 拒绝。
 
-## 一、装配位置与整体分层
+代价是多出摘要事件、切点和归档路径这类派生状态；每次压缩之后都要确认模型还能通过哪条路径找回原文。
 
-### 摘要中间件位于主代理核心栈中
+![State 里的原始消息一条没删，模型这一轮只拿到压缩后的请求视图](./img/10-01-request-view-vs-state.png)
+
+*图：正常历史摘要用事件重建模型视图；原始消息保留在 State，配置 Checkpointer 后可保存。归档是否成功需单独检查。*
+
+## 三、装配位置与整体分层
+
+### 1. 摘要中间件位于主代理核心栈中
 
 `create_deep_agent()` 构造主代理中间件时，会把摘要中间件放在文件工具和同步子代理之后，`PatchToolCallsMiddleware` 之前：
 
@@ -80,7 +87,7 @@ TodoListMiddleware
 
 `PatchToolCallsMiddleware` 虽然紧邻摘要中间件，但它使用 `before_agent()`；摘要主要使用 `wrap_model_call()`。列表上的相邻关系不等于两个 Hook 会按同一条调用链依次执行。
 
-### 上下文压缩有六条处理路径
+### 2. 上下文压缩有六条处理路径
 
 Deep Agents 没有一个统一的「压缩函数」。源码按处理对象和触发入口拆成六条路径：
 
@@ -102,28 +109,18 @@ Deep Agents 没有一个统一的「压缩函数」。源码按处理对象和�
 
 文件工具自己的分页和结果数量限制属于工具内部的结果控制，不是另一套全局摘要机制。比如 `read_file` 使用 `offset`、`limit`，`ls`、`glob`、`grep` 也会限制结果规模。
 
-### 六条路径分别在什么场景出现
+## 四、构造阶段：默认阈值和归档位置
 
-| 路径 | 常见场景 |
-| --- | --- |
-| 工具参数截断 | 模型前面调用 `write_file` 写入大文件，或者调用 `edit_file` 生成了很长 patch（补丁文本）；这些 tool call 进入旧消息区域后，下一轮模型调用前被缩短 |
-| 工具结果卸载 | 自定义工具返回了完整构建日志、数据库查询结果、网页正文或大量 JSON；工具已经执行完成，但返回的 `ToolMessage` 太大 |
-| 输入消息卸载 | 用户一次性粘贴了完整源码、长日志、数据文件或大段文档，且这条用户消息正好是当前请求的最后一条消息 |
-| 自动历史摘要 | 对话经过多轮工具调用和模型推理后，累计消息接近摘要阈值，旧消息已经占据大部分上下文 |
-| 溢出回退 | 本地 token 估算没有达到阈值，但 provider 按自己的计数规则拒绝了模型请求 |
-| 主动压缩 | 模型判断当前任务已经切换，或者旧的工作过程不值得继续占用上下文，于是主动调用 `compact_conversation` |
-
-## 二、构造阶段：默认阈值和归档位置
-
-### Deep Agents 在 LangChain 摘要实现外面增加 Backend 能力
+### 1. Deep Agents 在 LangChain 摘要实现外面增加 Backend 能力
 
 `_DeepAgentsSummarizationMiddleware.__init__()` 先创建 LangChain 的摘要辅助实例：
 
 ```python
+# 先创建 LangChain 自带的摘要中间件，Deep Agents 只在外层加归档与摘要事件逻辑
 self._lc_helper = LCSummarizationMiddleware(
     model=model,
-    trigger=trigger,
-    keep=keep,
+    trigger=trigger,        # 触发阈值：比例或绝对 token 数
+    keep=keep,              # 压缩后保留的比例或条数
     token_counter=token_counter,
     summary_prompt=summary_prompt,
     trim_tokens_to_summarize=trim_tokens_to_summarize,
@@ -133,15 +130,15 @@ self._lc_helper = LCSummarizationMiddleware(
 
 随后，Deep Agents 保存 Backend、摘要事件和归档路径。阈值判断、切点选择、消息分区和摘要生成委托给 `_lc_helper`；历史归档、媒体路径转换和 State 事件由 Deep Agents 包装层完成。
 
-### 默认值由模型 Profile 决定
+### 2. 默认值由模型 Profile 决定
 
 `create_summarization_middleware()` 调用 `compute_summarization_defaults(model)`。模型存在 `profile["max_input_tokens"]` 时，默认配置是：
 
 ```python
 {
-    "trigger": ("fraction", 0.85),
-    "keep": ("fraction", 0.10),
-    "truncate_args_settings": {
+    "trigger": ("fraction", 0.85),     # 有模型 profile 时：占用 85% 触发
+    "keep": ("fraction", 0.10),        # 压缩后保留最近 10%
+    "truncate_args_settings": {        # 工具参数截断用另一套阈值
         "trigger": ("fraction", 0.85),
         "keep": ("fraction", 0.10),
     },
@@ -157,6 +154,7 @@ self._lc_helper = LCSummarizationMiddleware(
 
 ```python
 {
+    # 拿不到模型最大输入 token 时，退回固定条数而不是比例
     "trigger": ("tokens", 170000),
     "keep": ("messages", 6),
     "truncate_args_settings": {
@@ -180,7 +178,7 @@ self._lc_helper = LCSummarizationMiddleware(
 - dict，dict 内多个条件是 AND；
 - list，list 中多个子句是 OR。
 
-### Backend 路径
+### 3. Backend 路径
 
 摘要中间件根据 Backend 的 `artifacts_root` 计算路径前缀：
 
@@ -198,11 +196,11 @@ self._large_tool_results_prefix = f"{_root}/large_tool_results"
 
 它们都是 Backend 的逻辑路径，最终存储位置由 Backend 决定。
 
-## 三、模型调用前：先构造有效消息
+## 五、模型调用前：先构造有效消息
 
-### 摘要事件不直接替换原始消息
+### 1. 摘要事件不直接替换原始消息
 
-正常摘要完成后，State 中保存的不是一份新的完整消息列表，而是 `_summarization_event`：
+正常摘要完成后，State 中保存的是 `_summarization_event`，完整消息列表仍留在检查点里：
 
 ```python
 class SummarizationEvent(TypedDict):
@@ -237,9 +235,13 @@ return result
 [S1, M5, M6, M7]
 ```
 
-`M0` 到 `M4` 仍在 State 中，并没有被这次摘要删除。它们已经通过 `file_path` 归档，需要细节时可以重新读取。
+`M0` 到 `M4` 仍在 State 中，并没有被这次摘要删除。只有 Backend 归档成功、`file_path` 有效且文件仍可访问时，模型才可以沿路径重新读取。归档失败时摘要仍可能成功，因此“有摘要”和“可回读原文”必须分别判断。
 
-### 连续摘要要修正切点
+接着模型生成新消息 `M8`，图将它追加到原始状态，得到 `[M0, …, M8]`；下一次请求根据同一个事件重建 `[S1, M5, M6, M7, M8]`。摘要 `S1` 存在于事件记录中，作为模型视图的前缀使用，不需要每轮追加到原始消息历史里。
+
+三处数据各有用途：State 保存执行记录，`_summarization_event` 保存重建视图所需的摘要和切点，Backend 归档向文件工具提供可回读的原文。只删除原始历史会破坏第一处；只保存原始历史又不能降低模型本轮的输入长度。
+
+### 2. 连续摘要要修正切点
 
 第二次摘要时，有效列表的第 0 项是摘要消息，不对应原始 State 的真实消息：
 
@@ -253,9 +255,11 @@ return result
 return prior_cutoff + effective_cutoff - 1
 ```
 
+本例中 `prior_cutoff=5`、`effective_cutoff=3`，新绝对切点为 `7`。下一轮应看到 `[S2, M7, M8, M9]`，而不是从原始 State 的第 3 条消息重新开始。
+
 `-1` 用来抵消有效列表开头那条摘要消息。归档时，`_filter_summary_messages()` 还会排除之前生成的摘要消息，避免重复保存。
 
-### 模型调用前的轻量参数截断
+### 3. 模型调用前的轻量参数截断
 
 `wrap_model_call()` 先计算消息、系统提示和工具 schema 的 token 数：
 
@@ -282,7 +286,7 @@ if tool_call["name"] in {"write_file", "edit_file"}:
 
 它通过 `msg.model_copy()` 创建新的 `AIMessage`，只改变当前 `ModelRequest`，不改 State，也不写 Backend。这个步骤结束后，中间件会重新计数，再判断是否进入完整摘要。
 
-### 最新超大 `HumanMessage` 的卸载
+### 4. 最新超大 `HumanMessage` 的卸载
 
 FilesystemMiddleware 也会在模型调用前处理最新的超大 `HumanMessage`：
 
@@ -319,9 +323,13 @@ HumanMessage(content="<很长的日志文本>")
 
 写入成功后，源码用同一个消息 ID 把带路径标记的副本更新回 State；下一轮请求根据标记生成预览。原始文本仍可通过 Backend 路径读取，模型不需要把整段内容再次放回上下文。
 
-## 四、自动历史摘要：切分、归档、生成摘要
+## 六、自动历史摘要：切分、归档、生成摘要
 
-### 上下文占用检测分两层
+![长卷切段、旧段入袋，留在桌上的只有一页摘要](./img/10-02-summarize-split-archive.png)
+
+*图：长卷切段、旧段入袋，留在桌上的只有一页摘要。*
+
+### 1. 上下文占用检测分两层
 
 Deep Agents 和 LangChain 都参与了检测，但两者做的不是同一件事。
 
@@ -347,11 +355,17 @@ LangChain 还会检查最近一条匹配当前 provider 的 `AIMessage` 是否�
 
 **第二层是模型提供方的真实校验。**
 
-如果本地预估没有触发摘要，Deep Agents 仍然会把请求交给模型。模型适配器和 provider 会按照自己的 tokenizer、工具 schema 规则和隐藏 token 计算上下文大小。请求超过真实限制时，模型调用抛出 `ContextOverflowError`，Deep Agents 在 `wrap_model_call()` 中捕获它，转入溢出回退。
+如果本地预估没有触发摘要，Deep Agents 仍然会把请求交给模型。模型适配器和 provider 会按照自己的 tokenizer、工具 schema 规则和隐藏 token 计算上下文大小。
+
+请求超过真实限制时，模型调用抛出 `ContextOverflowError`，Deep Agents 在 `wrap_model_call()` 中捕获它，转入溢出回退。
 
 所以，源码里的阈值检测是「提前预估」，不是 provider 最终确认的上下文占用。两层之间出现差异时，provider 的拒绝结果优先，溢出回退负责补救。
 
-### 未达到阈值时先正常调用
+![本地 token 估算过了，provider 仍可能拒绝请求](./img/10-04-local-estimate-vs-provider.png)
+
+*图：估算用本地软尺，真正的门框在 provider 那边；被拒后要掏出末尾工具结果再调一次模型。*
+
+### 2. 未达到阈值时先正常调用
 
 如果 `_should_summarize()` 返回 False，源码先把轻量截断后的请求交给模型：
 
@@ -362,9 +376,9 @@ except ContextOverflowError:
     overflow_triggered = True
 ```
 
-本地 token 计数是估算值。provider 仍可能因为工具 schema、隐藏 token 或消息格式差异拒绝请求，这个异常会进入第七节的溢出回退。
+本地 token 计数是估算值。provider 仍可能因为工具 schema、隐藏 token 或消息格式差异拒绝请求，这个异常会进入“上下文溢出后的回退压缩”一节所述的处理链。
 
-### 达到阈值后确定切点
+### 3. 达到阈值后确定切点
 
 `_determine_cutoff_index()` 决定切点，`_partition_messages()` 返回：
 
@@ -384,7 +398,7 @@ AIMessage(tool_calls=[...])
 
 切点小于等于 0 时，源码不强行摘要，直接使用当前消息调用模型。
 
-### 归档旧消息
+### 4. 归档旧消息
 
 自动摘要会先把要摘要的消息写入 Backend。`_offload_to_backend()` 将消息转换为 XML 格式，追加到：
 
@@ -396,7 +410,7 @@ AIMessage(tool_calls=[...])
 
 归档失败返回 `None`，摘要仍会继续生成，但摘要消息不会提供完整历史的恢复路径。
 
-### 内联媒体转换为路径
+### 5. 内联媒体转换为路径
 
 `_offload_inline_media()` 在归档和摘要前处理 `data:` 图片、音频和视频：
 
@@ -418,7 +432,7 @@ _offload_inline_media()
 
 异步路径在媒体处理完成后，用 `asyncio.gather()` 并发归档和生成摘要。
 
-### 生成摘要消息
+### 6. 生成摘要消息
 
 `_build_new_messages_with_path()` 生成一条 `HumanMessage`：
 
@@ -433,7 +447,7 @@ A condensed summary follows:
 
 如果归档失败，消息只保留摘要文本，不附带一个无法确认存在的路径。
 
-## 五、摘要结果如何回到下一轮请求
+## 七、摘要结果如何回到下一轮请求
 
 自动摘要会把摘要消息和保留消息交给当前模型：
 
@@ -442,7 +456,7 @@ modified_messages = [*new_messages, *preserved_messages]
 response = handler(request.override(messages=modified_messages))
 ```
 
-模型调用完成后，返回 `ExtendedModelResponse`：
+`ExtendedModelResponse` 是“模型响应 + 图更新指令”的返回容器。模型调用完成后，中间件用它同时交回本次模型响应和 `Command`；后者要求图保存摘要事件：
 
 ```python
 return ExtendedModelResponse(
@@ -457,28 +471,40 @@ return ExtendedModelResponse(
 [summary_message, *state["messages"][cutoff_index:]]
 ```
 
-摘要消息不会直接追加到原始 `state["messages"]`。这让 State 保留原始消息记录，同时让模型请求使用压缩视图。溢出回退是例外，它会把保留区末尾过大的工具结果替换为预览和恢复路径，并把替换后的尾部写回 State。
+摘要消息不会直接追加到原始 `state["messages"]`。正常路径保存摘要事件，溢出回退还可能提交尾部工具消息替换。这个提交发生在下游模型调用返回之后：
 
-## 六、工具调用后的大结果卸载
+```python
+response = handler(request.override(messages=modified_messages))
+
+update: dict[str, Any] = {"_summarization_event": new_event}
+if new_state_tail:
+    update["messages"] = list(new_state_tail)
+```
+
+顺序带来一个实际边界：Backend 归档已经完成，后续摘要生成或模型调用仍可能失败。若函数未返回状态更新，不能仅凭归档文件存在就认定新摘要事件已写入图状态；反过来，`file_path=None` 时又可能成功保存摘要事件。存储写入、摘要生成和状态提交并不处于同一个事务。
+
+## 八、工具调用后的大结果卸载
 
 这条路径来自 `FilesystemMiddleware`，不是自动摘要的一部分。工具执行完成后，`wrap_tool_call()` 才检查结果：
 
 ```python
 tool_result = handler(request)
 
+# 没配阈值，或这个工具在不卸载的白名单里，直接返回原结果
 if (
     self._tool_token_limit_before_evict is None
     or request.tool_call["name"] in TOOLS_EXCLUDED_FROM_EVICTION
 ):
     return tool_result
 
+# 超过阈值才写入 Backend，把完整结果换成预览加恢复路径
 return self._intercept_large_tool_result(
     tool_result,
     request.runtime,
 )
 ```
 
-### 它具体怎么改 `ToolMessage`
+### 1. 它具体怎么改 `ToolMessage`
 
 `_process_large_message()` 先提取文本内容，并用字符数近似 token 数：
 
@@ -496,7 +522,15 @@ if len(content_str) <= NUM_CHARS_PER_TOKEN * self._tool_token_limit_before_evict
 
 `ls`、`glob`、`grep`、`read_file`、`write_file`、`edit_file`、`delete` 被排除在通用卸载之外，因为它们已有分页、结果限制或短确认结果。
 
-## 七、上下文溢出后的回退压缩
+![超大工具结果整卷写进后端，模型只看到头尾预览](./img/10-05-large-result-offload.png)
+
+*图：原文进 `/large_tool_results/`，消息体换成头尾预览加恢复路径，模型可以按路径把原文读回来。*
+
+## 九、上下文溢出后的回退压缩
+
+![箱子被退回来先压缩；还压不进，就换更大的箱子重装](./img/10-03-overflow-fallback-compression.png)
+
+*图：箱子被退回来先压缩；还压不进，就换更大的箱子重装。*
 
 溢出回退的入口是 provider 抛出的 `ContextOverflowError`：
 
@@ -509,13 +543,13 @@ if len(content_str) <= NUM_CHARS_PER_TOKEN * self._tool_token_limit_before_evict
   -> 重试模型
 ```
 
-### 只裁剪保留区末尾的连续工具结果
+### 1. 只裁剪保留区末尾的连续工具结果
 
 `_clip_overflow_tail()` 只检查 `preserved_messages` 末尾是否是一批连续 `ToolMessage`，并且这批消息的 token 数达到由 `keep` 推导出的阈值。
 
-它不会把所有工具结果都改写，只处理最可能造成本轮溢出的尾部。
+它不会把所有工具结果都改写，只检查保留区末尾的连续工具消息。这是一条有限回退路径，不能保证解决系统提示词、工具 schema 或其他大消息造成的溢出。切点不大于 0 时会重新调用原视图；压缩后的下游调用若再次抛错，当前函数也没有无限重试循环。
 
-### `read_file` 结果保留原路径
+### 2. `read_file` 结果保留原路径
 
 如果 ToolMessage 对应的调用是 `read_file`，`_slice_read_file_tm()`：
 
@@ -525,7 +559,7 @@ if len(content_str) <= NUM_CHARS_PER_TOKEN * self._tool_token_limit_before_evict
 
 原文件已经在 Backend 中，所以不用重复写入 `/large_tool_results/...`。
 
-### 其他工具结果写入恢复文件
+### 3. 其他工具结果写入恢复文件
 
 其他 ToolMessage 使用 `_offload_tool_message_content()`：
 
@@ -537,7 +571,7 @@ if len(content_str) <= NUM_CHARS_PER_TOKEN * self._tool_token_limit_before_evict
 
 Backend 写入失败时保留原消息，不生成虚假的恢复路径。
 
-## 八、主动 `compact_conversation`
+## 十、主动 `compact_conversation`
 
 自动摘要之外，源码还提供一个工具，让模型在合适的时机主动压缩对话：
 
@@ -552,7 +586,7 @@ factory 会创建摘要引擎，再用 `SummarizationToolMiddleware` 包住它�
 
 `SummarizationMiddleware` 会在模型调用前自动判断阈值；`SummarizationToolMiddleware` 只提供工具，只有工具真的被调用时才压缩。
 
-### `_run_compact()` 的实际顺序
+### 1. `_run_compact()` 的实际顺序
 
 ```text
 读取 State 中的 messages 和 _summarization_event
@@ -565,7 +599,7 @@ factory 会创建摘要引擎，再用 `SummarizationToolMiddleware` 包住它�
   -> _build_compact_result()
 ```
 
-### 工具注册不等于立即压缩
+### 2. 工具注册不等于立即压缩
 
 `SummarizationToolMiddleware.__init__()` 只创建一个 `StructuredTool`，放入 `self.tools`：
 
@@ -575,7 +609,7 @@ self.tools: list[BaseTool] = [self._create_compact_tool()]
 
 模型下一轮请求能看到这个工具后，才可能生成对应的 tool call。工具没有参数，调用本身只表达「现在压缩上下文」，具体压缩多少由当前消息和 `keep` 配置决定。
 
-### `_is_eligible_for_compaction()` 先做资格判断
+### 3. `_is_eligible_for_compaction()` 先做资格判断
 
 工具调用进入 `_run_compact()` 后，源码先读取：
 
@@ -600,7 +634,7 @@ trigger=("fraction", 0.85)
 
 字典形式的一个触发子句要求其中条件全部满足，多个子句之间仍按 OR 处理。使用 `fraction` 时如果模型没有 `max_input_tokens`，资格判断无法计算，工具返回「Nothing to compact」。
 
-### 通过后如何生成压缩结果
+### 4. 通过后如何生成压缩结果
 
 `_run_compact()` 只取切点之前的消息：
 
@@ -628,7 +662,7 @@ summary_message + state["messages"][cutoff_index:]
 
 主动压缩复用摘要引擎，但不会经过自动路径的 provider 溢出回退，也不会自动执行历史摘要路径里的内联媒体预处理。
 
-## 九、Summarization 与 FilesystemMiddleware 的边界
+## 十一、Summarization 与 FilesystemMiddleware 的边界
 
 两者都可能把内容写入 Backend，但对象和触发点不同：
 
@@ -660,12 +694,33 @@ summary_message + state["messages"][cutoff_index:]
 
 **相关测试**：`libs/deepagents/tests/unit_tests/middleware/test_summarization_middleware.py`、`libs/deepagents/tests/unit_tests/middleware/test_summarization_factory.py`、`libs/deepagents/tests/unit_tests/test_eviction_replay.py`、`libs/deepagents/tests/integration_tests/test_filesystem_middleware.py`
 
-## 读完后的工程判断
+## 十二、工程判断
 
-上下文压缩维护三份互相配合的信息：
+调整压缩策略时，先确认压力来自哪里。大工具结果优先看卸载阈值；历史累积优先看 trigger 与 keep；系统提示词或工具 schema 过大，则不能指望只摘要旧消息解决。
 
-- State 中的原始消息记录；
-- `_summarization_event` 中的摘要、切点和归档路径；
-- 当前模型请求中的预览、摘要和近期消息。
+| 调整对象 | 可能收益 | 必须一起观察 |
+| --- | --- | --- |
+| 降低历史摘要 trigger | 更早留出输入空间 | 摘要调用次数、费用、遗漏事实与任务正确率 |
+| 缩小保留窗口 keep | 减少近期原文占用 | 工具配对边界是否完整、近期任务细节是否仍足够 |
+| 降低工具结果卸载阈值 | 减少单次结果占用 | 模型是否增加多次回读、归档存储和权限是否可用 |
+| 缩小 Memory 或工具描述 | 减少历史切分无法移走的部分 | 常驻规则与工具选择能力是否退化 |
 
-参数截断和文件卸载处理单条大消息；自动摘要处理历史消息；溢出回退处理 provider 已经拒绝的请求；主动压缩则由模型显式发起。不同路径虽然都在减少模型输入，但它们的触发点、替换对象和恢复方式并不相同。
+需要可回读原文时，应把归档成功、媒体是否完整和路径可访问作为独立检查。否则摘要即使生成，也可能只剩不可追溯的压缩文本。保留完整图状态有利于恢复，但不等于模型能够通过文件工具直接读取检查点里的历史。
+
+自定义历史重排还会影响绝对切点。若另一中间件删除或插入了摘要覆盖区内的消息，应同时校正或重建 `_summarization_event`，不能继续沿用旧 cutoff。修改单条结果、整体重建消息与只改本轮视图，应分别遵循 [03](03-state-reducers-and-recovery.md) 的状态合并规则。
+
+## 十三、延伸阅读
+
+**下层：LangChain / LangGraph**
+
+- [LangChain 09：上下文与隐私](../langchain/09-context-and-privacy.md)——LangChain 侧的上下文处理与裁剪
+
+**本系列**
+
+- [03：状态、Reducer 与恢复](./03-state-reducers-and-recovery.md)——完整记录与模型视图分离的前提
+- [08：FilesystemMiddleware 与权限](./08-filesystem-middleware-and-permissions.md)——单条大结果卸载的落点
+
+**上层：方法论与案例**
+
+- [Agent 系统设计 03：上下文压缩](../../../../notes/agent-system-design/03-view/agent-context-compression.md)——压缩策略与可恢复性的取舍
+- [Agent 系统设计 03：上下文管理](../../../../notes/agent-system-design/03-view/agent-context-management.md)——分层预算与触发阈值两种思路

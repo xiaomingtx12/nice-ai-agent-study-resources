@@ -6,16 +6,17 @@ description: 拆解 examples/better-harness 如何限制可编辑 Harness 表面
 
 # Deep Agents 源码解析 15：Examples 实战——better-harness 优化闭环
 
-## 源码定位
+## 一、源码定位
 
 > **阅读基线**：Deep Agents 0.6.12（`examples/better-harness/`）。
+> 源码版本与路径约定见 [源码版本与路径约定](source-baseline.md)。
 >
 > - 实验模型与主循环：`examples/better-harness/better_harness/core.py` → `Surface`、`EvalCase`、`Variant`、`run_experiment()`
 > - 候选注入与恢复：`examples/better-harness/better_harness/patching.py` → `build_baseline_variant()`、`build_variant()`、`patch_module_attrs()`、`workspace_override_context()`
 > - 外层提案 Agent：`examples/better-harness/better_harness/agent.py` → `ProposerWorkspace`、`build_proposer_workspace()`、`load_candidate_values()`、`propose_variant()`
 > - 评测进程：`examples/better-harness/better_harness/runners.py` → `PytestRunner.run_split()`、`HarborRunner.run_split()`、`build_runner()`
 
-## 先给结论
+## 二、从一份候选配置到下一轮基线
 
 `better-harness` 是一个“优化 Agent 的 Agent”：
 
@@ -35,13 +36,15 @@ description: 拆解 examples/better-harness 如何限制可编辑 Harness 表面
 
 它优化的是 Harness 配置和实现，不是某一次 Agent 输出。前文的 [14：Rubric 自评循环](14-rubric-self-evaluation-loop.md)处理“本次任务是否完成”；本篇处理“下一版 Agent 是否比上一版更好”。
 
-## 这篇要回答的设计问题
+`Surface` 指允许修改的一个目标，例如某个模块的提示词常量；`Variant` 保存这些目标的一整套候选取值；`EvalCase` 是用于判断这套取值表现的一条评测任务；`Runner` 负责把候选装入评测环境并运行任务。外层 Agent 编辑的是候选文件，只有 Runner 的报告进入接受判断后，候选才可能成为下一轮基线。
 
-Harness 优化最危险的地方是搜索空间太大、接受标准太松。`Surface` 只公开允许修改的配置和文件，`Variant` 记录一轮完整取值，Runner 负责把候选真实注入评测进程，接受规则则只认可重复的 train/holdout 结果。外层 Agent 可以提出改动，但不能绕过候选边界和评测门槛直接改写当前版本。
+## 三、这篇要回答的设计问题
+
+Harness 优化最危险的地方是搜索空间太大、接受标准太松。`Surface` 只公开允许修改的配置和文件，`Variant` 记录一轮完整取值，Runner 负责把候选真实注入评测进程，接受规则则比较评测报告中的 train/holdout 通过数。外层 Agent 可以提出改动，但不能绕过候选边界和评测门槛直接改写当前版本。
 
 这套设计把“生成候选”和“接受候选”分开，也保留回滚依据。它仍然不是自动证明：评测集、注入过程和环境权限如果不可靠，优化器只会更快地放大错误标准。
 
-## 源码地图
+## 四、源码地图
 
 | 文件 | 负责什么 |
 | --- | --- |
@@ -51,7 +54,7 @@ Harness 优化最危险的地方是搜索空间太大、接受标准太松。`Su
 | `better_harness/runners.py` | Pytest / Harbor 评测进程和结果工件 |
 | `examples/deepagents_example.toml` | 一份可运行的实验配置样例 |
 
-## 怎么跑
+## 五、怎么跑
 
 ```bash
 # 在 examples/better-harness 目录安装依赖
@@ -75,11 +78,11 @@ uv run better-harness run my_experiment.toml \
 
 `scorecard` 是可选的独立评测集，只在 baseline 和最终 Variant 上运行，不参与中间轮次的接受判断。
 
-## 一、把 Harness 建模成可搜索对象
+## 六、把 Harness 建模成可搜索对象
 
 ### 1. Surface：限制外层 Agent 的搜索空间
 
-`Surface` 不是抽象标签，而是一条可被候选值替换的真实配置边界：
+`Surface` 是一条可被候选值替换的真实配置边界，每个字段都对应真实配置：
 
 ```python
 # `Surface`：一个可搜索 Surface 的完整字段
@@ -159,7 +162,7 @@ class Variant:
 
 `Variant` 是评测真正要运行的配置快照。外层 Agent 修改的是 workspace 文件，Runner 使用的是 Variant 的 `attr_overrides()` 和 `file_overrides()`。
 
-## 二、baseline、候选和起点值
+## 七、baseline、候选和起点值
 
 优化不能从“空配置”开始。`build_baseline_variant()` 直接用每个 Surface 的 `base_value` 构造 baseline：
 
@@ -210,9 +213,21 @@ def build_variant(
     )
 ```
 
-因此，外层 Agent 没有真正改动时，`proposal.changed_surfaces` 为空，主循环会停止，不会为“没有变化”的候选浪费评测成本。
+这里有两个同名字段，但比较基准不同：`Variant.changed_surfaces` 与最初的 Surface.base_value 比，记录相对初始基线的改动；`Proposal.changed_surfaces` 则与本轮 current.values 比，决定这一轮有没有新改动。后者在 `propose_variant()` 中计算：
 
-## 三、外层 Agent 如何提出候选
+```python
+changed_surfaces = tuple(
+    sorted(
+        name
+        for name in experiment.surfaces
+        if values[name] != current.values[name]
+    )
+)
+```
+
+例如当前提示词已经从 A 改为 B，本轮仍输出 B：Variant 仍记录它相对 A 有改动，但 Proposal 为空，主循环停止。把前者当成每轮变化判断，会误以为优化器在重复评测同一个候选。
+
+## 八、外层 Agent 如何提出候选
 
 ### 1. 每轮先建立 proposer workspace
 
@@ -277,13 +292,13 @@ def load_candidate_values(
 
 `propose_variant()` 随后比较新旧值，创建 `Proposal` 和候选 `Variant`，并把 `result.json` 写回 workspace。这个文件保存候选值、变更 Surface、提案摘要和外层 Agent 的最终消息，是一轮优化的可重放证据。
 
-外层 Agent 本身由 `create_deep_agent()` 构造，文件 Backend（后端）指向 proposer workspace。这样它可以用文件工具读取失败案例和编辑 Surface，但修改范围由 workspace 中暴露的文件决定。
+外层 Agent 由 `create_deep_agent()` 构造，并使用指向 proposer workspace 的虚拟文件 Backend。真正进入候选的是 `load_candidate_values()` 从预先登记的 surface_files 读回的内容；提示词中的“只编辑 current”并不是操作系统隔离。候选后续进入评测进程执行时，还需按其代码权限管理实验环境。
 
-## 四、候选如何进入评测进程
+## 九、候选如何进入评测进程
 
 `kind` 决定候选值的落地方式。
 
-### `module_attr`：进程内替换模块属性
+### 1. `module_attr`：进程内替换模块属性
 
 ```python
 # `patch_from_env()`、`patch_module_attrs()`：从 Variant 文件加载并替换 module:attribute
@@ -308,7 +323,7 @@ Runner 把 Variant 文件路径放进环境变量，并通过 `sitecustomize.py`
 
 它适合替换默认提示词或其他模块级配置，但有一个重要限制：如果目标代码已经把原属性复制到另一个变量，后续 `setattr()` 不会追溯修改那个副本。
 
-### `workspace_file`：临时覆盖文件并恢复
+### 2. `workspace_file`：临时覆盖文件并恢复
 
 ```python
 # `workspace_override_context()`：评测期间覆盖文件，退出后恢复原内容
@@ -334,11 +349,11 @@ def workspace_override_context(
                 target.write_text(original)
 ```
 
-这种方式适合工具、Skill、中间件实现和 Agent 注册代码。它提供的是可恢复的临时覆盖，不是安全沙箱；候选代码仍会在评测进程中执行。
+这种方式适合工具、Skill、中间件实现和 Agent 注册代码。`finally` 在正常退出或 Python 异常展开时尝试恢复原文；强制终止进程、机器故障或恢复写入失败时，不能保证已回滚。备份只覆盖登记的文件正文，候选代码对数据库、其他文件或网络的副作用不在恢复范围内。
 
 “中间件实现”和“中间件注册”通常要拆成两个 Surface：只改实现文件但不改注册位置，候选代码可能根本没有进入 `create_agent()` 的中间件列表。
 
-## 五、Runner 如何运行一组 split
+## 十、Runner 如何运行一组 split
 
 以 `PytestRunner.run_split()` 为例，一次 split 执行包含这些边界：
 
@@ -350,14 +365,14 @@ def workspace_override_context(
 6. 保存 stdout、stderr、JUnit、summary 和 trace 引用；
 7. 退出覆盖上下文，恢复目标工作区。
 
-核心调用位于 `PytestRunner.run_split()` 和 `HarborRunner.run_split()`。这说明 better-harness 不是对候选文本做静态打分，而是让候选配置真实加载后再运行内层 Agent。
+核心调用位于 `PytestRunner.run_split()` 和 `HarborRunner.run_split()`。这说明 better-harness 让候选配置真实加载后再运行内层 Agent，评分来自实际运行，与对候选文本做静态打分不同。
 
 `PytestRunner` 通过配置中的 `project_root`、`model_flag` 和 `summary_flag` 调用 [16：Evals 评测体系](16-deepagents-evals.md)。因此两篇文章的分工是：
 
-- 13 篇定义“如何判断一次 Agent 运行是否通过”；
-- 12 篇负责“如何反复替换 Harness，再用这把尺子选择更好的版本”。
+- [16：Evals](16-deepagents-evals.md) 定义“如何判断一次 Agent 运行是否通过”；
+- 本篇负责“如何反复替换 Harness，再用这把尺子选择更好的版本”。
 
-## 六、train、holdout 和 scorecard 的边界
+## 十一、train、holdout 和 scorecard 的边界
 
 | split | 外层 Agent 能看到失败细节 | 是否参与每轮接受 | 用途 |
 | --- | --- | --- | --- |
@@ -378,7 +393,7 @@ def workspace_override_context(
 
 如果 train 测工具调用、holdout 测记忆能力，两者即使数量相同也不具备可比性；相同 stratum 约束就是为了避免这种配置错误。
 
-## 七、主循环和接受规则
+## 十二、主循环和接受规则
 
 `run_experiment()` 的顺序是：
 
@@ -423,9 +438,13 @@ candidate = CandidateEvaluation(
 - 所有用例默认一票一分，没有表达业务严重性、时延或成本；
 - 多轮反复使用 holdout，会让 holdout 承受选择压力。
 
-因此，生产实验不应只看综合通过数。可按业务需要增加 holdout 不得回退、分层加权、成本门槛、重复运行和真正不参与选择的 test split。
+假设两组各有 10 个用例，当前版本为 `train=8、holdout=8`，候选为 `train=10、holdout=7`。总通过数从 16 变为 17，按上述源码候选会被接受，尽管 holdout 下降了。若业务要求保留集不能退化，就必须增加单独约束；严格的总数比较不会自动提供这项保证。
 
-## 八、运行工件和可观测性
+holdout 虽然不向提案 Agent 提供逐项修改依据，仍反复参与候选选择，因此也会影响搜索方向。`scorecard` 留到基线与最终版本对比，可提供另一份观察；任何一组分数都不能消除模型输出和环境造成的试验波动。
+
+接受候选改变的是内存中的 current 以及最终报告记录，不会自动把目标仓库永久改成候选版本。Runner 的文件覆盖在上下文退出时恢复；要发布 final，应先读取报告对应的 Variant，再走项目自己的审查和发布流程。
+
+## 十三、运行工件和可观测性
 
 一次运行目录会保存：
 
@@ -440,16 +459,16 @@ candidate = CandidateEvaluation(
 
 `reuse_existing=True` 可以复用已有 split 结果，但前提是运行目录、Variant key 和配置仍然对应。跨配置复用结果会把旧实验的证据混入新实验，导致接受判断失真。
 
-## 九、工程判断
+## 十四、工程判断
 
-### 适合使用
+### 1. 适合使用
 
 - Prompt、工具、Skill 或 Middleware 有明确可编辑边界；
 - 能把改动结果转成真实评测；
 - 需要保留每轮候选、证据和回滚信息；
 - 接受“外层 Agent 负责提出候选，人或规则负责最终筛选”。
 
-### 不适合直接使用
+### 2. 不适合直接使用
 
 - 没有稳定评测集，只能凭主观感觉接受修改；
 - Surface 直接覆盖整个仓库，候选范围失去约束；
@@ -457,7 +476,7 @@ candidate = CandidateEvaluation(
 - 把临时文件恢复误当成恶意代码隔离；
 - 候选 Middleware 或 Tool 代码会接触生产凭证、网络和真实数据。
 
-### 这套设计真正提供的能力
+### 3. 这套设计真正提供的能力
 
 `better-harness` 提供的是一个**可回滚的候选搜索框架**，不是自动证明 Agent 变正确了。它把“改 Harness”拆成四个可检查的环节：
 
@@ -471,3 +490,18 @@ candidate = CandidateEvaluation(
 这四个边界有一个不清楚，优化结果就只能当作一次不可复现的 prompt 尝试。
 
 **相关配置**：`examples/deepagents_example.toml`
+
+## 十五、延伸阅读
+
+**下层：LangChain / LangGraph**
+
+- [LangChain 07：调用治理](../langchain/07-call-governance.md)——可治理的调用面是自动化优化的前提
+
+**本系列**
+
+- [16：Evals 评测体系](./16-deepagents-evals.md)——候选接受规则依赖的评分口径
+- [14：Rubric 自评循环](./14-rubric-self-evaluation-loop.md)——运行内验收与离线优化的差别
+
+**上层：方法论与案例**
+
+- [Agent 系统设计 06：评测](../../../../notes/agent-system-design/06-observation/agent-evaluation.md)——train / holdout 与过拟合的通用问题

@@ -6,9 +6,10 @@ description: 从源码拆解 SandboxBackendProtocol、BaseSandbox、LocalShellBa
 
 # Deep Agents 源码解析 05：Backend：命令执行与沙箱边界
 
-## 源码定位
+## 一、源码定位
 
 > **阅读基线**：Deep Agents 0.6.12（`libs/deepagents/`）。
+> 源码版本与路径约定见 [源码版本与路径约定](source-baseline.md)。
 >
 > - Sandbox 接口与结果类型：`libs/deepagents/deepagents/backends/protocol.py` → `SandboxBackendProtocol`、`ExecuteResponse`、`ExecuteOffloadResult`、`FileUploadResponse`、`FileDownloadResponse`、`execute_accepts_timeout()`（定义命令执行和文件传输能力）
 > - 沙箱基类：`libs/deepagents/deepagents/backends/sandbox.py` → `BaseSandbox.execute()`、`read()`、`write()`、`edit()`、`delete()`、`_write_preflight()`（用执行环境派生文件操作）
@@ -19,7 +20,7 @@ description: 从源码拆解 SandboxBackendProtocol、BaseSandbox、LocalShellBa
 > - execute 工具能力判断：`libs/deepagents/deepagents/middleware/filesystem.py` → `supports_execution()`、`_unsupported_tools_and_execution_state()`、`_create_execute_tool()`（判断 Backend 能力并控制 `execute` 工具）
 > - 捕获输出解析：`libs/deepagents/deepagents/middleware/filesystem.py` → `_resolve_capture()`、`_interpret_capture_output()`（确认捕获文件与执行环境同源，并生成模型可读结果）
 
-## 文章主线：能力接口不等于安全隔离
+## 二、执行能力、文件操作与环境隔离
 
 Deep Agents 把“可以执行命令”和“命令运行在什么安全环境”拆成了不同层次：
 
@@ -47,23 +48,33 @@ BaseSandbox
 | 大输出如何返回？ | `execute_with_offload()`、`_resolve_capture()` | 不代表命令消耗的资源变少 |
 | 命令实际在哪里运行？ | 具体 Backend 和 Provider 部署配置 | 不能只从类名判断安全性 |
 
-## 这篇要回答的设计问题
+![能发出命令不等于已被隔离](./img/05-01-execute-not-isolation.png)
 
-执行命令是一个能力问题，沙箱隔离是一个信任边界问题。把两者放进同一个接口，调用方很容易看到 `Sandbox` 就误以为已经获得 OS 级保护。Deep Agents 让 `SandboxBackendProtocol` 只声明 `execute()` 和文件传输能力，把容器、VM、远程执行服务等真正的隔离策略留在具体实现和部署环境中。
+*图：能发出命令和已经被隔离是两回事——按钮好按，围栏有没有围住要看部署环境。*
 
-这种拆分牺牲了一点“开箱即安全”的直觉，却避免了接口名称替部署环境做安全承诺。阅读 `BaseSandbox` 时，除了看文件如何复用 `execute()`，还要追问命令在哪台机器运行、凭证从哪里来，以及输出会不会跨边界返回。
+## 三、一次脚本执行涉及两个文件空间
 
-## 一、`SandboxBackendProtocol` 只增加命令执行
+假设应用持有 `analyze.py`，希望模型在远端环境执行它。文件先通过 `upload_files()` 进入执行环境，随后 `execute()` 在那个环境中运行命令；需要把生成的文件交回应用时，再调用 `download_files()`。只有两端共享存储时，才可能省去传输，不能因为路径名字相同就假定文件已在执行端。
+
+`BaseSandbox` 提供文件操作的通用实现：它把读写、搜索等操作转换成执行环境中的命令或文件传输。具体子类仍要实现如何执行、如何传输以及环境身份。这样新增远端服务时可以复用文件工具，但容器权限、网络访问和资源限制仍取决于该服务。
+
+`LocalShellBackend` 的命令就在应用所在的宿主机执行；换成远端 Backend，命令才会沿相应客户端进入远端。大输出卸载只减少传回模型的文本量，不会减少命令已经使用的 CPU、内存或外部副作用。
+
+![两个文件空间与输出卸载](./img/05-02-two-file-spaces-and-offload.png)
+
+*图：宿主和执行环境是两个文件空间——文件要上传过去，大箱子留在执行端，传回来的只有一张摘要纸条。*
+
+## 四、`SandboxBackendProtocol` 只增加命令执行
 
 类名里的 `Protocol` 是「统一接口约定」的意思，不是 Python 的 `typing.Protocol`：`BackendProtocol` 实际是 `abc.ABC`（抽象基类，带 `# noqa: B024`，方法用 `raise NotImplementedError` 而不是 `@abstractmethod`），靠 `isinstance()` 做名义判断。`SandboxBackendProtocol` 继承它，新增 `id` 和 `execute()`：
 
 ```python
 class SandboxBackendProtocol(BackendProtocol):
     @property
-    def id(self) -> str:
+    def id(self) -> str:          # 沙箱实例标识，用于跨调用定位同一个执行环境
         raise NotImplementedError
 
-    def execute(
+    def execute(                   # 唯一的命令执行入口，文件操作都可以由它派生
         self,
         command: str,
         *,
@@ -98,7 +109,7 @@ class ExecuteResponse:
 
 判断一个类是否“支持执行”，看的是它是否满足接口。判断它是否“安全”，还要继续读具体实现和部署配置。
 
-### `timeout` 是兼容参数，不是完整资源治理
+### 1. `timeout` 是兼容参数，不是完整资源治理
 
 Middleware 需要兼容旧 Backend，因此用 `execute_accepts_timeout()` 检查具体 `execute()` 是否接受 `timeout`：
 
@@ -120,7 +131,7 @@ def execute_accepts_timeout(cls: type[SandboxBackendProtocol]) -> bool:
 
 具体效果由 Backend 的执行服务决定。
 
-## 二、`BaseSandbox`：以执行环境为原语派生文件工具
+## 五、`BaseSandbox`：以执行环境为原语派生文件工具
 
 `BaseSandbox` 的类注释已经给出实现关系：
 
@@ -139,11 +150,11 @@ def execute_accepts_timeout(cls: type[SandboxBackendProtocol]) -> bool:
 class BaseSandbox(SandboxBackendProtocol, ABC):
     @property
     @abstractmethod
-    def id(self) -> str:
+    def id(self) -> str:          # 子类必须给出沙箱实例标识
         ...
 
     @abstractmethod
-    def upload_files(
+    def upload_files(             # 宿主与沙箱之间的文件传输，由子类按实现的协议完成
         self,
         files: list[tuple[str, bytes]],
     ) -> list[FileUploadResponse]:
@@ -207,20 +218,21 @@ responses = self.upload_files(
 源码用 UTF-8 字节数判断编辑负载：
 
 ```python
+# 编辑走内联还是走上传，取决于 old/new 两段文本的 UTF-8 字节数
 payload_size = (
     len(old_string.encode("utf-8"))
     + len(new_string.encode("utf-8"))
 )
 
 if payload_size <= _EDIT_INLINE_MAX_BYTES:
-    return self._edit_inline(
+    return self._edit_inline(       # 小改动：直接把文本拼进命令
         file_path,
         old_string,
         new_string,
         replace_all,
     )
 
-return self._edit_via_upload(
+return self._edit_via_upload(       # 大改动：先上传文件再执行，避免命令行超长被截断
     file_path,
     old_string,
     new_string,
@@ -251,11 +263,11 @@ result = self.execute(f"rm -rf {quoted}")
 
 `shlex.quote()` 只保证路径作为一个 Shell 参数传递，避免空格和元字符破坏命令结构。它不保证路径位于某个根目录，也不阻止当前执行环境访问其他资源。`rm -rf` 还可能在中途失败前已经删除部分内容。
 
-## 三、宿主应用与沙箱之间的文件传输
+## 六、宿主应用与沙箱之间的文件传输
 
-### `upload_files()`、`download_files()` 是跨边界端点
+### 1. `upload_files()`、`download_files()` 是跨边界端点
 
-当 Agent 进程和执行环境不在同一台机器上时，文件不能靠共享本地路径自动出现。Backend 需要把宿主应用中的字节传到沙箱，也需要把沙箱中的字节传回宿主应用：
+当 Agent 进程和执行环境不共享文件系统时，相同路径字符串不会让文件自动出现在两端。Backend 需要把宿主应用中的字节传到沙箱，也需要把沙箱中的字节传回宿主应用：
 
 ```text
 宿主应用
@@ -286,9 +298,9 @@ class FileDownloadResponse:
 
 `responses[i]` 对应输入中的第 `i` 个文件。单个文件失败不会自动抛出异常，调用方应检查每项的 `error`。这对批量上传项目文件、批量下载构建产物很重要：一次权限错误不会抹掉其他成功结果。
 
-这两个端点不是模型默认可见的文件工具。FilesystemMiddleware 默认注册的是 `read_file`、`write_file`、`edit_file`、`ls`、`glob`、`grep` 和可选的 `execute`；`upload_files()` / `download_files()` 更适合由 Backend 内部、Provider 适配器或自定义工具调用。
+这两个端点不是模型默认可见的文件工具。FilesystemMiddleware 提供 `read_file`、`write_file`、`edit_file`、`delete`、`ls`、`glob`、`grep` 和 `execute`，其中部分工具按 Backend 能力过滤；`upload_files()` / `download_files()` 更适合由 Backend 内部、Provider 适配器或自定义工具调用。
 
-### `write()` 与原生文件传输的关系
+### 2. `write()` 与原生文件传输的关系
 
 `BaseSandbox.write()` 把文本编码成 UTF-8 字节，再调用 `upload_files()`：
 
@@ -317,7 +329,7 @@ return WriteResult(path=file_path)
 
 这样做是为了避免大文本进入 `execute()` 请求体，减少 Shell 参数长度和多层转义带来的限制。
 
-### `read()` 不一定调用 `download_files()`
+### 3. `read()` 不一定调用 `download_files()`
 
 “读取文件给模型看”和“把原始文件下载到宿主应用”是两条不同路径：
 
@@ -336,7 +348,7 @@ download_files(["/app/main.py"])
 
 因此，不能从“Backend 支持下载”推断“模型每次 read_file 都会下载完整文件”。模型文件读取通常仍受分页和预览大小控制；原始 bytes 下载更适合宿主服务处理附件、构建产物或需要交给其他系统的文件。
 
-### 大编辑只传输修改负载
+### 4. 大编辑只传输修改负载
 
 当 `old_string + new_string` 超过内联阈值时，`BaseSandbox._edit_via_upload()` 上传两个临时文件：
 
@@ -350,7 +362,7 @@ download_files(["/app/main.py"])
 
 目标文件没有离开沙箱。这里的文件传输承担的是“把编辑参数送进去”，不是把整个目标文件搬到 Agent 进程。Provider 需要保证临时文件上传和后续 `execute()` 看到同一个沙箱文件系统，否则编辑脚本无法读取刚上传的内容。
 
-## 四、`LocalShellBackend`：名字里带 Sandbox，实际是宿主机 Shell
+## 七、LocalShellBackend 的宿主机执行路径
 
 `LocalShellBackend` 继承 `FilesystemBackend` 并实现 `SandboxBackendProtocol`，核心执行代码是：
 
@@ -376,7 +388,7 @@ result = subprocess.run(
 - `timeout`：交给 `subprocess.run()`；
 - 没有容器、虚拟机、chroot、网络命名空间或资源控制。
 
-### 构造参数的实际边界
+### 1. 构造参数的实际边界
 
 | 参数 | 实际作用 | 不提供的能力 |
 | --- | --- | --- |
@@ -397,7 +409,7 @@ backend.execute("rm -rf /some/other/path")
 
 这些命令能否成功，取决于当前用户和宿主机权限，而不是 `virtual_mode`。
 
-### 输出截断发生在命令执行之后
+### 2. 输出截断发生在命令执行之后
 
 `LocalShellBackend.execute()` 拿到子进程结果后才按 `max_output_bytes` 截断：
 
@@ -410,9 +422,11 @@ if len(output) > self._max_output_bytes:
 
 它限制的是返回值大小，不是命令本身的输出行为。命令可能已经把更多内容写入管道、磁盘或网络，也可能继续消耗资源直到超时。
 
+另需注意 `len(output)` 按 Python 字符计数，不是字节数。参数名叫 `max_output_bytes`，这一层实现按字符截断；对 UTF-8 多字节文本，实际保留的字节数可能大于设定值，追加的截断提示还会增加返回长度。这里不能按参数名称推导严格的字节上限。
+
 `LocalShellBackend` 适合可信的本地开发 CLI、个人开发环境和受控 CI。多租户服务、不可信用户输入和不可信代码执行，需要真正隔离的远端 Backend。
 
-## 五、FilesystemMiddleware 如何暴露 `execute`
+## 八、FilesystemMiddleware 如何暴露 `execute`
 
 Backend 支持执行，不代表模型一定能看到 `execute` 工具。FilesystemMiddleware 会在模型请求阶段检查能力：
 
@@ -425,7 +439,7 @@ def supports_execution(backend: BackendProtocol) -> bool:
 
 Composite 只检查 `default`，因为它的 `execute()` 不按文件路径路由。
 
-### 模型请求前：过滤不可用工具
+### 1. 模型请求前：过滤不可用工具
 
 `_unsupported_tools_and_execution_state()` 会解析当前 Backend，并把不支持的 `execute` 或 `delete` 加入过滤集合：
 
@@ -442,13 +456,14 @@ unsupported, execution_active, backend = (
 
 这里排除的是**模型本轮可见的工具**。FilesystemMiddleware 实例、`self.tools` 中的工具对象和整个中间件栈仍然存在；下一次请求如果解析出的 Backend 能力变化，过滤结果可以重新计算。
 
-### 工具执行时：再次兜底
+### 2. 工具执行时：再次兜底
 
 `_create_execute_tool()` 内部仍会解析 Backend 和检查能力：
 
 ```python
 resolved_backend = self._get_backend(runtime)
 
+# 执行入口再次校验能力，拒绝旧请求或直接调用中的不支持操作
 if not supports_execution(resolved_backend):
     return ToolMessage(
         content=(
@@ -466,13 +481,13 @@ if not supports_execution(resolved_backend):
 - 模型请求前过滤：让模型不要选择当前不可用的工具；
 - 工具执行时兜底：防止动态 Backend、旧请求或直接工具调用绕过能力判断。
 
-这仍然只是能力控制，不是安全隔离。`execute` 被隐藏，只说明当前 Backend 没有执行方法；被显示，也只说明接口上有执行方法。
+这仍然只是能力控制，不是安全隔离。能力检查可以隐藏不支持的 `execute`，工具排除等其他配置也可能隐藏它；工具可见只说明当前请求允许模型选择该工具，不证明执行环境已隔离。
 
-## 六、大输出卸载：把完整结果留在执行环境
+## 九、大输出卸载：把完整结果留在执行环境
 
 命令输出过大时，Deep Agents 可以让完整输出留在沙箱文件系统，只把预览返回给模型。这个机制处理的是传输量和上下文大小，不改变命令权限。
 
-### `execute_with_offload()` 的两条路径
+### 1. `execute_with_offload()` 的两条路径
 
 ```python
 def execute_with_offload(
@@ -486,6 +501,7 @@ def execute_with_offload(
 ) -> ExecuteOffloadResult:
     use_timeout = timeout is not None and execute_accepts_timeout(type(self))
     if not self.enable_capture_offload:
+        # 未开启源端捕获：按原样执行，由具体 Backend 返回输出
         result = (
             self.execute(command, timeout=timeout)
             if use_timeout
@@ -493,6 +509,7 @@ def execute_with_offload(
         )
         return ExecuteOffloadResult(offloaded=False, response=result)
 
+    # 开启卸载：把命令包一层重定向到沙箱内文件，只带回少量内联输出
     wrapper = _build_capture_execute_cmd(
         command,
         capture_path,
@@ -510,7 +527,7 @@ def execute_with_offload(
     )
 ```
 
-`enable_capture_offload` 默认是 `False`。关闭时，命令原样执行，完整结果返回给上层，由 Middleware 的通用工具结果卸载逻辑继续处理。
+`enable_capture_offload` 默认是 `False`。关闭时，命令原样执行，Backend 将结果交给上层；该结果可能已被 Backend 或传输层截断。后续通用卸载只能保存收到的内容，不能找回已被丢弃的输出。
 
 开启时，`_build_capture_execute_cmd()` 生成一个 Shell 包装器：
 
@@ -524,7 +541,7 @@ def execute_with_offload(
 
 捕获文件有默认的 `10 * 1024 * 1024` 硬上限。超过上限时，文件本身也不完整，`ExecuteResponse.truncated` 会被标记。
 
-### 为什么要单独保存退出码
+### 2. 为什么要单独保存退出码
 
 如果直接把命令输出接到管道，Shell 可能把管道最后一个命令的退出码当成整个命令结果。捕获包装器因此把原命令退出码写到 `.ec` 文件，再读取回来：
 
@@ -542,7 +559,7 @@ def execute_with_offload(
 
 如果 Backend 传输层已经把包装器输出截断，元数据可能丢失。源码会回退为普通 `ExecuteResponse`，不会为了重新取得元数据而重跑命令，因为重跑可能产生第二次副作用。
 
-### `_resolve_capture()` 为什么要求同源
+### 3. `_resolve_capture()` 为什么要求同源
 
 捕获流程是：
 
@@ -561,7 +578,7 @@ execute(wrapper)
 
 如果捕获路径被路由到 Store 或另一个文件系统 Backend，Middleware 不会启用源端捕获，而是回退到普通执行和通用消息处理。
 
-### `LangSmithSandbox` 为什么可以开启
+### 4. `LangSmithSandbox` 为什么可以开启
 
 `LangSmithSandbox` 继承 `BaseSandbox`，并设置：
 
@@ -579,7 +596,7 @@ class LangSmithSandbox(BaseSandbox):
 
 远端 SDK 解决的是连接方式，不自动替代网络、权限、资源和生命周期配置。
 
-## 七、什么才是“真正的沙箱”
+## 十、什么才是“真正的沙箱”
 
 可以把源码中的机制按安全强度拆成几层：
 
@@ -603,18 +620,15 @@ class LangSmithSandbox(BaseSandbox):
 - 沙箱是否按任务创建和销毁；
 - 输出、日志和环境变量是否可能泄露敏感信息。
 
-有两类风险任何沙箱都防不住，要在沙箱之外处理：
+沙箱内的代码仍能使用执行身份获准访问的资源。若不可信内容诱导模型读文件或发送网络请求，能否成功取决于挂载、凭证和出站策略。框架的 Backend 接口不配置这些条件。
 
-- **上下文注入**：能控制部分输入的调用方，可以诱导 agent 在沙箱内执行任意命令。沙箱把命令和宿主机隔开了，但 agent 在沙箱内仍是完全控制，读得动沙箱里的任何文件。
-- **网络外泄**：除非网络被阻断，被注入的 agent 可以通过 HTTP 或 DNS 把沙箱里的数据送出去。部分提供商支持阻断网络（如 Modal 的 `blockNetwork: true`）。
+有凭证的业务操作可以由宿主侧工具完成，让执行环境只接触必要输入与产物。必须向沙箱提供凭证时，权限范围、有效期和可访问服务需要由部署方限定；这属于部署设计，不能从 `BaseSandbox` 的继承关系推出。
 
-这两条叠加成一个硬规则：**密钥绝不放进沙箱**。通过环境变量、挂载文件或 `secrets` 选项注入沙箱的 API key、token、数据库凭证，都可能被上下文注入的 agent 读走并外泄。更稳妥的做法是让需要凭证的工具在沙箱外运行，Agent 只按工具名调用，看不到凭证；另一种做法是使用由出站代理自动附加凭证的 Provider 能力。如果必须注入，也要对全部工具调用开人工审批、阻断网络、使用最窄权限和最短有效期，并监控沙箱出站流量。这仍是补救措施，不是隔离本身。
-
-## 八、两种 Agent 与沙箱的集成模式
+## 十一、两种 Agent 与沙箱的集成模式
 
 沙箱运行的是代码，但 Agent 框架可以放在沙箱里，也可以放在宿主服务里。位置不同，会改变凭证、状态、通信和部署成本。
 
-### 模式一：Agent in sandbox
+### 1. 模式一：Agent in sandbox
 
 ```text
 用户 / 宿主入口
@@ -636,7 +650,7 @@ Agent 框架、中间件、工具和执行代码都在沙箱内。对 Agent 来�
 
 这种模式适合必须复现完整本地运行环境、且 Provider 已经妥善处理通信和凭证注入的场景。它的核心取舍是：减少 Agent 与沙箱之间的文件和调用往返，换来更高的镜像和运行时耦合。
 
-### 模式二：Sandbox as tool
+### 2. 模式二：Sandbox as tool
 
 ```text
 用户
@@ -650,9 +664,10 @@ LLM 循环、Middleware、记忆和任务调度留在宿主服务，`execute()`�
 
 ```python
 class LangSmithSandbox(BaseSandbox):
-    enable_capture_offload = True
+    enable_capture_offload = True    # 启用大输出卸载：输出先落沙箱内文件
 
     def __init__(self, sandbox: Sandbox) -> None:
+        # 只包装调用方传入的实例，不负责创建、认领或销毁沙箱
         self._sandbox = sandbox
 
     def execute(
@@ -669,9 +684,9 @@ class LangSmithSandbox(BaseSandbox):
             output += "\n" + result.stderr if output else result.stderr
 
         return ExecuteResponse(
-            output=output,
+            output=output,           # stdout 与 stderr 已合并，调用方无法再区分两者
             exit_code=result.exit_code,
-            truncated=False,
+            truncated=False,         # 这一层不自己截断，截断交给上层处理
         )
 ```
 
@@ -706,9 +721,9 @@ class LangSmithSandbox(BaseSandbox):
 - 按用户或项目复用：减少创建次数，但隔离责任更重；
 - 沙箱销毁后重建：宿主 Agent 状态仍可保留，但未上传或未下载的工作文件会随 Provider 沙箱一起消失。
 
-因此，`Sandbox as tool` 的关键不是把远程 Shell 包成一个类，而是把**宿主 Agent 状态**和**沙箱工作状态**分别管理，再用 Sandbox ID、路径映射和 `upload_files()` / `download_files()` 建立它们之间的边界。
+因此，`Sandbox as tool` 的关键在于把**宿主 Agent 状态**和**沙箱工作状态**分别管理，再用 Sandbox ID、路径映射和 `upload_files()` / `download_files()` 建立它们之间的边界；把远程 Shell 包成一个类只是第一步。
 
-### 两种模式的边界对比
+### 3. 两种模式的边界对比
 
 | 模式 | Agent 在哪里 | 文件如何跨边界 | 状态与生命周期 | 代价与适用条件 |
 | --- | --- | --- | --- | --- |
@@ -717,66 +732,56 @@ class LangSmithSandbox(BaseSandbox):
 
 选择时先看谁持有状态和凭证，再看文件传输量。需要把 Agent 当作长期运行服务时，`Sandbox as tool` 更容易把 Agent 状态与一次性执行环境分开；必须让 Agent 和代码运行在同一镜像中时，才考虑 `Agent in sandbox`。
 
-## 九、沙箱的生命周期与作用域
+## 十二、沙箱实例要绑定任务，不能只换一个线程 ID
 
-第七节检查清单里的「沙箱是否按任务创建和销毁」，展开是两个作用域模式：每个线程一个沙箱（thread-scoped），或同一助手下所有线程共享一个沙箱（assistant-scoped）。
-
-| 作用域 | 分配方式 | 状态持久性 |
-| --- | --- | --- |
-| thread-scoped（默认） | 每个 thread 独占一个沙箱，首次运行创建、后续轮次复用 | 同一 thread 内持久，thread 结束或 TTL 过期销毁 |
-| assistant-scoped | 同一 assistant 的所有 thread 共享一个沙箱 | 文件、已装包、克隆仓库跨对话保留 |
-
-沙箱是持续计费的资源，不用了要主动关掉。thread-scoped 靠 TTL（如 `idle_ttl_seconds=3600`）让提供商在空闲后自动删除或归档；assistant-scoped 状态会随时间累积，需要 TTL、定期快照重置或清理逻辑，否则磁盘和内存无限增长。
-
-两种模式都要在「每次运行解析到同一个沙箱」和「不再用了就销毁」之间做映射。工厂里用 `thread_id` 或 `assistant_id` 拼出沙箱名，先查已有再创建：
+“什么才是真正的沙箱”检查清单里的「沙箱是否按任务创建和销毁」，核心是宿主服务怎么持有和复用沙箱实例。`LangSmithSandbox` 只包装调用方提供的实例（`backends/langsmith.py:55-67`）：
 
 ```python
-from deepagents.backends.langsmith import LangSmithSandbox
-from langsmith.sandbox import SandboxClient
+def __init__(self, sandbox: Sandbox) -> None:
+    self._sandbox = sandbox
+    self._default_timeout: int = 30 * 60
 
-client = SandboxClient()
-
-def agent(config: RunnableConfig):
-    thread_id = config["configurable"]["thread_id"]
-    sandbox_name = f"thread-{thread_id}"            # 用 thread_id 拼名 → thread-scoped
-    existing = [
-        sb for sb in client.list_sandboxes()
-        if getattr(sb, "name", None) == sandbox_name
-    ]
-    ls_sandbox = (
-        existing[0] if existing
-        else client.create_sandbox(
-            name=sandbox_name,
-            idle_ttl_seconds=3600,                   # 空闲 TTL，防止忘了销毁
-        )
-    )
-    return create_deep_agent(
-        model=model,
-        backend=LangSmithSandbox(sandbox=ls_sandbox),
-    )
+@property
+def id(self) -> str:
+    return self._sandbox.name
 ```
 
-把名字前缀从 `thread-{thread_id}` 换成 `assistant-{assistant_id}`，就切到了 assistant-scoped。作用域的选择不在 `BaseSandbox` 源码里，而在调用方怎么复用沙箱实例。框架只接收传入的 Backend，不替应用决定一个沙箱该活多久、给谁使用。
+这里没有按 `thread_id` 创建、认领或销毁沙箱的逻辑。应用可以按线程、会话、任务或项目复用实例，但不存在由这个 Backend 保证的默认作用域。两个线程传入同一个 `Sandbox` 对象，仍会修改同一份文件。
 
-## 十、选型判断
+常见两种复用粒度：
 
-### 可信本地开发
+| 复用粒度 | 分配方式 | 状态持久性 | 主要风险 |
+| --- | --- | --- | --- |
+| 按任务或线程 | 每个任务独占一个沙箱，首次运行创建、后续轮次复用 | 同一任务内持久，任务结束或 TTL 过期销毁 | 启动成本；忘记销毁会持续计费 |
+| 按用户或助手 | 同一用户的所有任务共享一个沙箱 | 文件、已装包、克隆仓库跨任务保留 | 跨任务污染、残留文件和并发覆盖 |
+
+沙箱的费用与保留行为取决于提供商。应用应记录实例归属，并定义任务结束、空闲超时和恢复失败时的回收策略。TTL（资源有效期）只有在执行服务实际支持并配置后才生效，Backend 适配器不会自行提供它。
+
+两个任务同时修改共享文件时，路径权限允许访问并不能防止覆盖；还需由资源分配或存储并发控制处理。**工程建议**：为独立任务分配独立沙箱或工作副本，在可信服务端保存租户、任务与 Sandbox ID 的绑定；共享代码由单一合并入口检查基线版本和冲突。Git worktree 可以隔开工作目录，仍共享宿主机权限和网络，不能代替安全沙箱。必须共享的数据由工具内部执行条件更新；不要持有数据库锁等待模型推理或人工审批。
+
+验收时让两个任务同时修改各自的 `/workspace/progress.json`，确认读不到对方结果；再故意把它们绑定到同一实例，确认应用拒绝冲突任务或显式串行化。杀掉占用者后还要检查资源能否回收、旧任务能否继续写入；仅给租约设过期时间，不能阻止暂停后恢复的旧进程写入，必要时由存储端校验递增的 fencing token（隔离旧持有者的令牌）。
+
+作用域的选择不在 `BaseSandbox` 源码里，而在调用方怎么复用沙箱实例。框架只接收传入的 Backend，不替应用决定一个沙箱该活多久、给谁使用。
+
+## 十三、选型判断
+
+### 1. 可信本地开发
 
 可以使用 `LocalShellBackend`，但要把它看作“宿主机 Shell Backend”，配合人工审批、独立开发用户和敏感目录治理。
 
-### 需要远端执行
+### 2. 需要远端执行
 
 实现 `BaseSandbox` 子类，把 `execute()`、文件上传下载和 `id` 接到容器、VM 或远程执行服务。隔离策略放在执行服务，而不是放在类名里。
 
-### 命令输出很大
+### 3. 命令输出很大
 
 确认执行环境支持捕获包装器、`capture_path` 与执行命令同源，再开启 `enable_capture_offload`。捕获机制只解决输出传输，不解决命令权限。
 
-### 只需要文件工具
+### 4. 只需要文件工具
 
 优先使用 `StateBackend`、`StoreBackend` 或 `FilesystemBackend`，不要为了使用 `read_file` 而给 Agent 增加 Shell 执行能力。
 
-## 小结
+## 十四、工程判断
 
 05 篇的源码结论是：
 
@@ -787,6 +792,33 @@ def agent(config: RunnableConfig):
 - capture-at-source 只降低大输出的传输和上下文成本；
 - 真正隔离由执行环境和部署策略提供。
 
+### 1. 怎么用
+
+| 场景 | 选择 | 理由 |
+| --- | --- | --- |
+| 本地开发 CLI、个人脚本 | `LocalShellBackend` | 信任边界就是本机用户 |
+| CI 中跑受控任务 | `LocalShellBackend` + 独立用户 | 任务可信，但仍需限制进程权限 |
+| 不可信代码、多租户 | `BaseSandbox` 子类接远端容器/VM | 隔离责任在执行服务，不在类名 |
+| 只需要文件工具 | `StateBackend` / `StoreBackend` | 不引入 `execute` 能力，减少攻击面 |
+
+**避免使用**：不可信输入不要直接交给 `LocalShellBackend`；`virtual_mode` 只约束文件工具的路径解析，`execute()` 仍按宿主机用户权限运行。**改造要点**：覆盖 `BaseSandbox.write()` 时应保留 `_write_preflight()` 创建父目录及报告错误的语义。它不是 `read()` 的检查，也不提供路径授权；源码明确说明预检与实际写入分属两次 Backend 调用，仍有检查后资源发生变化的时间窗口。
+
 04 篇解释文件存储和路由，05 篇解释命令执行和隔离，两篇的 Backend 交集只保留必要的接口边界。
 
 **相关测试**：`libs/deepagents/tests/unit_tests/backends/` · `libs/deepagents/tests/integration_tests/`
+
+## 十五、延伸阅读
+
+**下层：LangChain / LangGraph**
+
+- [LangGraph 09：预建工具层](../langgraph/09-prebuilt-tool-layer.md)——工具节点与执行环境的连接方式
+
+**本系列**
+
+- [04：Backend 接口与实现](./04-backend-protocol-and-implementations.md)——六种 Backend 的存储与能力边界
+- [08：FilesystemMiddleware 与权限](./08-filesystem-middleware-and-permissions.md)——`execute` 工具怎样暴露给模型
+
+**上层：方法论与案例**
+
+- [Agent 系统设计 05：工作区与沙箱](../../../../notes/agent-system-design/05-action/agent-workspace-sandbox.md)——沙箱实例与任务生命周期的绑定
+- [Agent 系统设计 05：权限与后置条件](../../../../notes/agent-system-design/05-action/agent-permission-and-postconditions.md)——能力接口为什么不能替代安全边界
