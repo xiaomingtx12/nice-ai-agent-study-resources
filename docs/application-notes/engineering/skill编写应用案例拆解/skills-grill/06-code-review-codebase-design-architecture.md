@@ -1,391 +1,298 @@
 ---
 sidebar_position: 7
 title: "code-review、codebase-design 与 improve-codebase-architecture：从审查到架构改进"
-description: 从 mattpocock/skills 源码拆解标准审查、规格审查、深模块设计和架构维护如何分工并形成后续反馈闭环。
+description: 从 mattpocock/skills 源码拆解标准与规格审查、深模块设计、架构候选筛选及多方案接口比较。
 ---
 
 # code-review、codebase-design 与 improve-codebase-architecture：从审查到架构改进
 
-:::info 版本基线
+:::info 版本与源码入口
 
-本文分析 GitHub 项目 [`mattpocock/skills`](https://github.com/mattpocock/skills) `v1.2.3`。
+本文分析 GitHub 项目 [`mattpocock/skills`](https://github.com/mattpocock/skills)，`package.json` 版本为 `1.2.3`，commit 为 `84fdeffd12f2ee307994d1eb6feb48173b6e0502`。以下路径相对项目根目录；入口均为真实 Markdown 章节，HTML 摘录是报告模板，不是架构扫描程序。
+
+| 文件 | 阅读入口 | 作用 |
+| --- | --- | --- |
+| `skills/engineering/code-review/SKILL.md` | `Process` 第 1–5 步、`Why two axes` | 确定差异范围、分派审查、聚合报告 |
+| `skills/engineering/codebase-design/SKILL.md` | `Glossary`、`Principles`、`Going deeper` | 共享设计词汇及条件引用 |
+| `skills/engineering/codebase-design/DEEPENING.md` | `Dependency categories`、`Seam discipline`、`Testing strategy: replace, don't layer` | 按依赖选择测试方式 |
+| `skills/engineering/codebase-design/DESIGN-IT-TWICE.md` | `Process` 第 1–3 步 | 为选定候选探索不同接口 |
+| `skills/engineering/improve-codebase-architecture/SKILL.md` | `1. Explore`、`2. Present candidates as an HTML report`、`3. Grilling loop` | 扫描、展示候选、深入用户选择 |
+| `skills/engineering/improve-codebase-architecture/HTML-REPORT.md` | `Scaffold`、`Candidate card`、`Style guidance` | 报告结构与呈现方式 |
 
 :::
 
-## 先看这条反馈流
+## 一、code-review：同一份差异，两份独立判断
 
-前一篇的 `/implement` 在完成代码、测试和提交前会调用 `/code-review`。审查发现的结构性问题，再进入 `improve-codebase-architecture`；架构 Skill 不直接替用户决定接口，而是先展示候选，用户选定后才调用 `/grilling` 和 `/domain-modeling` 深入设计。
+### 1、先核对比较范围，命令固定不等于代码快照固定
 
-```text
-实现完成
-    │
-    ▼
-/code-review
-    │  Standards + Spec 两条审查轴
-    ├──────────────┐
-    ▼              ▼
-标准问题       规格问题
-    │              │
-    └──────┬───────┘
-           ▼
-结构性摩擦或浅模块
-           │
-           ▼
-/improve-codebase-architecture
-           │
-           ▼
-临时 HTML 候选报告
-           │
-           ▼
-用户选择一个候选
-           │
-           ├── /grilling
-           ├── /domain-modeling
-           └── /codebase-design
+`code-review` 检查一段代码差异：Standards（规范审查）判断是否遵守仓库约定，Spec（规格审查）判断是否满足原始需求。`codebase-design` 提供讨论模块结构的词汇，`improve-codebase-architecture` 则扫描架构摩擦、让用户选择值得深入的候选。三者没有组成自动修复流水线；审查报告可以成为架构讨论的输入，但扫描入口仍须由用户显式调用。
+
+这些 skill 主体都是模型需要遵循的 Markdown 指令。下文的顺序、子 agent 分工和等待条件由宿主中的模型执行，没有函数自动检查阶段状态。实际输入输出包括 Git 差异、标准文件、规格、子 agent 报告和设计文档。
+
+来源：`skills/engineering/code-review/SKILL.md` → `1. Pin the fixed point`，完整摘录：
+
+```markdown
+Whatever the user said is the fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. If they didn't specify one, ask for it.
+
+Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
+
+Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here — not inside two parallel sub-agents.
 ```
 
-三个 Skill 处理的对象不同：
+用户给出比较引用；没有给出时先询问，不自行猜成 `main`。三点差异 `git diff <fixed-point>...HEAD` 从两个引用的共同祖先（merge-base）比较到 `HEAD`。同时记录的两点 `git log` 列出 `HEAD` 可达、比较引用不可达的提交，帮助审查者理解这段工作。
 
-| Skill | 处理对象 | 主要动作 | 主要产物或状态 |
+这里有两个必须带入使用方式的限制：
+
+- **不包含未提交修改。** 暂存区和工作区中的代码都不在这条命令内。即使 description 提到进行中的工作，正文也没有提供未提交差异分支。
+- **没有冻结引用。** `git rev-parse` 在这里用于确认引用能解析；指令没有要求把结果 SHA 替换进后续命令。`main`、`HEAD~5` 和 `HEAD` 仍可能随提交或引用更新而变化。“Capture the diff command once”固定的是命令文本，不保证两个子 agent 稍后执行时读取相同快照。
+
+因此，需保持审查期间的比较对象稳定；如果要严格可复现，自编流程应明确解析并保存两端提交，再把相同快照交给所有审查者。这是对源码协议的补充，不是当前实现已经提供的保证。
+
+还有一个组合空档：`skills/engineering/implement/SKILL.md` 要求先调用 `/code-review`，再提交代码。如果尚无中间提交，刚写的实现不会进入审查；如果差异非空，也可能只是此前提交的内容。不能把“审查执行过”当作“本轮实现已被覆盖”。
+
+### 2、先收集需求与规范，再把相同差异交给不同角色
+
+`2. Identify the spec source` 依次寻找：提交信息中的工作项引用、用户传入的路径、`docs/` / `specs/` / `.scratch/` 下与分支或功能匹配的规格；仍找不到时询问用户。工作项的获取方式来自 `docs/agents/issue-tracker.md`。用户确认没有规格时，实际分派步骤跳过 Spec 子 agent，最终报告写明 `no spec available`，不会从实现反推一份需求再审自己。
+
+`3. Identify the standards sources` 则查找仓库的编码规范与贡献说明。没有这些文件也不意味着规范审查无法开始，因为同节内置十二类 Fowler code smells（代码坏味道，即提示潜在设计问题的启发式）。例如重复逻辑、散落多处的关联修改、只做转发的中间层、为未出现的需求增加抽象。
+
+来源：`skills/engineering/code-review/SKILL.md` → `3. Identify the standards sources`，摘录优先级：
+
+```markdown
+- **The repo overrides.** A documented repo standard always wins; where it endorses something the baseline would flag, suppress the smell.
+- **Always a judgement call.** Each smell is a labelled heuristic ("possible Feature Envy"), never a hard violation — and, like any standard here, skip anything tooling already enforces.
+```
+
+仓库标准优先，坏味道只能作为带名称的判断。例如 Feature Envy 指方法过多操作其他对象的数据，可能提示应移动职责；如果项目明确采用这种组织方式，就不能仅凭通用偏好判定违规。工具已经强制检查的规则应跳过，以免报告重复格式化器或静态检查器的结果。
+
+这一步完成后，有三组材料：同一份差异命令与提交列表、规范文件及坏味道基线、原始规格。它们被有意分配给两个不同上下文，避免“符合需求”掩盖结构问题，或“代码漂亮”掩盖需求缺失。
+
+### 3、子 agent 的输入必须完整，不能假设它看得到主会话
+
+来源：`skills/engineering/code-review/SKILL.md` → `4. Spawn both sub-agents in parallel`，摘录 Standards 输入中的关键一项：
+
+```markdown
+- The list of standards-source files you found in step 3, **plus the smell baseline from step 3** pasted in full — the sub-agent has no other access to it.
+```
+
+规范文件可以按路径读取，内置坏味道清单却必须完整放进子 agent 的提示中。否则主会话读过这份清单，并不意味着新上下文也拿到了它。实际分派规则如下：
+
+| 角色 | 独有输入 | 要报告的内容 | 每条发现的依据 |
 | --- | --- | --- | --- |
-| `/code-review` | 固定比较点之后的代码差异 | 并行检查标准和规格 | 两轴审查报告 |
-| `/codebase-design` | 模块的 interface、implementation 和 seam | 提供深模块设计词汇和原则 | 共享设计判断 |
-| `/improve-codebase-architecture` | 近期变更暴露出的架构摩擦 | 扫描候选、生成视觉报告、进入用户选定的设计讨论 | 临时 HTML 报告、架构决策和后续方案 |
+| Standards | 规范来源文件、完整坏味道基线 | 违反仓库标准的位置，以及可能的坏味道 | 规范文件与具体规则；或坏味道名称与差异片段 |
+| Spec | 规格路径或已获取的正文 | 缺失或部分实现、范围外行为、看似实现但做错的需求 | 对应的规格原句 |
 
-`code-review` 回答“这次变更是否符合标准、是否实现了规格”；`codebase-design` 提供判断模块形状的语言；`improve-codebase-architecture` 负责把代码库中的摩擦整理成可以讨论的候选。
+两个角色都收到差异命令和提交列表，各自报告有 Under 400 words 的长度上限。这个限制约束报告长度，不是限制只读多少文件。完整依据仍要足以让主会话和用户定位发现。
 
-## `code-review`：把质量拆成两条独立审查轴
+独立提示没有禁止再次委派或重新调用 `/code-review`。所以“恰好两个子 agent”是顶层分派意图，不是全局递归上限。自编审查 skill 若需要固定开销，应在角色提示中明确直接执行审查及委派边界；当前文本未提供这种限制，也没有定义子 agent 失败后的重试策略。
 
-### 先固定比较点，再启动审查
+### 4、聚合保留两轴，也保留未覆盖信息
 
-`code-review/SKILL.md` 把输入定义为固定点和当前 `HEAD` 之间的差异：
-
-```markdown
-Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
-
-- **Standards** — does the code follow this repo's documented coding standards?
-- **Spec** — does the code faithfully implement the originating issue / spec?
-```
-
-流程第一步要求解析用户给出的 commit、branch、tag 或 merge-base，并运行三点 diff：
+来源：`skills/engineering/code-review/SKILL.md` → `5. Aggregate`，完整摘录：
 
 ```markdown
-git diff <fixed-point>...HEAD
+Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
+
+End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
 ```
 
-同时记录从固定点到当前分支的提交列表。固定点解析失败或差异为空时，流程应在启动审查子 agent 之前停止。
+聚合者保留两个分区，分别给出数量和各轴最严重的问题；缺失规格时，在 Spec 区明确说明未审。规范通过与规格通过不能相互替代，也不应被压成一个模糊的总分。
 
-**源码直接证明：**审查对象不是“当前工作区看起来怎么样”，而是用户指定基线之后的变更集。三点 diff 以 merge-base 为比较基准，避免把无关的历史分叉混进结果。
+这个步骤允许原样或轻度整理子报告，没有要求逐条重新核验所有引用。带证据的报告更容易检查，但不等于证据已被第二次验证。`code-review` 的输出是发现，不包含自动修改代码、修复后重试或直至零发现才结束的协议。坏味道本身又是启发式，不能把反复审查直到“完全干净”当作有收敛保证的流程。
 
-**工程推导：**固定比较点使审查结果可复查。同一分支后来增加提交时，可以重新以同一个基线运行，比较报告变化；没有固定点的审查容易混入旧问题，也无法清楚说明审查覆盖了哪一段代码。
+## 二、codebase-design：先统一接口含义，再判断模块价值
 
-### 先找规格来源，再找标准来源
+### 1、词汇表定义的是使用成本，不是目录布局
 
-`code-review` 要按顺序寻找规格：
+`codebase-design` 主文件以参考规则为主，不负责扫描整个仓库，也不规定一开始就生成多个方案。它的 `Going deeper` 只在涉及依赖处理或替代接口时，把模型引向两个配套文件。
 
-1. 从提交信息中的 Issue 引用查找；
-2. 使用用户传入的路径；
-3. 在 `docs/`、`specs/` 或 `.scratch/` 中按分支名或 feature 匹配；
-4. 找不到时询问用户；如果确实没有规格，Spec 轴明确报告没有规格可用。
-
-标准来源则包括仓库中的编码规范、贡献指南和其他说明代码写法的文件。除此之外，Skill 还带有一组 Fowler 代码坏味道基线，例如神秘命名、重复代码、Feature Envy、Primitive Obsession、Shotgun Surgery 和 Speculative Generality。
-
-这里有一个重要的优先级：仓库明确写出的标准优先于通用坏味道基线；坏味道只是判断提示，不自动等于违规。Skill 还要求跳过工具已经强制检查的内容，避免把格式化器或类型检查器的结论重复报告成审查发现。
-
-### Standards 和 Spec 为什么并行
-
-源码明确要求两条轴由并行子 agent 执行，最后分别聚合：
+来源：`skills/engineering/codebase-design/SKILL.md` → `Glossary`，摘录 Interface 定义：
 
 ```markdown
-Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
+**Interface** — everything a caller must know to use the module correctly: the type signature, but also invariants, ordering constraints, error modes, required configuration, and performance characteristics. _Avoid_: API, signature (too narrow — they refer only to the type-level surface).
 ```
 
-Standards 子 agent 检查每个文件或代码块是否违反仓库标准，并标注坏味道属于判断性意见还是硬性规则。Spec 子 agent 检查规格要求是否缺失、是否有范围外行为、以及看似实现但逻辑可能错误的部分。
+interface（接口）包含调用者必须知道的所有事实：不只方法和参数，还包括不变量、顺序、错误、配置和性能条件。一个只有两个方法的模块，如果调用者还要理解十条初始化规则，接口仍然可能很重。
 
-最终报告必须保留两个标题：
+这份词汇表把其余概念接在同一关系上：
 
-```markdown
-## Standards
-## Spec
-```
-
-不能把两类发现合并后重新排序，也不选择一条轴作为“更重要”的总结果。
-
-这种分离对应两种不同的失败：代码可以完全符合编码规范，却实现了错误需求；也可以正确实现 Issue，却破坏仓库的设计约定。并行执行减少上下文污染，分开汇报则防止一个维度的通过掩盖另一个维度的问题。
-
-### `code-review` 不负责直接重构
-
-Skill 的职责是建立固定范围、找到证据、运行两轴审查并呈现结果。它没有把架构重写塞进审查流程。发现浅模块、重复边界或耦合泄漏时，报告提供的是后续行动依据；是否启动架构改进，需要另一个显式入口和用户选择。
-
-这保持了审查的可验证性：一份 review 应该说明当前 diff 的问题，不能在同一过程中改变被审查对象并让问题消失在新 diff 中。
-
-## `codebase-design`：用共享词汇判断模块深度
-
-### 这些词汇描述的是设计关系
-
-`codebase-design/SKILL.md` 首先要求统一术语：
-
-```markdown
-Design **deep modules**: a lot of behaviour behind a small interface, placed at a clean seam, testable through that interface.
-```
-
-它定义了八个核心概念：
-
-| 术语 | 在源码中的含义 |
+| 术语 | 含义及观察对象 |
 | --- | --- |
-| module（模块） | 任何拥有 interface 和 implementation 的东西，可以是函数、类、包或跨层切片 |
-| interface（接口） | 调用者正确使用模块必须知道的全部事实，包括类型、约束、错误模式和性能特征 |
-| implementation（实现） | 模块内部的代码，与描述 seam 角色的 adapter 区分 |
-| depth（深度） | 调用者学习单位 interface 后能获得多少行为能力 |
-| seam（接缝） | 可以改变行为而不在调用位置修改的 interface 所在位置 |
-| adapter（适配器） | 在 seam 上满足 interface 的具体实现 |
-| leverage（杠杆） | 一个 interface 为多个调用者提供能力的收益 |
-| locality（局部性） | 变更、bug、知识和验证集中在一个位置的维护收益 |
+| module（模块） | 有接口和实现的单位，可以是函数、类、包或跨层切片 |
+| implementation（实现） | 模块内部的代码 |
+| depth（深度） | 调用者每理解一单位接口，能获得多少行为能力 |
+| seam（接缝） | 接口所处的位置，在此替换行为而不改动调用处 |
+| adapter（适配器） | 在某个接缝处满足接口的具体实现，描述它承担的角色 |
+| leverage（复用收益） | 同一接口让多个调用者和测试获得能力 |
+| locality（局部性） | 变化、bug、知识和验证集中在少数位置 |
 
-源码要求使用这些词汇，不用 `component`、`service`、`API` 或 `boundary` 替换它们。术语约束本身就是一种组合协议：`tdd`、架构扫描和后续 grilling 使用同一套词汇描述测试入口和模块关系，减少同一个设计问题在不同 Skill 中换名重述。
+例如源文提到的 Postgres 数据访问实现与内存替身，都可以充当 adapter；它们内部代码多少不同，并不改变 adapter 是“填在接口位置上的具体实现”这一角色。深度也不是实现行数除以接口行数，增加内部代码不会自动提高调用者收益。
 
-### deep 和 shallow 的判断依据
+源码要求设计讨论使用这组固定名词，避免把 module 随意换成 service、component，把 interface 缩窄成类型签名。自编多个会互相引用的 skill 时，共享词汇的价值就在这种具体约束上：测试、扫描和方案比较说到“接口”时，都要同时考虑错误与顺序条件。
 
-源码把 deep module 描述成“小 interface + 大量隐藏 implementation”，shallow module 则是 interface 几乎和 implementation 一样复杂。判断重点不是代码行数，而是调用者从一个稳定入口获得了多少行为。
+### 2、删除测试判断是否保留抽象，透传层也可以是改进对象
 
-Skill 提供三个判断原则：
+来源：`skills/engineering/codebase-design/SKILL.md` → `Principles`，摘录：
 
 ```markdown
-- **Depth is a property of the interface, not the implementation.**
 - **The deletion test.** Imagine deleting the module. If complexity vanishes, it was a pass-through. If complexity reappears across N callers, it was earning its keep.
-- **The interface is the test surface.** Callers and tests cross the same seam.
 ```
 
-删除测试用于识别只做透传的浅模块：删除后复杂度消失，说明这个模块没有集中逻辑；删除后复杂度分散到多个调用者，说明它确实提供了 locality 和 leverage。
+deletion test（删除测试）是一个设计推演，不是执行删除文件的命令。想象拿掉模块：如果只是少了一次无意义转发，复杂度消失，这层没有提供足够价值；如果调用者不得不各自补回隐藏逻辑，复杂度重新分散，模块就在提供复用收益与局部性。
 
-“interface 是测试面”与上一篇的 TDD seam 直接相连。调用者和测试应该穿过同一个接口观察行为。如果测试必须越过接口进入内部状态，问题可能出在模块形状，而不是测试写得不够多。
+这不能推出“透传模块应从架构候选中排除”。删除或合并透传层，可能正是把分散逻辑集中到更清楚接口后的改进。架构扫描自己的表述也不同。来源：`skills/engineering/improve-codebase-architecture/SKILL.md` → `1. Explore`，摘录：
 
-### seam 需要真实的变化理由
+```markdown
+Apply the **deletion test** to anything you suspect is shallow: would deleting it concentrate complexity, or just move it? A "yes, concentrates" is the signal you want.
+```
 
-`codebase-design` 规定：一个 adapter 只能说明存在假想 seam，两个 adapter 才能证明 seam 有真实变化。架构设计不应为了“方便测试”凭空增加一层接口。
+两处文字分别强调“现有模块有没有价值”和“删除后是否集中复杂度”。实际判断要描述删掉之后谁接手职责；仅仅减少文件数、或把同样复杂度搬到另一个文件，都不足以说明设计收益。
 
-它还区分 external seam 和 internal seam：深模块内部可以有只供实现和内部测试使用的 internal seam，但不能因为测试使用了它，就把它暴露到模块的 external interface。这样既保留测试能力，也不扩大调用者必须理解的 interface。
+### 3、外部接缝与内部接缝承担不同责任
 
-源码给出的可测试性建议包括：
+来源：`skills/engineering/codebase-design/SKILL.md` → `Principles`，摘录内部结构原则：
 
-- 通过依赖注入传入依赖，不在函数内部自行创建外部对象；
-- 返回结果，让调用者观察结果，少把关键行为藏在无法验证的副作用中；
-- 缩小 interface，让调用者和测试需要准备的参数更少。
+```markdown
+- **Depth is a property of the interface, not the implementation.** A deep module can be internally composed of small, mockable, swappable parts — they just aren't part of the interface. A module can have **internal seams** (private to its implementation, used by its own tests) as well as the **external seam** at its interface.
+```
 
-这些建议服务于深度和测试，不是要求所有模块都抽象出可替换接口。没有第二个 adapter 的单一实现，通常只增加间接层。
+深模块可以由许多小部件构成。对调用者暴露的是外部接缝，内部测试可使用私有接缝，但不能仅因测试要用就把它加入公共接口。否则内部每个变化都会变成调用者也要理解的新事实。
 
-## `DEEPENING.md`：依赖类别决定怎样跨 seam 测试
+`Designing for testability` 进一步建议接收依赖而非自行创建、返回可观察结果、缩小接口面积。这些是设计方向，不会自动施加语言级可见性或导入限制；仓库中的词汇表没有生成限制跨模块引用的编译器或 lint 规则。文件夹看起来像“深模块”，也不能替代实际接口约束。
 
-`codebase-design/DEEPENING.md` 把待改进的依赖分为四类：
+### 4、依赖类别决定替身放在哪里
 
-| 依赖类别 | 例子 | 深化后的测试方式 |
+`Going deeper` 把依赖分析引向 `skills/engineering/codebase-design/DEEPENING.md` → `Dependency categories`。它按依赖能否在测试中真实运行、是否受项目控制，分出四种处理方式：
+
+| 依赖类别 | 实际情形 | 指令建议的测试方式 |
 | --- | --- | --- |
-| in-process | 纯计算、内存状态、无 I/O | 合并模块，直接在新 interface 上测试 |
-| local-substitutable | 有本地测试替身的数据库或文件系统 | 在测试套件中运行替身，通常不把 port 暴露到外部 interface |
-| remote but owned | 自己控制的内部服务或网络接口 | 在 seam 定义 port，生产使用 HTTP/gRPC/队列 adapter，测试使用内存 adapter |
-| true external | 第三方支付、短信等服务 | 注入外部 port，测试提供 mock adapter |
+| `In-process`，进程内 | 纯计算、内存状态，无 I/O | 合并浅模块后直接测试新接口，无需 adapter |
+| `Local-substitutable`，可用测试替身替代 | 文中举 PGLite 替代 Postgres、内存文件系统 | 替身随测试运行，接缝留在内部，不把 port 暴露给调用者 |
+| `Remote but owned`，项目控制的远程依赖 | 自有网络服务 | 在接缝定义 port，生产注入 HTTP/gRPC/队列 adapter，测试注入内存 adapter |
+| `True external`，无法控制的第三方依赖 | 支付、短信等 | 注入外部 port，测试提供 mock adapter |
 
-这个分类把“是否可以抽象”与“如何验证”放在一起。远程但自有的依赖可以由内存 adapter 复现；真正外部的依赖只能隔离；纯进程内逻辑则不需要为了测试额外创建 adapter。
+port（端口）在这里就是为了隔离依赖而定义的接口。mock（模拟替身）用于无法控制的外部交互；自有远程依赖的内存 adapter 则需要表达该接口的行为。区分“项目内部的协作者”和“需要跨越部署边界的依赖”，才能与测试驱动开发（TDD）的 mock 原则一起使用，而不是把所有调用都模拟掉。
 
-文档同时要求 replace, don't layer：深化之后，在新模块 interface 上写行为测试，并删除已经被新测试覆盖的旧浅模块测试。保留两套测试会让旧 interface 继续约束实现，增加维护成本，也掩盖新模块真正提供的行为面。
-
-**源码直接证明：**深模块的 external interface 是调用者和测试共同跨越的 seam；internal seam 不能替代它。
-
-**工程推导：**如果一次架构改进只新增了一个更深的模块，却保留所有旧测试和旧透传模块，代码库得到的是另一层叠加，而不是 locality。删除旧层是深化过程的一部分。
-
-## `DESIGN-IT-TWICE.md`：避免第一种接口过早定型
-
-当用户已经选定一个架构候选，并且需要探索多个 interface 形状时，`DESIGN-IT-TWICE.md` 规定采用并行子 agent：
+来源：`skills/engineering/codebase-design/DEEPENING.md` → `Seam discipline`，摘录：
 
 ```markdown
-Spawn 3+ sub-agents in parallel. Each must produce a **radically different** interface for the deepened module.
+- **One adapter means a hypothetical seam. Two adapters means a real one.** Don't introduce a port unless at least two adapters are justified (typically production + test). A single-adapter seam is just indirection.
 ```
 
-每个子 agent 都要输出：
+“两个 adapter”不要求已有两个生产后端；生产实现加上确有需要的测试实现就可以构成依据。单一实现为了可能的未来变化而增加接口，只带来额外间接层。这个判断仍需具体说明第二个 adapter 为什么必要，而不能为了凑数量再写一个无用替身。
 
-1. interface 的类型、方法、参数、不变量、顺序约束和错误模式；
-2. 调用者如何使用它；
-3. interface 后面隐藏哪些 implementation；
-4. 依赖策略和 adapter；
-5. depth、leverage 和 trade-off。
+同文件 → `Testing strategy: replace, don't layer` 要求在新模块接口上建立行为测试后，删除旧浅模块的单元测试。设计意图是让测试跟随新的职责位置，避免旧接口继续束缚实现。应用时必须先确认重要行为仍由新测试覆盖；“把旧测试删了”本身不构成验证，更不能仅因目录合并就删除尚无替代覆盖的测试。
 
-并行方案使用不同约束：有的最小化 interface，有的追求扩展能力，有的为最常见调用者优化，有的围绕 ports & adapters 设计。之后按三项标准比较：
+## 三、架构扫描：从范围到候选，再等待选择
 
-- **depth**：interface 是否以较少知识承载更多行为；
-- **locality**：变化和 bug 是否集中在一个模块；
-- **seam placement**：interface 放置的位置是否能隔离变化并支撑测试。
+### 1、先确定值得看的区域，再让子 agent 探索
 
-这一步的用途是打破“第一个看起来能用的接口”带来的锁定。它仍然是方案探索，不是架构 Skill 自动选择并落地某个接口。最终推荐由当前会话综合，具体决定要经过用户确认。
+`improve-codebase-architecture` 的 frontmatter（文件头元数据）设置 `disable-model-invocation: true`，相邻 `agents/openai.yaml` 设置 `policy.allow_implicit_invocation: false`。它需要用户显式启动，但启动后可以按指令使用 `codebase-design`、`grilling`、`domain-modeling` 等模型可调用的 skill。
 
-## `improve-codebase-architecture`：先呈现候选，再开始设计
-
-### 扫描范围由变更热点限定
-
-`improve-codebase-architecture/SKILL.md` 的第一条流程约束是先定范围：
+来源：`skills/engineering/improve-codebase-architecture/SKILL.md` → `1. Explore`，摘录范围分支：
 
 ```markdown
-**Scope before you scan — YAGNI.** Deepening a module pays off by making future changes to it easier, so put extra weight on the parts of the codebase that have recently changed.
+- If the user named a direction — a module, a subsystem, a pain point — take it, and skip the inference below.
+- Otherwise, walk back a good stretch of the commit history (`git log --oneline`) to find the codebase's hot spots — the files and areas that keep coming up — and let those paths pull your attention first. If the changes are scattered with no clear hot spot, widen the net.
 ```
 
-如果用户点名模块、子系统或痛点，就直接使用该方向；没有指定方向时，先读取一段较长的提交历史，找到反复变更的热点，再围绕这些路径自然探索。
+指定模块或痛点就直接沿该方向；否则用一段提交历史推断经常变化的区域，没有明显热点时才扩大范围。指令没有给“最近”固定天数，也没有实现按变更频率排序的算法。优先近期活跃区域，是因为把它变得更容易修改更可能很快带来收益；长期不动的区域即使结构不理想，也未必值得当前投入。
 
-探索阶段还要求先读项目的 `CONTEXT.md` 和相关 ADR，并由子 agent 观察理解代码时遇到的实际摩擦：概念是否分散在过多浅模块中、接口是否几乎和实现一样复杂、测试是否只能进入错误层级、耦合是否泄漏穿过 seam。
+模型先读 `CONTEXT.md` 的领域词汇和相关 ADR（架构决策记录），再派一个子 agent 走读代码。探索关注理解一个概念是否要跳过很多浅模块、纯函数测试是否错过真实调用模式、耦合是否穿透接口、哪些行为缺少可测试入口。这个版本只写了“spawn a sub-agent”，没有绑定某个产品专有的工具名或参数。
 
-Skill 用 deletion test 过滤候选：删除一个模块后复杂度是否重新分散到多个调用者？如果删除只会让复杂度消失，这个模块可能只是透传，不值得作为深化候选。
+### 2、候选报告给出职责变化，不提前确定具体接口
 
-### 报告是临时产物，不直接写入仓库
+第 2 步把探索结果写成操作系统临时目录下的 `architecture-review-<timestamp>.html`，每次新建一个报告，并打开给用户、报告路径。这里描述的是 skill 的产物位置，不是被分析应用的运行时组件。
 
-扫描完成后，Skill 要求写一个独立 HTML 文件到操作系统临时目录：
+候选需要包含涉及文件、具体摩擦、职责将如何变化、局部性与复用收益、前后对照图，以及 `Strong` / `Worth exploring` / `Speculative` 三档推荐强度；末尾选出最值得优先处理的一项。
 
-```markdown
-Write a self-contained HTML file to the OS temp directory so nothing lands in the repo.
-```
-
-文件名带时间戳，报告使用 Tailwind CDN 和 Mermaid CDN，展示每个候选的文件、问题、解决方向、收益、before/after 图和推荐强度，最后给出 Top recommendation。`HTML-REPORT.md` 进一步要求报告保持静态，只保留 Tailwind 和 Mermaid 两个脚本，不把应用代码或交互产品混入其中。
-
-这一设计把架构扫描和代码库状态分开：扫描报告是当前观察的临时视图，不会因为每次探索都在仓库中留下草稿文件。用户可先比较多个候选，再决定哪个问题值得进入真正的设计流程。
-
-### 为什么报告阶段禁止直接提出接口
-
-源码明确写着：
+来源：`skills/engineering/improve-codebase-architecture/SKILL.md` → `2. Present candidates as an HTML report`，摘录结束条件：
 
 ```markdown
 Do NOT propose interfaces yet. After the file is written, ask the user: "Which of these would you like to explore?"
 ```
 
-候选报告只描述当前摩擦和可能的深化方向，不提前锁定 interface。原因有三点：
+这里允许说明“把订单接入的分散规则集中到一个模块”，却要求把具体方法、参数、错误形状等接口设计留到选择之后。报告先帮助用户判断哪个问题值得花时间；选定候选只确定了讨论对象，还没有批准具体实现。
 
-1. 架构扫描的输入是代码摩擦，输出是待选择的候选，不是用户已经批准的设计；
-2. 不同候选的收益、影响范围和依赖类别需要先比较；
-3. interface 是架构决策，应该在用户选择候选后结合约束、依赖和测试要求讨论。
+该步骤没有自动选第一名继续，也没有定义“找不到有价值候选”的明确退出格式。推荐强度能表达不确定性，却不能保证每次扫描都找到值得改的东西。自编扫描 skill 时，给出“没有足够证据支持改动”的合法结果，可以减少为完成报告而硬凑候选。
 
-报告阶段的输出是 HTML 文件和用户可选择的候选列表，状态仍属于当前探索过程。它没有修改代码，也没有自动创建 ADR。
+### 3、HTML 是一个文件，样式与图形仍依赖外部资源
 
-### 选择之后才进入 grilling 和 domain-modeling
+`HTML-REPORT.md` 把呈现细节从扫描正文中分出去：卡片结构、图例、图形选择和配色都在配套文件里。关系和调用顺序适合 Mermaid（用文本定义图形的工具），强调模块厚薄或职责收拢时可用 CSS/SVG；每个候选都要有 before/after 对照。
 
-用户选定候选后，Skill 才运行 `/grilling`，讨论约束、依赖、deepened module 的形状、seam 后隐藏什么以及哪些测试可以保留。设计过程中继续使用 `/domain-modeling`：
+来源：`skills/engineering/improve-codebase-architecture/HTML-REPORT.md` → `Scaffold`，摘录加载部分，其余 HTML 省略：
 
-- 新的领域术语进入 `CONTEXT.md`；
-- 模糊术语在讨论中被收紧；
-- 用户拒绝候选的理由只有在未来架构审查需要避免重复提议时，才建议记录 ADR；
-- 需要探索多个 interface 时，调用 `/codebase-design` 的 design-it-twice 模式。
-
-这条调用链说明 `improve-codebase-architecture` 不是一个自动重构器。它先把架构摩擦变成候选，再把选中的候选交给访谈、领域建模和接口设计能力。
-
-## 三者如何组合
-
-### `code-review` 发现问题，架构 Skill 管理后续决策
-
-一次实现交付可以沿着这条链运行：
-
-```text
-spec / tickets
-      ↓
-implement
-      ↓
-code-review
-      ├─ Standards：仓库标准和坏味道
-      └─ Spec：需求覆盖和范围
-                 ↓
-       需要长期处理的结构性问题
-                 ↓
-improve-codebase-architecture
-                 ↓
-       候选报告 → 用户选择 → grilling
-                 ↓
-       codebase-design + domain-modeling
+```html
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+</script>
 ```
 
-`code-review` 报告当前 diff 的问题，不能替用户决定一个深模块应该怎样设计。`improve-codebase-architecture` 整理候选，也不能在用户选择前提出接口。`codebase-design` 提供设计语言和比较标准，但它本身是参考 Skill，不承担扫描、报告或自动改造。
+Tailwind 提供样式工具，Mermaid 渲染图形；两者都从 CDN（内容分发网络）加载。模板所称 self-contained 是报告集中在单个 HTML 文件，不是完全离线、自带所有资源。断网或脚本被拦截时，样式和图形可能不完整；写出并打开文件也不等于已经观察到渲染结果。
 
-### 审查发现不等于架构任务已经成立
+`Style guidance` 限定只有上述两个脚本，其他内容保持静态。正文虽然提到折叠动画等视觉方向，配套文件没有提供交互应用逻辑。需要离线报告时，应明确改用内嵌样式和 SVG，并保留候选比较信息；这属于呈现方式的调整，不是模板已有的降级分支。
 
-标准审查中的 Shotgun Surgery、Divergent Change 或 Message Chains 可以提示结构摩擦，但它们仍是审查发现。是否值得架构改进，要结合变更热点、未来收益、依赖类别和真实测试困难判断。
+### 4、ADR 冲突和候选拒绝，各有不同的处理时机
 
-反过来，架构候选也未必是当前 diff 的错误。一个模块可能暂时浅，但没有重复变化、没有调用者摩擦，也没有测试问题。`improve-codebase-architecture` 以近期变更和实际理解阻力限定范围，就是为了避免把所有理论上的重构都列入候选。
+来源：`skills/engineering/improve-codebase-architecture/SKILL.md` → 第 2 步，摘录冲突规则：
 
-### 配置层表达不同的状态副作用
+```markdown
+**ADR conflicts**: if a candidate contradicts an existing ADR, only surface it when the friction is real enough to warrant revisiting the ADR. Mark it clearly in the card (e.g. a warning callout: _"contradicts ADR-0007 — but worth reopening because…"_). Don't list every theoretical refactor an ADR forbids.
+```
 
-三个 Skill 的调用配置体现了不同副作用：
+已有 ADR 不应被悄悄绕过。真实摩擦足以支持重新讨论时，可以把候选放入报告，但必须带出冲突和重开理由；不能把所有违背旧决定的理论重构都列出来。
 
-- `code-review/agents/openai.yaml` 只声明显示名称和简介；
-- `codebase-design/agents/openai.yaml` 只声明设计词汇能力；
-- `improve-codebase-architecture/agents/openai.yaml` 明确 `allow_implicit_invocation: false`，frontmatter 也设置 `disable-model-invocation: true`。
+用户选中候选后，第 3 步才要求运行 `/grilling`，讨论约束、依赖、模块形状、接口后隐藏什么，以及哪些测试应保留。`grilling` 把决策按前置关系组织成轮次，等待用户回答后再推进；它结束时仍需要确认双方理解一致，不能把报告里的推荐视为已确认方案。
 
-审查和设计词汇可以作为其他实现过程的参考能力。架构改进会写临时报告、打开外部文件、等待用户选择，并在后续可能更新 `CONTEXT.md` 或 ADR，所以入口必须由用户显式调用。
+设计中还调用 `/domain-modeling` 维护领域文档：新概念确定就写入 `CONTEXT.md`，模糊术语变清楚就当场更新，文件不存在时按需创建。用户拒绝候选若有未来必须知道的实质理由，再提议记录 ADR；“现在没空做”之类短期理由不够。
 
-Skill 之间仍通过 `/skill-name` 表达能力依赖，不通过 `../` 深层路径耦合内部文件。这样 `codebase-design` 可以被 TDD、架构改进和其他 Skill 共享，而不要求调用方了解它的目录布局。
+这部分会写领域文档，因此整个 skill 不能笼统描述成“只生成一个 HTML、绝不改变仓库内容”。扫描阶段没有要求改业务代码，设计阶段却明确允许记录术语和决定；完整重构实现仍不在这份流程内。
 
-## 运行边界与工程代价
+## 四、需要比较接口时，再进入 Design It Twice
 
-| 阶段 | 状态归属 | 主要副作用 | 下游消费者 |
-| --- | --- | --- | --- |
-| 固定 review point | 当前分支历史和用户输入 | 读取 diff、提交列表、规格和标准文件 | 两个审查子 agent |
-| Standards / Spec 审查 | 两个相互隔离的子 agent | 生成两份独立发现 | review 聚合器、开发者 |
-| 架构探索 | 当前代码库、`CONTEXT.md` 和 ADR | 读取提交历史、扫描热点 | 架构候选报告 |
-| 候选报告 | 操作系统临时目录 | 写 HTML、调用 CDN、打开文件 | 用户选择 |
-| 设计深入 | 当前会话和项目文档 | grilling、词汇更新、必要时 ADR | 后续规格、实现或架构票据 |
+### 1、先给用户问题背景，同时给子 agent 独立技术材料
 
-这套拆法减少了三种误判：
+`skills/engineering/codebase-design/SKILL.md` → `Going deeper` 在需要探索替代接口时引用 `DESIGN-IT-TWICE.md`。它不是每次阅读设计词汇就必跑的分支，前提是已经有选定候选，用户希望比较不同接口。
 
-- 把代码风格合规当成需求正确；
-- 把一次 review 的坏味道直接当成必须重构的架构任务；
-- 在没有用户选择和约束确认时，直接锁定一个 interface。
+第 1 步先给用户解释必须满足的约束、依赖类别，以及帮助理解约束的粗略代码草图；草图用于定位问题，不是提前提交方案。来源：`skills/engineering/codebase-design/DESIGN-IT-TWICE.md` → `1. Frame the problem space` 末尾与第 2 步开头，省略章节标题：
 
-代价同样明确：
+```markdown
+Show this to the user, then immediately proceed to Step 2. The user reads and thinks while the sub-agents work in parallel.
 
-- review 需要可靠的固定点、规格来源和标准文件；
-- 两条审查轴使用并行子 agent，运行和聚合逻辑更复杂；
-- 架构扫描需要生成视觉报告，并依赖本地打开文件和 CDN；
-- 用户必须在候选报告后做一次选择，设计过程因此不会完全自动推进；
-- 领域词汇、ADR、规格和架构候选之间需要维护清楚的状态归属。
+Spawn 3+ sub-agents in parallel. Each must produce a **radically different** interface for the deepened module.
+```
 
-`improve-codebase-architecture` 把 HTML 写入操作系统临时目录，避免把探索草稿带入仓库。迁移到无浏览器、无外网或禁止写临时文件的环境时，需要替换报告呈现方式，但应保留“先展示候选、再选择、后设计”的状态边界。
+这里没有第二个等待批准点：展示背景后立即并行设计，让用户阅读时子 agent 同时工作。每个子 agent 收到独立技术任务，包括文件路径、耦合细节、依赖类别与接口后隐藏的职责，还要收到设计词汇和 `CONTEXT.md` 的领域词汇。面向用户的简明说明不能替代这份完整输入。
 
-## 迁移边界
+### 2、不同约束制造不同方案，相同输出字段支持比较
 
-### 可以采用
+来源：`skills/engineering/codebase-design/DESIGN-IT-TWICE.md` → `2. Spawn sub-agents`，摘录分派约束：
 
-- 把 code review 拆成 Standards 和 Spec 两条独立审查轴；
-- 要求 review 先固定比较点，并显式寻找规格和标准来源；
-- 用统一的 module、interface、depth、seam、adapter、leverage、locality 词汇讨论架构；
-- 用 deletion test 识别没有提供 locality 或 leverage 的浅模块；
-- 只有存在真实变化时才建立 seam 和 adapter；
-- 架构扫描先给出候选报告，用户选定后再进入 grilling 和接口设计；
-- 通过多个差异明显的 interface 方案比较 depth、locality 和 seam placement。
+```markdown
+- Agent 1: "Minimize the interface — aim for 1–3 entry points max. Maximise leverage per entry point."
+- Agent 2: "Maximise flexibility — support many use cases and extension."
+- Agent 3: "Optimise for the most common caller — make the default case trivial."
+- Agent 4 (if applicable): "Design around ports & adapters for cross-seam dependencies."
+```
 
-### 需要改造
+前三种分别追求最小入口、扩展能力与常用场景便利；依赖跨接缝时可增加端口与适配器方案。区别来自真实优化目标，不是让三个 agent 给同一设计换名字。
 
-- 固定点、Issue tracker、规格位置和编码标准要映射到目标项目；
-- 没有子 agent 并行能力时，保留两条审查轴的独立输入和独立输出，按顺序运行；
-- 没有 `CONTEXT.md` 或 ADR 的项目，需要定义等价的领域词汇和决策记录位置；
-- 无浏览器、无 CDN 或只读环境，需要替换 HTML 报告呈现方式；
-- 依赖类别和 adapter 必须按目标系统的真实部署边界重新分类；
-- 不能自动打开临时文件的 harness，需要把报告路径作为显式产物交给用户。
+每个方案统一输出接口及不变量、调用示例、隐藏的实现、依赖与 adapter 策略，以及收益薄弱处。第 3 步按顺序展示，再用 depth、locality 和 seam placement（接缝位置）比较，给出自己的推荐；不同方案的部分可兼容时允许提出组合方案。
 
-### 不应照搬
+这与两轴审查的聚合策略恰好不同：审查必须保持维度分离，接口设计则要求综合并明确推荐。两者的输出目的不同，不能抽象成一个通用“收集子 agent 结果后排序”的模板。设计步骤也没有创建文件、执行重构或自动提交的要求，产物仍是可供决策的方案。
 
-- 不要在没有固定比较点时声称 review 覆盖了完整变更；
-- 不要把 Standards 和 Spec 发现混在一个列表里重新排序；
-- 不要把通用坏味道基线当作高于仓库标准的硬规则；
-- 不要为了测试方便给只有一个实现的依赖强行加 seam；
-- 不要在架构候选报告阶段直接设计和实施 interface；
-- 不要把所有浅模块都视为必须深化的对象，先看近期变化和实际摩擦；
-- 不要把 HTML 报告、CDN 或临时路径误写成项目运行时能力。
+## 五、这些写法适合怎样的使用与扩展
 
-## 编写审查与架构型 Skill 的检查清单
+### 1、参考材料可以复用，过程边界不能靠词汇代替
 
-- [ ] review 是否要求用户提供并验证固定 point？
-- [ ] diff 是否使用明确的 merge-base 比较方式，并记录提交列表？
-- [ ] 是否先寻找规格来源，再寻找仓库标准和通用坏味道基线？
-- [ ] Standards 与 Spec 是否由独立上下文分别审查、分别汇报？
-- [ ] 仓库标准是否覆盖通用启发式规则，工具已经检查的内容是否跳过？
-- [ ] 架构 Skill 是否定义稳定且可复用的 module、interface、depth、seam、adapter、leverage、locality 词汇？
-- [ ] 是否使用 deletion test 判断模块是否真正提供 locality 和 leverage？
-- [ ] 是否区分 external seam 和 internal seam，并避免暴露仅供内部测试的接口？
-- [ ] 是否根据依赖类别选择真实、内存或 mock adapter？
-- [ ] 架构扫描是否先限定范围并优先检查近期变更热点？
-- [ ] 候选阶段是否只生成可比较的报告，没有过早锁定 interface？
-- [ ] 用户选择候选后，是否通过 grilling 确认约束、依赖和测试？
-- [ ] 新术语和不可逆的架构理由是否分别进入 `CONTEXT.md` 与 ADR？
-- [ ] 需要多种接口方案时，是否按 depth、locality 和 seam placement 比较，而不是只选第一方案？
+`codebase-design` 把通用词汇与依赖策略独立出来，让 TDD、架构扫描和接口比较共享；`improve-codebase-architecture` 把 HTML 呈现细节放在配套文件，主流程仍能清楚看到“探索 → 报告 → 用户选择”。这种组织方式把每个阶段必须遵守的条件留在正文，把按情形使用的细节放到有明确引用的资料里。
+
+自编 skill 时要同时写清引用条件和消费方式。例如“需要替代接口时读取 Design It Twice”比无条件附上一大段并行设计步骤更能避免误启动；“把完整坏味道基线传给 Standards 子 agent”比假定子 agent 继承父上下文更能保证输入完整。
+
+### 2、报告的完成条件与改动的完成条件应分别定义
+
+审查的终点是两份有依据的报告；扫描的首个终点是候选 HTML 与用户选择；接口比较的终点是方案与推荐。只有领域建模明确规定了何时更新词汇和提议 ADR。它们都没有提供“评审发现 → 修复 → 重试 → 更新工作项状态”的完整执行协议。
+
+使用时，给审查提供稳定的比较对象与实际规格，给扫描提供近期要解决的变化或痛点，给接口比较提供一个明确候选。要把这些能力扩展成交付流程，还需定义可移动引用怎样冻结、未提交差异怎样纳入、缺失输入或子 agent 失败如何处理、哪些发现必须解决。把这些约定写在交接处，才能让后续使用者知道一份报告究竟证明了什么，以及它尚未完成什么。

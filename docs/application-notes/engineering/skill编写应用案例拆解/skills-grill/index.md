@@ -1,170 +1,167 @@
 ---
 sidebar_position: 1
 title: "Matt Pocock Skills：一套工程 Skill 如何组织成工作流"
-description: 以 mattpocock/skills 源码为对象，按 Skill 职责拆解路由、访谈、上下文沉淀、规格拆分、实现反馈和发布边界，为后续编写 Skill 积累可迁移经验。
+description: 沿触发、指令组合、项目配置和产物交接，理解 mattpocock/skills 怎样组织工程工作流，以及这些写法适合怎样复用。
 ---
 
 # Matt Pocock Skills：一套工程 Skill 如何组织成工作流
 
-:::info 版本基线
+:::info 源码基线与入口
 
-本文拆解 GitHub 项目 [`mattpocock/skills`](https://github.com/mattpocock/skills)，对应版本 `v1.2.3`。分析对象包括各目录中的 `SKILL.md`、bucket README、`agents/openai.yaml`、`.agents/`、`.claude-plugin/`、脚本和 ADR。本文的目的，是从真实项目中积累后续编写、拆分、组合和验证 Skill 的工程经验。
+项目为 `mattpocock/skills`，`package.json` 版本 `1.2.3`，源码快照为 `84fdeffd12f2ee307994d1eb6feb48173b6e0502`。全系列以这一快照为准。表中路径均相对项目根目录；`SKILL.md` 是交给 agent 阅读的指令文件，入口用真实章节或正文定位，没有对应的程序函数。
+
+| 相对路径 | 入口 | 用途 |
+| --- | --- | --- |
+| `.agents/invocation.md` | `Model-invoked vs user-invoked`、`Dependencies between them` | 触发方式和 skill 之间的依赖写法 |
+| `skills/engineering/ask-matt/SKILL.md` | `The main flow: idea → ship`、`On-ramps` | 按任务状态选择工作流入口 |
+| `skills/engineering/setup-matt-pocock-skills/SKILL.md` | `Process` | 把项目环境转成后续 skill 可读取的配置 |
+| `skills/engineering/grill-with-docs/SKILL.md` | frontmatter 后的正文 | 组合访谈与领域建模 |
+| `skills/engineering/implement/SKILL.md` | frontmatter 后的正文 | 组合实现、测试和审查 |
 
 :::
 
-## 这组案例要回答什么
+这组 skill 把工程任务拆成不同粒度的指令：`ask-matt` 负责选入口，`grilling` 负责逐轮澄清，`domain-modeling` 负责维护术语和决策，`implement` 负责消费已明确的工作。它们通过会话内容、项目文档和 Issue（工作项）交换信息，由宿主中的 agent 阅读指令、选择工具并执行。
 
-这里不写 Skill 使用教程，也不按文件顺序翻译 `SKILL.md`。要拆的是一个更具体的问题：一组 Markdown 指令如何被组织成可选择、可组合、可交付的工程工作流。
+理解这套实现，需要同时看两个问题：一份 `SKILL.md` 如何约束当前任务，以及它把什么结果留给下一份指令。只记住命令名称，会漏掉“谁来决定下一步”和“换会话后还能读到什么”。
 
-每篇文章按“源码分析 → 为什么这样组织 → 迁移边界”的顺序展开。原始 `SKILL.md` 只作为事实来源，不当作可直接复用的成品；文章会解释入口、流程、产物和约束，以及这些设计在其他项目中需要哪些改造。代码块会明确标注为“源码摘录”，避免把分析对象和通用结论混淆。
+## 一、skill 的执行逻辑写在哪里
 
-## 先分清三层分类
+### 1、元数据决定何时发现，正文决定发现后怎样做
 
-`mattpocock/skills` 同时使用三套分类标准，不能把它们混成“工程化 Skill”和“产品化 Skill”两类。
+`SKILL.md` 头部的 YAML 元数据称为 frontmatter，存放名称、描述和触发配置。正文则告诉 agent 如何工作。`.agents/invocation.md` 将两类入口明确分开，以下摘录用户入口的定义：
 
-### 目录分类：Skill 放在哪个 bucket
-
-```text
-engineering/   日常代码工程工作
-productivity/  通用生产力和非代码工作流
-misc/          保留但较少使用的 Skill
-in-progress/   在建、用于收集反馈的 Skill
-deprecated/    已废弃的 Skill
+```markdown
+- **User-invoked** — reachable **only by the human typing its name**. Set `disable-model-invocation: true` in the frontmatter (Claude Code) and `policy.allow_implicit_invocation: false` in `agents/openai.yaml` (Codex). The `description` is **human-facing**: a one-line summary read by a person browsing slash-commands. Strip trigger lists ("Use when the user says…").
 ```
 
-当前专栏主要分析 `engineering/` 和 `productivity/` 下的已发布 Skill。`productivity` 表示生产力与通用工作流，不表示“产品化”；仓库当前没有独立的 `product/` 或 `productization/` 分类。
+这是该项目的调用约定。用户显式入口的描述用于帮助人选择；允许模型调用的 skill 则在 `description` 中写清触发场景。比如“需要澄清设计决策”可以命中 `grilling`，“生成可执行 Issue”则是用户选择的 `to-tickets` 阶段。配套的 `agents/openai.yaml` 承载界面元数据及对应宿主的隐式调用策略。
 
-目录还决定发布状态：正式 bucket 中的 Skill 需要同步顶层 README、对应 bucket README 和 Claude Code 插件清单；`misc/`、`in-progress/`、`deprecated/` 不进入同一套正式发布清单。
+这些文件不实现模型，也不提供独立调度器。宿主指运行 agent、加载指令并提供文件、终端等工具的环境。配置如何生效取决于宿主支持；正文中的“等待回答”“调用其他 skill”需要 agent 遵循，不能仅凭 Markdown 指令推断存在程序锁或异常处理器。
 
-### 调用分类：谁可以触发 Skill
+### 2、短入口把复用行为交给另一个 skill
 
-| 类型 | 触发方式 | 典型职责 |
-| --- | --- | --- |
-| `user-invoked` | 用户输入 Skill 名称后显式调用；模型不能隐式调用 | 工作流入口、阶段切换、交接、需要用户决定的操作 |
-| `model-invoked` | 用户可以显式调用，模型也可以根据 description 自动调用 | 访谈、领域建模、测试、调试、研究和代码审查 |
+`skills/engineering/grill-with-docs/SKILL.md` 的执行正文只有一句：
 
-例如，`ask-matt`、`grill-me`、`grill-with-docs`、`to-spec`、`to-tickets`、`implement`、`triage` 和 `wayfinder` 属于用户显式调用入口；`grilling`、`domain-modeling`、`tdd`、`code-review`、`diagnosing-bugs`、`research` 和 `prototype` 可以被模型自动触发。
-
-### 工作流分类：Skill 在整条链路中的职责
-
-`ask-matt` 又从运行时职责组织这组 Skill：
-
-```text
-Main flow              从 idea 到 ship 的默认主流程
-On-ramps               从外部 Issue、Bug 或大型未知工作接入主流程
-Codebase health        代码库架构维护
-Vocabulary underneath  供其他 Skill 使用的共享术语和设计词汇
-Standalone              不要求先经过主流程的独立工具
-Precondition            使用工程 Skill 前的一次性项目配置
+```markdown
+Run a `/grilling` session, using the `/domain-modeling` skill.
 ```
 
-这三层分类分别回答不同问题：目录分类回答“文件放在哪里、是否正式发布”；调用分类回答“谁能触发”；工作流分类回答“当前任务中承担什么职责”。后续文章会在每篇开头同时标出这三个维度。
+`grilling` 规定提问顺序、事实调查和结束条件；`domain-modeling` 规定怎样澄清领域术语、更新 `CONTEXT.md`、记录 ADR。ADR 是架构决策记录，用来保存一项重要决定、采用理由和被放弃的方案。入口将两套行为一起带入当前会话，无须再复制它们的细则。
 
-## 需要分析的 Skill
+调用关系由自然语言表达。`.agents/invocation.md` 要求依赖写成 `/skill`，共享参考材料放在拥有它的 skill 内部。领域建模格式变化时只需改所属文件；代价是宿主必须能找到被依赖的 skill，模型也必须实际读取其指令。仓库没有一个包管理器自动解析这些依赖。
 
-下面按工作流中的职责列出本专栏要分析的 Skill。它们共同组成一条从模糊想法到实现交付的工程链路。
+### 3、阶段衔接和内部调用要分开看
 
-### 入口与路由
+`ask-matt` 把 `/to-spec → /to-tickets → /implement` 列为工作路线，但这三个都是用户显式入口。路线表示上一阶段的产物适合交给下一阶段，由用户决定何时切换。
 
-- **`ask-matt`**：用户显式调用的路由 Skill。根据任务阶段和不确定性推荐下一个入口，同时说明主流程、旁路、独立工具和上下文切换方式。首篇文章已完成。
-- **`setup-matt-pocock-skills`**：工程 Skill 的前置配置入口。负责设置 Issue tracker、triage 标签和文档目录，使后续 Skill 具备共同的运行前提。
+`implement` 的正文则要求使用可由模型调用的能力。以下是 `skills/engineering/implement/SKILL.md` 的连续摘录：
 
-### 需求澄清与领域语言
+```markdown
+Use /tdd where possible, at pre-agreed seams.
 
-- **`grilling`**：访谈原语。通过 frontier（当前未解决的问题边界）、round（提问轮次）和 design tree（设计分支）逐步缩小不确定性。
-- **`grill-with-docs`**：带项目文档沉淀的访谈入口。在 `grilling` 基础上维护 `CONTEXT.md` 和 ADR，把讨论结果留在工作目录。
-- **`grill-me`**：无状态的访谈入口。适合没有项目目录的场景，不写入项目上下文。
-- **`domain-modeling`**：领域建模和术语校准。挑战模糊或重载词汇，记录不可逆决策，并维护项目共享语言。
-- **`wait-what`**：会话内纠偏工具。当解释没有被理解时，根据已有上下文重新表达问题，不开启新的交付阶段。
+Run typechecking regularly, single test files regularly, and the full test suite once at the end.
 
-### 方案、拆分与大任务规划
+Once done, use /code-review to review the work.
 
-- **`wayfinder`**：处理一个会话无法容纳、且从当前位置到目标的路径还不清晰的大型工作。它先建立决策票据地图，逐项解决未知问题，再回到规格阶段。
-- **`to-spec`**：把当前会话中已经讨论的内容整理成规格说明，并发布到项目约定的 Issue tracker。
-- **`to-tickets`**：把规格或计划拆成 tracer-bullet tickets（纵向可交付票据），为票据声明阻塞关系，交给后续实现阶段。
-- **`to-questionnaire`**：当关键信息掌握在其他人手中时，生成面向对方的问卷，收集结果后再回到澄清或规格阶段。
-- **`prototype`**：用一次性程序或页面回答单个设计问题。它提供运行证据，不替代正式实现。
-- **`research`**：把资料阅读工作交给后台 agent，基于 primary sources（主要来源）产出带引用的 Markdown，供后续澄清和方案设计使用。
+Commit your work to the current branch.
+```
 
-### 实现、测试与维护
+`tdd` 是测试驱动开发指令，该版本按一个行为的失败测试和最小实现推进，把重构放到审查阶段；seam 指事先约定的模块交界或测试入口。这里的 “where possible” 保留了使用条件，源码没有要求任何修改都强制走完整测试流程。`code-review` 在实现结束后按规范和规格两条线审查，随后正文要求提交当前分支。
 
-- **`implement`**：消费 spec 或 tickets，按既定 seam 推进实现，内部组合 `tdd`，提交前调用 `code-review`。
-- **`tdd`**：以 red-green-refactor（红—绿—重构）循环推进一个纵向行为切片，形成测试和实现反馈。
-- **`diagnosing-bugs`**：处理难复现 bug、回归和性能问题。先建立能在当前问题上变红的反馈环，再最小化、假设、加观测、修复并补回归测试。
-- **`code-review`**：对固定范围的 diff 做 Standards 和 Spec 两个维度的审查，减少实现完成但偏离规范或原始需求的情况。
-- **`codebase-design`**：提供 deep module、interface、depth、seam、adapter 等代码库设计词汇和判断框架，供测试和架构维护 Skill 使用。
-- **`improve-codebase-architecture`**：扫描代码库中的架构加深机会，先输出候选，再把选中的问题送回澄清流程。
-- **`resolving-merge-conflicts`**：处理进行中的 merge 或 rebase 冲突，按双方变更意图逐块解决，完成当前 Git 操作。
+这段组合存在一个交接缺口：`code-review` 要求固定比较基准，并使用 `git diff <fixed-point>...HEAD`；`implement` 没有提供这个基准，提交前的新修改也不会进入该差异。调用方需要明确待审状态和比较范围，才能让审查覆盖本次实现。第五、六篇会展开这一问题。源码还没有定义发现问题后的自动修复次数、提交失败重试或回滚协议；无人值守的变体需要补齐停止条件和恢复材料。
 
-### 需求入口与人工操作
+## 二、项目配置怎样成为公共输入
 
-- **`triage`**：处理外部进入、尚未整理的 bug 和需求，通过角色状态机把它们变成可交给 agent 的 Issue。它不重复处理 `to-tickets` 已经生成的票据。
-- **`grilling`、`prototype`、`research`、`wizard` 等独立 Skill**：不要求先经过主流程即可单独调用。
-- **`handoff`**：把目标、事实、未决问题、文件位置和下一步写成可携带的交接材料，服务于换 harness、换目录、协作者或分叉任务。
-- **`wizard`**：处理只能由人完成的凭据配置、第三方控制台操作、CI secret 设置和一次性迁移。
-- **`teach`**：以当前目录为状态工作区，跨会话学习一个概念。
-- **`writing-for-agents`**：面向 Skill、`AGENTS.md` 和其他 agent 消费文档的写作参考。
+### 1、setup 把环境差异写成下游能读取的文件
 
-以上列表是专栏的分析范围。后续文章会按依赖关系逐步核验，不把尚未分析的专题提前写成实现结论。
+Issue tracker（工作项跟踪系统）负责保存和跟踪工作项；Issue 指其中一项需求、缺陷、规格或实现工作。不同项目可能用 GitHub、GitLab，也可能以 Markdown 文件记录。`to-spec` 不应在执行到一半时猜测结果要写到哪里。
 
-## 源码里的五层结构
+`setup-matt-pocock-skills` 负责建立这层约定。它在 `Process` 之前声明：
 
-| 层次 | 目录或文件 | 要确认的事实 |
+```markdown
+This is a prompt-driven skill, not a deterministic script. Explore, present what you found, confirm with the user, then write.
+```
+
+执行从读取 Git 远端、既有 `CLAUDE.md` 或 `AGENTS.md`、文档目录及已安装能力开始。agent 据此提出 Issue tracker 建议；安装了 `triage` 才询问角色标签；只有发现多包仓库信号，才提供多领域文档布局选项。普通项目默认使用根目录的 `CONTEXT.md` 和 `docs/adr/`。
+
+它展示拟写入的配置，接收用户修改，再更新项目指令文件中的 `Agent skills` 区块。结果分成几个可独立维护的文件：
+
+| 产物 | 保存什么 | 谁消费 |
 | --- | --- | --- |
-| Skill 本体 | `skills/*/*/SKILL.md` | 名称、触发描述、流程指令、输出边界和依赖关系是什么？ |
-| 调用协议 | `.agents/invocation.md`、`agents/openai.yaml` | user-invoked 与 model-invoked 如何区分？两个 harness 的调用策略是否一致？ |
-| 工作流路由 | `skills/engineering/ask-matt/` | Skill 清单如何变成主流程、分支和阶段边界？ |
-| 状态与词汇 | `CONTEXT.md`、`.agents/adr/`、`domain-modeling/` | 什么知识会跨会话留下来，什么决定需要被记录？ |
-| 发布与安装 | `.claude-plugin/`、`scripts/link-skills.sh`、`package.json` | 本地链接、Claude Code 插件和版本同步各自维护什么不变量？ |
+| `docs/agents/issue-tracker.md` | 创建、读取和更新 Issue 的方式 | `to-spec`、`to-tickets`、`triage`、`wayfinder` |
+| `docs/agents/triage-labels.md` | 分诊角色与实际标签字符串的映射 | `triage`，以及发布时使用 `ready-for-agent` 的 `to-spec`、`to-tickets` |
+| `docs/agents/domain.md` | 术语文档及 ADR 的位置、读取规则 | 探索代码和维护领域知识的 skill |
+| `CLAUDE.md` 或 `AGENTS.md` 中的引用 | 上述配置的入口 | 进入项目工作的 agent |
 
-这张地图用于定位后续文章的证据，不把目录层次直接等同于运行时架构。每个结论都要回到具体文件、调用关系或配置约束。
+`Process → 4. Write` 规定：已有 `CLAUDE.md` 时修改它，否则使用已有 `AGENTS.md`；两者都没有才询问要创建哪个。已有 `Agent skills` 区块应原位更新，并保留周围的用户内容。这里的重复执行策略写在指令中，由 agent 实施，不能当成脚本已经完成了结构化合并。
 
-## 当前正文
+标签配置还有一处条件不匹配：setup 仅在安装了 `triage` 时生成映射，而 `to-spec`、`to-tickets` 也要求提供标签词汇。如果只安装后两者，setup 可能省略它们需要的配置，重复运行也不保证补齐。编写这种公共配置入口时，生成条件需要覆盖所有消费者，不能只按文件名称判断它属于哪个 skill。
 
-- [ask-matt：路由型 Skill 怎样组织一组工程工作流](./01-ask-matt-router.md)
-- [grilling：用 frontier 和 design tree 组织多轮需求访谈](./02-grilling-interview.md)
-- [grill-with-docs 与 domain-modeling：把访谈结果留下来](./03-grill-with-docs-domain-modeling.md)
-- [to-spec → to-tickets：从对话到可执行工作单元](./04-to-spec-to-tickets.md)
-- [tdd、diagnosing-bugs 与 implement：把实现变成可反馈的交付闭环](./05-tdd-diagnosing-bugs-implement.md)
-- [code-review、codebase-design 与 improve-codebase-architecture：从审查到架构改进](./06-code-review-codebase-design-architecture.md)
-- [triage 与 wayfinder：从外部请求到决策地图](./07-triage-wayfinder.md)
-- [prototype、research 与 to-questionnaire：把未知变成可用证据](./08-prototype-research-questionnaire.md)
-- [handoff、teach、writing-for-agents 与 wait-what：上下文怎样移动、累积和纠偏](./09-handoff-teach-writing-wait-what.md)
+### 2、配置缺失是否阻塞，要看后果
 
-## 后续分析顺序
+`.agents/adr/0001-explicit-setup-pointer-only-for-hard-dependencies.md` 区分两种依赖：`to-spec`、`to-tickets`、`triage` 缺少发布位置或标签映射，会把输出写错，因此明确提示先 setup；术语表和历史 ADR 则能提高测试、诊断或架构分析的准确度，缺失时仍可工作。
 
-| 顺序 | Skill / 专题 | 重点源码 | 要回答的问题 |
+`skills/engineering/setup-matt-pocock-skills/domain.md` 的 `Before exploring, read these` 给出实际降级行为：
+
+```markdown
+If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
+```
+
+因此 setup 主要确定“文档应该在哪里、怎样读取”，不会为了填满目录而预先生成全部领域知识。术语得到确认时再写术语表，重要决策落定时再写 ADR。对新 skill 而言，前置条件应绑定错误后果：缺了会写错位置就阻塞，缺了只少一层背景就允许降级。
+
+## 三、一项需求怎样经过这些 skill
+
+### 1、同一份信息在不同阶段变成不同产物
+
+以下以“给已有服务增加某项能力”为说明场景，表格归纳 `ask-matt` 的路线，不代表仓库实现了自动调度这些阶段的程序。
+
+| 当前材料 | 处理入口 | 新增或变化的状态 | 下一阶段怎样使用 |
 | --- | --- | --- | --- |
-| 1 | `ask-matt` | `skills/engineering/ask-matt/SKILL.md`、`PHASE-BOUNDARIES.md` | 路由器怎样表达主流程、旁路、独立工具和阶段切换？ |
-| 2 | `grilling` | `skills/productivity/grilling/SKILL.md` | frontier、round 和 design tree 怎样控制一次访谈的提问顺序？ |
-| 3 | `grill-with-docs` + `domain-modeling` | 两个 Skill 的 `SKILL.md`、`CONTEXT.md`、ADR 格式 | 同一套澄清工作为什么要分成访谈原语、文档入口和领域语言层？ |
-| 4 | `to-spec` → `to-tickets` | 对应 `SKILL.md`、Issue tracker 配置 | 对话如何变成带阻塞关系、可交给实现阶段的工作单元？ |
-| 5 | `tdd` + `diagnosing-bugs` + `implement` | 对应 `SKILL.md` 和依赖关系 | 测试反馈怎样覆盖正常实现、困难调试和多步交付？ |
-| 6 | `code-review` + `codebase-design` + `improve-codebase-architecture` | 对应 `SKILL.md` | 标准审查、规格审查、模块设计和架构维护怎样分工？ |
-| 7 | `triage` + `wayfinder` | 对应 `SKILL.md`、Issue tracker 状态约定 | 外部需求和大型未知工作如何接入主流程？ |
-| 8 | `prototype` + `research` + `to-questionnaire` | 对应 `SKILL.md`、交接和引用产物 | 运行实验、资料研究和外部信息收集怎样为后续方案提供证据？ |
-| 9 | `handoff` + `teach` + `writing-for-agents` + `wait-what` | 对应 `SKILL.md`、`.agents/` 文档 | 上下文移动、学习状态、agent 文档和会话纠偏如何独立成能力？ |
-| 10 | 插件与安装面 | `.claude-plugin/`、`.agents/adr/0002-*.md`、`scripts/` | promoted Skill、插件显式清单和其他 harness 的能力差异如何影响发布结构？ |
+| 模糊目标、现有代码和约束 | 用户选择 `grill-with-docs` | 会话中的未决问题逐轮减少；确认的术语和重要决定写入文档 | 继续澄清，或判断是否需要运行证据 |
+| 纸面上难以判断的设计问题 | `prototype` | 生成可操作的实验，保留问题、运行方式和结论 | 将实验结果带回原讨论 |
+| 已明确的行为和边界 | 用户选择 `to-spec` | 形成发布到 Issue tracker 的规格 | 拆分时以规格为共同依据 |
+| 规格、预期验收行为 | 用户选择 `to-tickets` | 形成纵向实现 Issue，声明阻塞关系 | 选择前置工作已完成的 Issue |
+| 可执行 Issue、已有实现 | 用户选择 `implement` | agent 按需使用 `tdd`，产生实现和测试，再调用 `code-review` | 结合审查结果收尾和提交 |
 
-这条路线先读“怎么选”，再读“怎么问”和“怎么留下决策”，最后读“怎么执行、反馈和验收”。它按工作流依赖排列，不按目录字母序排列。
+纵向实现 Issue 指一次穿过必要模块、交付一个可验证行为的工作单元。例如一个请求从入口到数据读取再到返回值的最小链路，比把“所有接口”“所有存储”分成两张大 Issue 更早暴露模块连接问题。源码将这种切片称为 tracer bullet，相关拆分准则在第四篇展开。
 
-## 和相邻专栏的边界
+如果工作能在当前会话内说清并完成，`ask-matt` 允许从澄清直接进入 `implement`。跨会话交付需要更完整的规格和 Issue；把每个小改动都塞进全部阶段，会增加写文档和重新读取的成本。
 
-本目录下的两个子专栏研究对象不同：
+### 2、状态保存在会话、文件和 Issue 中
 
-- [Anthropic Skills](../anthropic-skills) 继续作为另一份本地 Skill 目录的独立案例；
-- 本专栏分析 GitHub 项目 [`mattpocock/skills`](https://github.com/mattpocock/skills)。`D:\open_code\skills-grill` 只是本地目录名；文章中的版本、项目名和源码结论以 GitHub 项目及对应快照为准。
-- 本专栏的落点是从这些 Skill 中提炼后续编写时可以复用的设计经验：触发边界、流程编排、Skill 组合、上下文沉淀、反馈闭环和发布约束。
+访谈中的 design tree（设计决策树）和 frontier（前提已满足的待决问题集合）由模型在会话中维护；仓库没有为它们定义序列化对象或数据库表。用户回答后，agent 重新判断哪些问题已解决、哪些后续问题可以提问。
 
-两者都可以讨论 Skill 的加载和调用，但不能互相充当事实来源，也不能把一套仓库的文章结构或规则推成另一套仓库的实现结论。
+跨会话信息需要外部载体。`CONTEXT.md` 保存稳定术语，ADR 保存重要决策，规格保存要实现的行为，Issue 保存当前工作单元及其依赖。`handoff` 另外生成可携带的交接文件，用于换目录、换宿主、交给协作者或分出旁支任务。
 
-## 后续文章的判断标准
+`ask-matt` 建议澄清到拆分尽量保留连续上下文，使规格继承讨论理由；Issue 足够自包含后，各次实现可以从新会话开始。若规格只写“按上面讨论实现”，清理会话就会丢掉真正的约束。这也是拆分篇强调单张 Issue 必须独立可读的原因。
 
-每篇具体拆解至少要交代五件事：
+### 3、不同未知问题从不同入口处理
 
-1. **源码位置**：结论落在哪个文件、哪个入口或哪条依赖关系；
-2. **运行边界**：输入从哪里来，状态写到哪里，下一步由谁消费；
-3. **工程代价**：这套拆法减少了什么混乱，又增加了哪些配置、上下文或维护成本；
-4. **复用经验**：哪些设计经验值得迁移到新 Skill，迁移时需要补哪些上下文，哪些只适用于 `mattpocock/skills` 的 harness 和工作流。
+外部提交的原始需求先由 `triage` 判断信息是否齐全、谁适合接手；它不应再处理 `to-tickets` 已经整理好的 Issue。大型工作连决策路径都不清楚时，`wayfinder` 建立决策地图，以研究、原型和访谈逐步回答问题。地图清晰后通常先进入 `to-spec`，把分散决定整理为构建方案。
 
-README 只用于建立目录和产品叙述的背景。涉及触发、组合、退化或发布不变量时，以 `SKILL.md`、配置、脚本和 ADR 为准；尚未逐篇核验的内容保持在“待拆问题”层，不提前写成结论。
+困难缺陷进入 `diagnosing-bugs`，先建立能观察到当前故障的反馈，再调查原因。外部资料不足可使用 `research`，只有他人才掌握的信息可通过 `to-questionnaire` 收集。这些入口补齐不同类型的证据，不要求用户把所有问题都重新包装成需求访谈。
+
+## 四、按要理解的机制选择正文
+
+| 正文 | 核心问题 |
+| --- | --- |
+| [01 · ask-matt](./01-ask-matt-router.md) | 路由如何推荐入口，何时保留或交接上下文？ |
+| [02 · grilling](./02-grilling-interview.md) | 依赖关系如何决定提问轮次，事实调查如何与用户决策并行？ |
+| [03 · grill-with-docs 与 domain-modeling](./03-grill-with-docs-domain-modeling.md) | 一句组合指令如何把访谈结果沉淀成术语和 ADR？ |
+| [04 · to-spec 与 to-tickets](./04-to-spec-to-tickets.md) | 如何把讨论写成规格，再拆成可独立实现的 Issue？ |
+| [05 · tdd、diagnosing-bugs 与 implement](./05-tdd-diagnosing-bugs-implement.md) | 测试和诊断怎样约束实现推进，失败反馈怎样进入下一轮？ |
+| [06 · code-review、codebase-design 与架构改进](./06-code-review-codebase-design-architecture.md) | 固定审查范围、共享模块词汇和架构调查如何配合？ |
+| [07 · triage 与 wayfinder](./07-triage-wayfinder.md) | Issue 角色和决策地图如何表达等待、认领、阻塞与完成？ |
+| [08 · prototype、research 与 to-questionnaire](./08-prototype-research-questionnaire.md) | 运行实验、资料研究和他人反馈各自产生什么证据？ |
+| [09 · handoff、teach、writing-for-agents 与 wait-what](./09-handoff-teach-writing-wait-what.md) | 上下文如何移动、跨会话积累和重新解释？ |
+| [10 · 发布、安装与版本同步](./10-release-install-versioning.md) | 指令文件如何进入发布集合，维护脚本实际检查了什么？ |
+| [11 · 怎样编写个人 skill](./11-writing-personal-skills.md) | 如何从重复任务写出第一版，并通过实际使用改进触发、过程和完成条件？ |
+| [可直接使用 · source-walkthrough](./source-walkthrough/SKILL.md) | 一份完整的源码解析与文章改写 skill，可交给 agent 读取执行或迁移到目标宿主。 |
+
+## 五、复用这套组织方式需要付出什么
+
+`skills/` 下的 bucket 是目录分组：`engineering/`、`productivity/` 收纳正式发布能力；`misc/`、`in-progress/`、`deprecated/` 分别收纳较少使用、在建和退役的能力。目录分组与调用权限无关，`productivity/grill-me` 是用户入口，同组的 `grilling` 可以被模型调用。正式发布目录又不同于工作流顺序，`ask-matt` 单独维护它们之间的路线。
+
+这套拆法让 `grill-me` 和 `grill-with-docs` 共享访谈规则，让 `triage`、`wayfinder` 也能复用 `grilling`；同时增加了名称依赖、配置入口和发布清单的维护成本。改名一个 skill，需要连同路由和调用方一起更新；修改一种产物格式，需要检查读取它的后续 skill。
+
+编写自己的 skill 时，可以从一个具体任务开始：写清 agent 接到什么材料、需要补查哪些事实、哪些决定留给用户、产生什么可检查的结果、满足什么条件才结束。等多个入口确实重复同一种行为，再把它抽成共享 skill。`grill-with-docs` 的短正文能成立，是因为被调用的访谈和领域建模规则已经完整；脱离这些依赖，只复制那一句话不会得到同样的执行过程。

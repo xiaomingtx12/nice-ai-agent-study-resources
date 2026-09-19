@@ -1,217 +1,218 @@
 ---
 sidebar_position: 2
 title: "ask-matt：路由型 Skill 怎样组织一组工程工作流"
-description: 从 mattpocock/skills 的 ask-matt 源码拆解入口、路由、上下文切换和发布合同，说明路由型 Skill 为什么这样组织。
+description: 沿 ask-matt 的任务分支、能力委托和阶段边界，解释路由如何推荐下一入口，以及上下文与产物怎样接续。
 ---
 
 # ask-matt：路由型 Skill 怎样组织一组工程工作流
 
-:::info 版本基线
+:::info 版本基线与源码入口
 
-本文分析 GitHub 项目 [`mattpocock/skills`](https://github.com/mattpocock/skills) `v1.2.3``。
+项目：[`mattpocock/skills`](https://github.com/mattpocock/skills)。`package.json` 版本：`1.2.3`；commit：`84fdeffd12f2ee307994d1eb6feb48173b6e0502`。
+
+| 项目相对路径 | 真实入口 | 阅读用途 |
+| --- | --- | --- |
+| `skills/engineering/ask-matt/SKILL.md` | `The main flow: idea → ship`、`On-ramps`、`Phase boundaries`、`Precondition` | 路径选择、上下文处理与前置条件 |
+| `skills/engineering/ask-matt/PHASE-BOUNDARIES.md` | `The tree`、`These are judgement calls` | 阶段边界的判断顺序 |
+| `skills/engineering/ask-matt/agents/openai.yaml` | `policy.allow_implicit_invocation` | 配套调用配置 |
+| `.agents/invocation.md` | `Model-invoked vs user-invoked`、`Dependencies between them` | 人工入口与能力委托的边界 |
+| `skills/engineering/implement/SKILL.md` | 正文 `Use /tdd where possible`、`Once done` 两段，无章节标题 | 核对实现阶段的内部委托 |
+| `skills/engineering/code-review/SKILL.md` | `Process / 1. Pin the fixed point` | 审查范围与固定点要求 |
+| `docs/engineering/ask-matt.md` | `What it does`、`Prerequisites`、`Common questions` | 配套说明中的行为边界与已知问题 |
+
+以下摘录保留英文指令，中文解释紧随其后。Markdown 中的章节是模型阅读入口，不是程序函数。
 
 :::
 
-## ask-matt 是什么
+## 一、路由的结果是一项建议
 
-`ask-matt` 是一份用户显式调用的路由 Skill。它不修改业务代码，也不执行下游 Skill，只回答两个问题：
+`ask-matt` 接收用户对当前处境的描述，给出适合的 skill 或工作路径，以及哪些地方需要用户选择、保留上下文或切换会话。它的工作止于推荐；用户再显式进入相应流程。
 
-1. 当前任务应该从哪个入口开始？
-2. 当前阶段结束后，哪些上下文需要保留、交接或清理？
+这一边界在配套说明中比 `SKILL.md` 更明确。`docs/engineering/ask-matt.md` → `What it does`：
 
-```text
-当前任务
-   │
-   ▼
-/ask-matt  ──推荐下一入口──> 具体 Skill
-                                  │
-                                  ▼
-                           产生下一阶段材料
+```markdown
+It recommends and stops.
 ```
 
-它在这组 Skill 中承担的是工作流导航职责。访谈、原型、规格、票据、实现、测试和审查由其他 Skill 负责。
+这里的停止指不启动所推荐的目标流程，并不禁止读取自身参考文件：`skills/engineering/ask-matt/SKILL.md` → `Phase boundaries` 明确要求阅读 `PHASE-BOUNDARIES.md`。推荐范围是本项目人工维护的流程地图，不是扫描已安装的全部 skill 后生成的清单。
 
-## 源码分析
+因此，一次路由前后的变化是“用户不知道从哪里开始”变成“用户拿到下一入口和选择依据”。规格、工作项、代码和审查报告尚未产生。源码也没有路由注册表、条件执行器或工作流状态存储；模型阅读一张人工维护的流程地图，再结合用户描述作判断。
 
-下面按调用链阅读源码。代码块均为项目源码摘录；本文只解释这些结构解决了什么问题，以及编写类似 Skill 时应如何判断。
+这里的 **flow（工作路径）** 是多个 skill 之间有条件的衔接。例如“想法需要跨多个会话实现”，对应澄清、规格、任务拆分和逐项实现；“只是一个已经明确的小改动”，则不必支付整条路径的文档成本。命令名相似并不是选路依据，任务阶段和缺少的材料才是。
 
-### 1. 入口为什么只允许用户触发
+## 二、人工入口怎样限制委托范围
 
-`skills/engineering/ask-matt/SKILL.md` 的 frontmatter：
+### 1、调用配置与说明面向不同读者
+
+`skills/engineering/ask-matt/SKILL.md` → frontmatter（文件头部元数据）：
 
 ```yaml
----
 name: ask-matt
 description: Ask which skill or flow fits your situation. A router over the skills in this repo.
 disable-model-invocation: true
----
 ```
 
-对应的 `skills/engineering/ask-matt/agents/openai.yaml`：
+`skills/engineering/ask-matt/agents/openai.yaml` → `policy`：
 
 ```yaml
-interface:
-  display_name: "Ask Matt"
-  short_description: "Find the right skill or workflow"
 policy:
   allow_implicit_invocation: false
 ```
 
-`disable-model-invocation: true` 关闭 Claude Code 的模型自动调用；`allow_implicit_invocation: false` 关闭 Codex 的隐式调用。两个配置共同把 `ask-matt` 定义为人工入口。
+按本仓库 `.agents/invocation.md` 的约定，这两处配置共同表达“由用户显式调用”。其中 `description` 给浏览入口的人说明用途；允许模型调用的 skill 则在描述中保留丰富的触发条件，帮助模型判断何时使用。这是该快照的入口约定，`SKILL.md` 本身不实现权限检查。
 
-`.agents/invocation.md` 进一步规定：user-invoked Skill 不能隐式调用另一个 user-invoked Skill。
+### 2、推荐用户调用与指示模型使用要分开
 
-这样写有三个原因：
+`.agents/invocation.md` → `Model-invoked vs user-invoked`：
 
-- 路由需要用户提供任务阶段、项目状态和优先级，模型不能只凭关键词替用户选入口；
-- 路由器只负责导航，自动启动下游人工入口会把选择权隐藏在中间过程里；
-- 禁止 user-invoked Skill 互相隐式调用，可以阻止路由链形成不可见递归。
-
-因此，`ask-matt` 的输入是用户主动提出的工作流问题，输出是一个入口建议。代码、Issue、测试和审查结果都属于下游 Skill 的职责。
-
-**可迁移判断：**需要用户在多个工作流之间做选择时，才设置人工入口。若一个 Skill 可以根据任务内容直接执行，才适合使用模型自动调用，并在 description 中写触发场景。
-
-### 2. 路由为什么按阶段分组
-
-`ask-matt/SKILL.md` 没有把所有 Skill 做成平铺清单，而是分成主流程、on-ramps（旁路入口）、standalone（独立工具）和 vocabulary underneath（底层共享词汇）。这些分组对应任务的不同状态。
-
-#### 主流程
-
-源码中的主流程是：
-
-```text
-/grill-with-docs
-  → 需要运行验证：/handoff → /prototype → /handoff
-  → 需要跨会话：/to-spec → /to-tickets
-  → /implement
-  → /tdd
-  → /code-review
+```markdown
+A user-invoked skill may invoke model-invoked skills, but it can never reach another user-invoked skill.
 ```
 
-| 当前状态 | 入口 | 产物 | 下游消费者 |
+人工入口可以要求模型使用允许模型调用的能力；另一个人工入口仍由用户发起。`ask-matt` 提到 `/grill-with-docs`、`/to-spec`、`/to-tickets`、`/implement` 时是在推荐路径，不代表模型可以自行连续启动它们。
+
+同文件 → `Dependencies between them`：
+
+```markdown
+Dependencies are expressed as **`/skill`-style prose invocation** ("Run the `/grilling` skill"), not deep `../other-skill/FILE.md` cross-references. Shared reference docs live inside the skill that owns them; other skills reach that material by invoking the skill, not by linking across folders.
+```
+
+`/grilling` 这样的名字表达能力依赖，内部参考文件由该 skill 负责组织。这能让调用方避开被依赖方的目录细节，但它仍是文本指令：没有依赖解析器保证目标已安装、已加载或已执行。写自用路由时，需要分别表达“建议用户进入某流程”和“当前流程应使用某能力”，不能把两者都画成自动调用箭头。
+
+## 三、主路径怎样把讨论变成可执行工作
+
+### 1、先判断问题能否通过讨论解决
+
+`skills/engineering/ask-matt/SKILL.md` → `The main flow: idea → ship`，第 2 步中的原型往返指令：
+
+```markdown
+   - **`/handoff`** out, then open a fresh session against that file,
+   - **`/prototype`** to answer the question with throwaway code,
+   - **`/handoff`** back what you learned, and reference it from the original idea thread.
+```
+
+主路径从 `/grill-with-docs` 开始，在项目中访谈并留下术语与必要决策记录；没有项目工作目录时，地图推荐 `/grill-me`。当问题必须运行状态逻辑、查看界面或体验交互才能回答时，才进入上述原型分支。
+
+`/handoff` 负责把交接信息写成可携带的 Markdown 文件；原型使用独立目录和会话，回答一个设计问题；返回时把结论带回原讨论。这里有两个方向的信息流：出去的是待验证问题、约束和背景，回来的是实验结论。路由器只说明这条路径，不创建原型或交接文件。
+
+例如讨论“长表单还是分步填写”已经无法继续推进时，继续增加访谈问题不会产生界面体验证据。原型分支补的正是这类输入，而不是提前开始正式实现。
+
+### 2、再判断实现是否需要跨会话
+
+同文件、同章节的第 3 步按 `is this a multi-session build?` 分支。长分支要求先用 `/to-spec` 把讨论整理为规格，再用 `/to-tickets` 拆分任务；短分支的源码为：
+
+```markdown
+   - **No** → **`/implement`** right here, in the same context window.
+```
+
+跨会话分支中的 **tracer-bullet ticket（贯穿端到端行为的工作项切片）** 要贯穿一个可验证行为所需的层次，并能在一次新会话内实现。每个工作项声明 **blocking edges（阻塞依赖）**：哪些其他工作项完成后，它才能开始。这里讨论的是工作项产物的依赖，不能与 skill 之间的文本委托混为一谈。
+
+| 路径位置 | 消费什么 | 留下什么 | 下一步怎样接续 |
 | --- | --- | --- | --- |
-| 想法仍然模糊 | `/grill-with-docs` | `CONTEXT.md`、ADR、已确认决策 | 原型或规格阶段 |
-| 纸面无法回答设计问题 | `/prototype` | 可运行实验和结论 | 原始想法线程 |
-| 方案需要跨会话保存 | `/to-spec` | 规格说明 | `/to-tickets` |
-| 规格需要拆成执行单元 | `/to-tickets` | tracer-bullet tickets 和阻塞关系 | `/implement` |
-| 已有可执行工作 | `/implement`、`/tdd` | 代码、测试和反馈 | `/code-review` |
-| 实现需要验收 | `/code-review` | Standards 与 Spec 审查结果 | 修改或提交 |
+| 访谈 | 用户想法、项目事实 | 会话中的决策，已澄清术语和必要 ADR | 在同一会话继续整理 |
+| 规格 | 当前讨论及代码理解 | 描述目标、实现与测试取舍的规格 | 用户进入任务拆分 |
+| 任务拆分 | 规格、计划或已有讨论 | 自包含工作项及阻塞依赖 | 选择阻塞项已完成的工作项 |
+| 逐项实现 | 一个工作项的完整要求 | 代码、测试与审查结果 | 完成后切换到下一工作项 |
 
-这种分组解决了两个问题。第一，读者可以从任务状态找到入口，不需要记住所有 Skill 名称。第二，每个阶段都有明确产物，前一个阶段的结果能够成为后一个阶段的输入。
+ADR 是架构决策记录，用来保存值得长期保留的选择及原因。术语表和 ADR 不覆盖所有访谈答案，不能用这两个文件替代完整讨论；这也是规格形成前保留会话的原因。
 
-主流程中的分支也有具体条件：已经明确的方案不必重复访谈；必须运行代码或查看界面才能回答的问题才进入 `/prototype`；需要跨会话协作时才进入 `/to-spec` 和 `/to-tickets`。
+### 3、测试和审查属于实现内部的委托
 
-#### 旁路、独立工具和词汇层
+`skills/engineering/implement/SKILL.md` → 正文，以下为不连续摘录，中间省略了检查频率指令：
 
-| 类型 | 入口 | 为什么单独处理 | 后续关系 |
-| --- | --- | --- | --- |
-| On-ramp | `/triage` | 接收外部原始 bug 或需求 | 整理后交给 `/implement` |
-| On-ramp | `/diagnosing-bugs` | 先为难复现问题建立反馈环 | 修复并补回归测试 |
-| On-ramp | `/wayfinder` | 处理规模大且路径不清晰的工作 | 地图清晰后回到 `/to-spec` |
-| Standalone | `/grill-me`、`/research`、`/wizard` 等 | 可以脱离主流程独立产出结果 | 按产物接入其他阶段 |
-| Vocabulary | `/domain-modeling`、`/codebase-design` | 提供术语和模块设计框架 | 被其他 Skill 引用 |
-
-`/triage` 只处理外部进入、尚未整理的问题，不能再次处理 `/to-tickets` 已经生成的工作单元。`/wayfinder` 只负责建立决策地图，不能跳过规格阶段直接代替实现。
-
-这样写的原因是：入口分类本身就是路由规则。主流程描述常规交付，on-ramp 描述异常或外部进入方式，standalone 标出无需前置条件的工具，词汇层则不制造新的交付阶段。
-
-**可迁移判断：**路由表至少要说明进入条件、入口、产物和下游消费者。只有命令名的列表无法解释选择依据，也无法约束错误回流。
-
-### 3. 上下文为什么在阶段边界切换
-
-`PHASE-BOUNDARIES.md` 把会话管理放在阶段边界，并按顺序列出五个选项：
-
-```text
-1. Can you continue in this session? → Continue
-2. Is the context irrelevant?        → /clear
-3. Do you need to hand off?          → /handoff
-4. Can the task be done AFK?         → Subagent
-5. Otherwise                         → /compact
+```markdown
+Use /tdd where possible, at pre-agreed seams.
 ```
 
-这不是每执行一个 Skill 就切换上下文。当前阶段仍是下一阶段的主要事实来源时，优先继续当前会话；当前信息完全无关时才清空；需要换 harness、目录或协作者时才写交接文件；固定范围的后台任务才交给 subagent；剩余情况使用 `/compact`。
+```markdown
+Once done, use /code-review to review the work.
 
-把 `Continue` 放在第一位，是因为压缩和交接都会把完整讨论变成有损摘要。摘要减少上下文占用，但可能丢失决策原因和被否定的方案。这个顺序把信息损失当作阶段切换的成本来处理。
-
-**可迁移判断：**上下文动作应绑定阶段边界，而不是绑定某个 Skill 名称。判断依据是下一阶段需要什么信息、任务是否需要人工决策，以及是否发生了 harness 或目录迁移。
-
-### 4. Skill 为什么用名称组合
-
-`.agents/invocation.md` 要求依赖使用 `/skill` 风格的文字调用，不使用 `../other-skill/FILE.md` 这样的内部路径引用：
-
-```text
-Dependencies are expressed as /skill-style prose invocation,
-not deep ../other-skill/FILE.md cross-references.
+Commit your work to the current branch.
 ```
 
-`ask-matt` 因此使用 `/grill-with-docs`、`/to-spec`、`/implement` 等能力名称组织流程，而不读取这些目录里的文件。
+TDD（测试驱动开发）在预先约定的测试边界上，以失败测试和最小实现逐步推进；`/code-review` 在实现完成后检查编码规范与需求符合情况。两者在此版本都允许模型调用，因此 `/implement` 可以指示模型使用它们。
 
-这样写是为了隔离两个变化面：
+主路径应理解为“用户进入 `/implement`，模型在其中使用 `/tdd`，完成后使用 `/code-review`，再提交”，而不是“实现完毕，用户另起一轮 TDD，再另起一轮审查”。`where possible` 也应保留：具体实现入口没有保证所有工作一律测试先行。
 
-- Skill 可以移动内部参考文件，调用方不需要跟着修改路径；
-- 维护者可以直接从调用名称阅读依赖关系；
-- 能力依赖和运行条件可以分开：前者写 `/to-tickets`，后者另写“调用前必须存在规格文件”。
+这段交接仍有缺口：`skills/engineering/code-review/SKILL.md` → `Process / 1. Pin the fixed point` 使用 `git diff <fixed-point>...HEAD`，不涵盖未提交内容，而 `implement` 也没有传递审查固定点，不能据此假定提交前审查已经完整覆盖本次修改；详见 [05：实现与反馈](./05-tdd-diagnosing-bugs-implement.md) 和 [06：审查范围](./06-code-review-codebase-design-architecture.md)。
 
-调用名称解决“由谁处理”，输入契约解决“拿什么处理”。两者不能混成一个路径引用。
+## 四、旁路按缺少什么材料来选
 
-### 5. 发布为什么需要同步多份文件
+`On-ramps` 指那些从不同处境进入主流程的入口，不能被压成一条必经链。`skills/engineering/ask-matt/SKILL.md` → `On-ramps` 对误用 `/triage` 有明确限制：
 
-`ask-matt` 的交付面包括：
+```markdown
+  Triage is only for issues **you didn't create** — bug reports, incoming feature requests, anything that arrives raw. Tickets that `/to-tickets` produced are already agent-ready, so **don't triage them**.
+```
 
-| 合同 | 文件 | 负责内容 |
+外部 bug 报告和新需求缺少整理，需要 `/triage` 补成可执行问题；`/to-tickets` 已经完成这项整理，再分诊一次只会重复工作。
+
+| 当前缺口 | 推荐入口 | 接回主路径的条件 |
 | --- | --- | --- |
-| 行为合同 | `SKILL.md` | 名称、职责、路由和边界 |
-| 调用合同 | frontmatter、`agents/openai.yaml` | Claude Code 和 Codex 的调用策略 |
-| 分发合同 | 顶层 README、bucket README、`.claude-plugin/plugin.json`、安装脚本 | Skill 发现、插件发布和本地链接 |
+| 外部报告缺少执行所需信息 | `/triage` | 整理成 agent 能接手的问题后进入 `/implement` |
+| 故障原因未知，缺少稳定反馈 | `/diagnosing-bugs` | 先获得能复现该问题的失败命令，再定位和修复 |
+| 工作太大，连设计问题之间的关系都不清楚 | `/wayfinder` | 用决策票据逐步弄清方向，再进入 `/to-spec` |
+| 尚未选中要改进的架构位置 | `/improve-codebase-architecture` | 选中候选后，以新想法进入 `/grill-with-docs` |
 
-项目根目录 `CLAUDE.md` 要求正式发布的 `engineering/`、`productivity/` Skill 同步顶层 README、对应 bucket README 和插件清单。`.claude-plugin/plugin.json` 的 `skills` 数组包含 `./skills/engineering/ask-matt`；`scripts/link-skills.sh` 把 Skill 链接到本地 harness 目录。
+`wayfinder` 分支还保留了小范围例外。相同源码章节中的原文句子：
 
-这套维护面解决的是发布一致性，不属于路由算法本身。新增、改名或改变调用方式时，如果只更新 `SKILL.md`，就可能出现 README 能看到但插件找不到，或 Claude Code 和 Codex 的触发策略不一致。
+```markdown
+Looping the map straight into `/implement` skips that collapse and throws the linked detail away — go straight to `/implement` only when the effort turned out genuinely small.
+```
 
-**可迁移判断：**项目有多个 Skill 发现和安装入口时，需要把这些文件当作发布合同一起检查。小型项目只有一个宿主时，可以减少适配文件，但仍应保留一个明确的行为入口。
+大范围探索的决策分散在多张决策票据中，需要规格把它们合成可实现方案；如果探索后发现事情很小，允许直接实现。因此“必须经过规格”不是无条件规则。
 
-## 为什么这套写法适合这个项目
+`Vocabulary underneath` 单列 `/domain-modeling` 和 `/codebase-design`，分别处理项目领域语言和模块设计词汇；`Standalone` 收纳研究、原型、教学等可直接使用的能力。分组的作用是让用户知道“我缺一种能力”与“我进入交付下一阶段”是两类选择，而非要求每个请求遍历整个目录。
 
-把前面的源码放在一起，可以看出 `ask-matt` 的结构顺序并非随意排列：
+## 五、上下文切换怎样服从阶段边界
 
-1. **先限制触发者**：路由需要人工判断，先用两个 harness 的配置锁定入口；
-2. **再排列任务阶段**：用主流程表达常规路径，用旁路承接外部问题、故障和大型未知工作；
-3. **然后处理上下文**：在阶段结束时判断继续、清空、交接、委派还是压缩；
-4. **最后维护组合和发布**：通过 Skill 名称隔离目录，通过清单保证多个宿主和安装面一致。
+### 1、讨论材料先形成任务，再允许丢弃
 
-这也是路由型 Skill 应该具备的最小结构。它的价值不在于列出更多命令，而在于给每个入口补上选择条件、边界和产物去向。
+`skills/engineering/ask-matt/SKILL.md` → `Context hygiene`：
 
-## 迁移边界
+```markdown
+Keep steps 1–3 in **one unbroken context window** — don't compact or clear until after `/to-tickets` — so the grilling, spec, and tickets all build on the same thinking. Each `/implement` then starts fresh, working from the ticket.
+```
 
-### 可以采用
+这条规则对应材料的变化：访谈到任务拆分依赖同一段推理，工作项形成后才有可以独立消费的输入。多任务实现之间清空上下文，是建立在工作项自包含的前提上；如果关键约束只留在上一个会话，清空就会丢失依据。
 
-- 路由入口只负责选择，不代替下游执行；
-- 按任务阶段组织主流程和旁路；
-- 每条路径说明进入条件、输入、产物和下游消费者；
-- 在阶段边界处理上下文切换；
-- 通过 Skill 名称表达能力依赖；
-- 明确禁止隐式递归和错误回流。
+同节也给了例外：当会话接近所谓 **smart zone（仍能有效推理的上下文范围）** 时，在最近的阶段边界压缩后继续。源码写了约 `150k tokens` 的经验值，但没有容量检测、自动切换或跨模型保证；实际应用应把它看作作者的会话管理启发，而非固定安全阈值。
 
-### 需要改造
+### 2、五个选项有顺序，第一项匹配即选中
 
-- `CONTEXT.md`、ADR、Issue tracker 和 ticket 阻塞关系要替换成目标项目已有的状态存储；
-- `/clear`、`/compact`、`/handoff` 和 subagent 属于特定 harness 的会话能力，其他宿主需要定义替代动作；
-- Standards 与 Spec 双轴审查适合有编码规范和规格来源的项目，小型项目可以合并；
-- 如果项目只有一个下游 Skill，就不需要额外设置路由器。
+`skills/engineering/ask-matt/PHASE-BOUNDARIES.md` → `The tree`：
 
-### 不应照搬
+```markdown
+Work top to bottom at the boundary. The first **yes** wins.
+```
 
-- 不要把所有 Skill 的长说明堆在路由文件中；
-- 不要只抄命令名，不写进入条件和产物；
-- 不要让所有请求无条件先经过路由器，已有明确入口的任务可以直接调用目标 Skill；
-- 不要把本文的分析判断当成 `mattpocock/skills` 之外项目的运行事实。
+| 顺序 | 原文问题 | 选择后的信息变化 |
+| --- | --- | --- |
+| 1 | `Can you continue in this session?` | 继续使用完整会话；下阶段需要原始推理，或容量仍足够时优先考虑 |
+| 2 | `Is the context irrelevant to what comes next?` | `/clear` 让后续工作从空上下文开始，要求当前信息可丢弃 |
+| 3 | `Do you need to hand off?` | `/handoff` 把必要信息写成可带走的文件 |
+| 4 | `Can the task be done AFK?` | subagent 在独立上下文执行明确任务并回报，父会话保留 |
+| 5 | `Otherwise, /compact` | 以面向下一阶段的摘要替换完整上下文 |
 
-## 编写检查清单
+AFK 指用户离开键盘、不必持续指导；subagent 指单独承担限定任务并返回结果的子 agent。`/handoff` 的适用条件则是更换 harness（承载 agent 的运行宿主）、更换目录或仓库、交给同事，或在阶段中途分出支线任务。它不承担所有相邻步骤之间的交接。
 
-- [ ] 是否明确 Skill 由用户触发还是模型可自动触发？
-- [ ] 是否先定义职责边界，再写路由规则？
-- [ ] 每条路径是否包含进入条件、输入、产物和下游消费者？
-- [ ] 是否说明阶段边界的上下文动作？
-- [ ] 是否禁止隐式递归和错误回流？
-- [ ] 依赖是否通过 Skill 名称表达？
-- [ ] 宿主配置、README、插件清单和安装方式是否同步？
+这张表描述的是交给模型和用户遵循的判断顺序。参考文件 `These are judgement calls` 明说这些问题依赖判断，同一边界也可能作出不同选择。尤其不能把所有切换都理解成“摘要”：`/clear` 丢弃当前窗口内容，subagent 保留父窗口，只有压缩与交接主要面对摘要损失。
+
+## 六、手写地图的维护成本与使用边界
+
+### 1、前置条件不会自动校验
+
+`skills/engineering/ask-matt/SKILL.md` → `Precondition` 要求首次工程流程前使用 `/setup-matt-pocock-skills` 配置工作项跟踪系统（Issue tracker）、标签和文档布局。路由没有前置条件检测；配套说明 `Prerequisites` 明确指出，即使尚未配置，它仍可能推荐依赖这些条件的路径，也不负责安装所推荐的 skill。
+
+同一说明的 `Common questions` 记录了另一个风险：模型可能把“当前可见的 skill 列表没有该入口”误判为“未安装”。人工入口的可见性与安装状态不能等同，路由文本更不能当成环境探测结果。这些是该基线配套文档记录的局限，不代表路由器已经提供恢复分支。
+
+### 2、摘要能导航，关键行为仍以目标指令为准
+
+路由文件用短说明覆盖整套流程，读起来集中，代价是与各 skill 正文形成两份需要同步的知识。配套说明 `Where it fits` 对冲突给出优先级：
+
+```markdown
+Where the router and a `SKILL.md` disagree, the `SKILL.md` is right.
+```
+
+例如路由摘要把 `/to-spec` 概括为“把讨论变成规格”，而 `skills/engineering/to-spec/SKILL.md` → `Process` 还要求提出测试边界并与用户核对。仅根据摘要决定跳过它，可能同时跳过这项确认。选路时应保留这些条件，依赖某个具体行为时则读目标 skill；不能让导航说明代替能力定义。
+
+自编同类 skill 时，值得沿用的是这里的分支依据：是否有项目目录、能否通过讨论解决、是否跨会话、后续是否需要原始上下文。它们让用户能解释自己为什么走这条路。需要补强的是手写地图无法保证的部分，例如在重要推荐前核对目标能力和前置条件，并写清缺失时的处理方式。只有一两个明确入口的项目则可以直接使用目标 skill，未必需要增加一层导航。
