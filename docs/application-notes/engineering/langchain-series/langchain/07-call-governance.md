@@ -1,23 +1,22 @@
 ---
 sidebar_position: 9
 sidebar_label: 07 调用治理：限额、重试与回退
-description: 对照观察者线的限额中间件与拦截器线的重试、回退中间件，拆开调用次数、失败处理和模型切换的真实边界。
+description: 对照图节点限额与调用包装器中的重试、回退，解释计数口径、失败返回、退避延迟及外部副作用边界。
 ---
 
-# LangChain 源码 07：调用治理——限额、重试与回退
+# LangChain 源码解析 07：调用治理——限额、重试与回退
 
-## 源码定位
+## 一、源码定位
 
-> **阅读基线**：`langchain` 1.3.7（`libs/langchain_v1/`）。
+> **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
+> 路径相对 LangChain 仓库根目录；版本说明见 [系列导读](index.md)。
 >
-> **核心路径**：
->
-> - 模型调用计数与限额退出：`langchain/agents/middleware/model_call_limit.py`。
-> - 工具调用计数、分流和并行工具边界：`langchain/agents/middleware/tool_call_limit.py`。
-> - 模型和工具的重试包装器：`langchain/agents/middleware/model_retry.py`、`tool_retry.py`。
-> - 主模型失败后的备用模型切换：`langchain/agents/middleware/model_fallback.py`。
-> - 异常筛选、退避和失败处理类型：`langchain/agents/middleware/_retry.py`。
-
+> - 模型轮次：`libs/langchain_v1/langchain/agents/middleware/model_call_limit.py` → ModelCallLimitState、before_model()、after_model()。
+> - 工具限额：`libs/langchain_v1/langchain/agents/middleware/tool_call_limit.py` → ToolCallLimitMiddleware._separate_tool_calls()、after_model()。
+> - 模型重试：`libs/langchain_v1/langchain/agents/middleware/model_retry.py` → ModelRetryMiddleware.wrap_model_call()、_handle_failure()。
+> - 工具重试：`libs/langchain_v1/langchain/agents/middleware/tool_retry.py` → ToolRetryMiddleware.wrap_tool_call()。
+> - 备用模型：`libs/langchain_v1/langchain/agents/middleware/model_fallback.py` → ModelFallbackMiddleware.wrap_model_call()。
+> - 异常与退避：`libs/langchain_v1/langchain/agents/middleware/_retry.py` → should_retry_exception()、calculate_delay()。
 
 | 需求 | 机制 | 主要 Hook |
 | --- | --- | --- |
@@ -27,12 +26,12 @@ description: 对照观察者线的限额中间件与拦截器线的重试、回�
 
 限额是图节点级别的状态治理，重试和回退是一次调用内部的包装治理。这个区别决定了“调用次数”到底按哪一层统计。
 
-## 一、模型限额：检查在前，计数在后
+## 二、模型限额：检查在前，计数在后
 
 `ModelCallLimitMiddleware` 使用两个私有状态字段：
 
 - `thread_model_call_count`：线程（thread）级计数，随检查点（Checkpointer）跨多次运行保存。
-- `run_model_call_count`：运行（run）级计数，只在本次 `invoke` 内有效，使用 `UntrackedValue` 不写入检查点。
+- `run_model_call_count`：运行（run）级计数，使用 UntrackedValue 不写入检查点；从检查点恢复的新一次执行不沿用先前保存的 run 计数。
 
 源码：`model_call_limit.py:24-34`
 
@@ -134,9 +133,9 @@ def after_model(
 1. 限额判断使用 `>=`，表示达到上限后不再进入下一次模型节点。
 2. 计数发生在 `after_model`，它统计的是一次模型节点执行是否返回了结果，不是底层服务商（provider）实际收到了多少次 HTTP 请求。
 
-当 `exit_behavior="end"` 时，Hook 返回 `jump_to="end"`，并注入一条 `AIMessage`；当配置为 `"error"` 时，直接抛出 `ModelCallLimitExceededError`。这两种行为分别对应“让 Agent 正常结束”和“交给调用方处理异常”。
+当 `exit_behavior="end"` 时，Hook 返回 `jump_to="end"`，并注入一条 `AIMessage`；当配置为 `"error"` 时，直接抛出 `ModelCallLimitExceededError`。前者沿结束路由返回说明文本，不代表任务已完成；后者让调用方处理异常。若结束阶段还有会请求修订的 hook，仍需结合实际图路由判断最终状态。
 
-## 二、工具限额：在模型生成工具调用后分流
+## 三、工具限额：在模型生成工具调用后分流
 
 `ToolCallLimitMiddleware` 的计数是字典，而不是单个整数：
 
@@ -279,9 +278,9 @@ return {
 }
 ```
 
-`"end"` 的并行边界不能省略：如果同一条 `AIMessage` 还带着其他待执行工具调用，源码会抛出 `NotImplementedError`，要求调用者改用 `"continue"` 或 `"error"`。
+`"end"` 的边界限定在针对单个 tool_name 的实例：如果同轮还有其他名称的工具调用，分支会抛出 NotImplementedError。全局计数实例 tool_name=None 不走这个名称冲突判断。计数发生在执行前，因此允许的调用后来被审批拒绝、执行失败或未派发，都不能把计数直接当作成功执行数量。
 
-## 三、重试：在 `wrap_*` 内重复调用 `handler`
+## 四、重试：在 `wrap_*` 内重复调用 `handler`
 
 模型重试不是重新跑一轮 Agent 图，而是在一次模型节点内部循环调用 handler：
 
@@ -407,9 +406,11 @@ if jitter and delay > 0:
     delay = max(0, delay)
 ```
 
-重试只适合可安全重复的操作。模型调用通常由服务商处理幂等与重复请求问题；工具调用则必须逐个检查副作用。查询可以重试，写入、发送消息、扣款等操作必须有幂等键（idempotency key）或明确的去重策略。
+延迟先按 max_delay 截断，再加入最多正负 25% 抖动，因此启用 jitter 后实际等待可能达到 max_delay 的 1.25 倍。它不是等待时间的严格上界；每次网络调用自身的超时也不包含在退避时间中。
 
-## 四、回退：换模型，不等价于重试
+模型请求重试可能再次计费，也可能得到不同结果，不能假设供应商自动去重。对工具要区分“服务拒绝请求”和“提交成功但响应丢失”；后者重试可能重复写入。需要稳定业务动作 ID、结果查询或执行端去重时，应先建立这些约束，再启用自动重试。
+
+## 五、回退：换模型，不等价于重试
 
 `ModelFallbackMiddleware` 在构造期把字符串模型初始化成 Chat Model（聊天模型）实例，并按传入顺序保存备用模型：
 
@@ -462,9 +463,9 @@ def wrap_model_call(
     raise last_exception
 ```
 
-回退保留原请求中的消息、工具、系统提示和运行时上下文，只替换 `model` 字段。它的默认语义是“收到异常才切换”，不会因为模型返回普通错误文本而自动切换。
+回退保留原请求中的消息、工具、系统提示、model_settings 和运行时上下文，只替换 model 字段。备用模型可能不支持原来的多模态内容、工具参数或结构化策略，因此“可初始化”不等于“当前请求可兼容”。触发条件是内层 handler 抛异常；普通错误文本、错误 ToolMessage 或质量较差的答案不会自动触发回退。
 
-## 五、组合顺序：先看生命周期，再看包装栈
+## 六、组合顺序：先看生命周期，再看包装栈
 
 模型调用的一次完整路径可以简化为：
 
@@ -509,33 +510,10 @@ before_model
 - `ToolRetryMiddleware` 在工具节点内部重复调用同一个工具 handler；
 - 工具重试不会自动让工具限额按每次底层执行递增。
 
-## 工程判断
+## 七、工程判断
 
-### 值得照搬
+以 run_limit=2、max_retries=2 为例，每轮模型节点最多可进入三次重试尝试；两轮合计可能调用内层 handler 六次。若 handler 里还有模型 SDK 自带重试，实际 HTTP 请求可能更多；摘要、工具选择器和子任务的请求也不自动计入这两个模型轮次。这个例子用于区分计量单位，不是总费用上限。
 
-- 用 `thread` 和 `run` 两个生命周期字段分别表达跨运行预算和单次运行预算。
-- 把重试的异常筛选、退避和参数校验抽成 `_retry.py`，模型和工具共用同一套规则。
-- 用 `request.override(model=...)` 做回退，避免原地修改共享请求对象。
-- 把失败后的 `"continue"` 和 `"error"` 明确区分为两种控制流，而不是统一吞掉异常。
+工具重试捕获的是抛出的异常。若内层已经返回 status="error" 的 ToolMessage，当前重试循环会把它当作一次正常返回；需要按结果重试时，应显式定义结果判据，并确认是否允许再次执行。
 
-### 需要换实现或补一层
-
-- 需要限制真实 provider 请求次数时，不能只依赖模型调用限额；还要在客户端或服务商适配层统计重试、回退和流式重连。
-- 工具涉及写入或外部副作用时，先实现幂等和去重，再开启工具重试。
-- 需要“主模型重试后再回退”时，确认重试的 `on_failure="error"`；否则回退层可能永远收不到异常。
-- 需要精确控制并行工具预算时，先处理 `ToolCallLimitMiddleware` 的批量分流和 `"end"` 的 `NotImplementedError` 边界。
-
-### 不要照搬
-
-- 不要把 `max_retries` 当成 Agent 图循环次数；它只控制一次 `handler` 调用的重试次数。
-- 不要把 `ModelCallLimitMiddleware` 当成 API 请求计费器；它记录的是模型节点层面的计数。
-- 不要对写入型工具默认开启“所有异常都重试”；异常可能发生在请求已提交之后。
-- 不要只改 `middleware` 列表顺序就假设语义可控，先画出 Hook 生命周期和包装栈，再用失败场景做组合测试。
-
-## 读完后应该能判断什么
-
-- 一个需求是限制 Agent 模型轮次，还是限制底层 provider 请求次数。
-- 为什么模型限额使用 `before_model` / `after_model`，而重试和回退必须使用 `wrap_model_call`。
-- `ToolCallLimitMiddleware` 为什么在模型生成 `tool_calls` 后分流，而不是等工具 handler 执行后再拦截。
-- `on_failure="continue"` 为什么可能阻止外层回退看到异常。
-- 重试、回退、工具限额组合后，哪些次数是逻辑次数，哪些次数是真实外部调用次数。
+组合回退与重试时，明确哪一层保留异常、哪一层转换成消息。记录主模型、备用模型、每次尝试和最后交回图的结果，才能解释一次图计数背后的真实消耗。业务费用、截止时间和并行任务额度需要独立的计量与执行控制，参见 [Deep Agents 19](../deepagents/19-loop-budget-and-termination.md)。

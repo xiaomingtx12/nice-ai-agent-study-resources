@@ -4,20 +4,19 @@ sidebar_label: 09 上下文与隐私治理
 description: 对照摘要、上下文编辑和 PII 脱敏的源码实现，区分 State、模型请求和流式事件三条内容治理路径。
 ---
 
-# LangChain 源码 09：上下文与隐私治理——摘要、历史编辑与 PII
+# LangChain 源码解析 09：上下文与隐私治理——摘要、历史编辑与 PII
 
-## 源码定位
+## 一、源码定位
 
-> **阅读基线**：`langchain` 1.3.7（`libs/langchain_v1/`）。
+> **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
+> 路径相对 LangChain 仓库根目录；版本说明见 [系列导读](index.md)。
 >
-> **核心路径**：
->
-> - 摘要触发、消息保留、摘要模型调用和安全截断：`langchain/agents/middleware/summarization.py`。
-> - 工具结果清理、占位符和模型请求改写：`langchain/agents/middleware/context_editing.py`。
-> - State Hook、流式 Transformer（转换器）和内容覆盖范围：`langchain/agents/middleware/pii.py`。
-> - PII 检测器、策略和 `PIIDetectionError`：`langchain/agents/middleware/_redaction.py`。
+> - 摘要与截断：`libs/langchain_v1/langchain/agents/middleware/summarization.py` → SummarizationMiddleware.before_model()、_find_safe_cutoff_point()、_create_summary()。
+> - 请求副本编辑：`libs/langchain_v1/langchain/agents/middleware/context_editing.py` → ClearToolUsesEdit.apply()、ContextEditingMiddleware.wrap_model_call()。
+> - 状态与流事件脱敏：`libs/langchain_v1/langchain/agents/middleware/pii.py` → PIIMiddleware.before_model()、after_model()、_PIIStreamTransformer.process()。
+> - 检测与替换策略：`libs/langchain_v1/langchain/agents/middleware/_redaction.py` → RedactionRule、apply_strategy()、PIIDetectionError。
 
-## 先记住一条判断
+## 二、先区分 State、请求和事件三个数据位置
 
 这三个中间件都在控制“模型或调用方能看到什么”，但修改位置不同：
 
@@ -29,7 +28,7 @@ description: 对照摘要、上下文编辑和 PII 脱敏的源码实现，区�
 
 不要把“减少 token”和“隐私脱敏”归为同一种消息处理。前者改变模型上下文，后者控制敏感值在哪些边界被释放。
 
-## 一、摘要：重建历史，而不是删除几条消息
+## 三、摘要：重建历史，而不是删除几条消息
 
 `SummarizationMiddleware` 在 `before_model` 判断是否达到摘要条件。触发条件支持三种基本单位：
 
@@ -89,7 +88,7 @@ def __init__(
     self.trim_tokens_to_summarize = trim_tokens_to_summarize
 ```
 
-`"fraction"` 依赖模型的 `profile["max_input_tokens"]`。如果模型没有提供这个 profile（配置档），源码会在构造期报错，不能在运行时凭空推断最大上下文。
+fraction 使用中间件 self.model 的 profile["max_input_tokens"]，这里是传入的摘要模型，不会自动读取主 Agent 本轮切换后的模型窗口。若两者不同，应显式选择适合主请求的阈值。缺少所需 profile 信息时构造期报错。默认近似计数主要观察 messages，并不因此覆盖全部系统提示词、工具 schema 与输出预留。
 
 ### 1. 触发后如何替换消息
 
@@ -154,7 +153,7 @@ def _build_new_messages(summary: str) -> list[HumanMessage]:
 
 ### 2. 截断不能拆开 AI 和 Tool 消息对
 
-如果截断点落在 `ToolMessage` 上，源码会向前寻找包含对应 `tool_call_id` 的 `AIMessage`，把这条 AI 消息一并纳入摘要：
+cutoff_index 把列表分为 messages[:cutoff_index]（待摘要）和 messages[cutoff_index:]（保留）。若切点落在 ToolMessage 上，源码向前找配对的 AIMessage，将切点移到它的位置，使调用与结果一起留在保留区：
 
 源码：`summarization.py:751-785`
 
@@ -164,10 +163,7 @@ def _find_safe_cutoff_point(
     messages: list[AnyMessage],
     cutoff_index: int,
 ) -> int:
-    if cutoff_index >= len(messages):
-        return cutoff_index
-
-    if not isinstance(messages[cutoff_index], ToolMessage):
+    if cutoff_index >= len(messages) or not isinstance(messages[cutoff_index], ToolMessage):
         return cutoff_index
 
     # 收集截断点之后连续工具结果的 ID
@@ -193,7 +189,7 @@ def _find_safe_cutoff_point(
     return idx
 ```
 
-这条约束比“保留最近 N 条消息”更重要。保留消息数量只是策略，工具调用和工具结果的配对是协议边界。
+例如原序列为用户消息、AI 调用、工具结果、AI 回答，目标切点位于工具结果时，会前移到 AI 调用，后面三条一起保留。因此 keep 的消息数量不是严格的最终条数上限。这个算法处理切点附近的配对，不会修复整段历史中所有缺失或重复的工具消息。
 
 ### 3. 摘要本身会再调用一次模型
 
@@ -222,9 +218,9 @@ def _create_summary(self, messages_to_summarize: list[AnyMessage]) -> str:
         return f"Error generating summary: {e!s}"
 ```
 
-因此摘要会增加模型调用、延迟和费用。摘要失败时当前实现把异常文本写进摘要结果，并不等价于保留原始历史；生产环境需要针对失败策略补测试。
+因此摘要会增加模型调用、延迟和费用。失败分支返回的错误文本仍会作为 summary 进入前面的 RemoveMessage 更新，旧历史不会因摘要失败而自动保留。要改变这一行为，需要让失败跳过替换、停止运行或从可信归档恢复。当前中间件也不负责删除已经存在的旧检查点。
 
-## 二、上下文编辑：只改模型请求副本
+## 四、上下文编辑：只改模型请求副本
 
 `ContextEditingMiddleware` 的默认策略是 `ClearToolUsesEdit`：
 
@@ -375,9 +371,9 @@ def wrap_model_call(
 - 图内 State 仍保留原始历史，便于检查点、审计和后续策略使用。
 - 当前模型只收到清理后的消息副本。
 
-`token_count_method="approximate"` 更快但不保证与服务商一致；`"model"` 使用当前模型的 token 统计方法，成本和延迟更高。
+approximate 分支按传入消息估算；model 分支把 system_message 与 request.tools 一并交给当前模型的统计方法。后者是否准确、是否需要远端调用，取决于模型适配器。ClearToolUsesEdit 仅在超过 trigger 时尝试清理候选，受 keep、exclude_tools 和可配对结果数量限制，不保证处理后一定低于 trigger。
 
-## 三、PII：状态 Hook 与流式 Transformer 两条路径
+## 五、PII：状态 Hook 与流式 Transformer 两条路径
 
 PII（Personally Identifiable Information，个人身份信息）中间件先解析一条脱敏规则：
 
@@ -504,7 +500,9 @@ def after_model(
     return {"messages": new_messages}
 ```
 
-因此，State Hook 默认不会检查所有历史消息，也不会改写 AIMessage 的 `tool_calls` 参数。要覆盖流式模型输出中的工具参数，需要启用输出侧的流式 Transformer。
+State Hook 不检查全部历史，也不改 AIMessage.tool_calls 参数。上面重建消息时只保留 content、id、name 和 tool_calls；发生替换后，原 usage_metadata、response_metadata 等字段不会由此构造自动保留。它还对 content 做 str 转换，多模态列表命中时可能变成字符串，需要按业务消息类型核对。
+
+事件 Transformer 可以处理它所消费的工具参数展示，但这不会修改实际派发工具的参数。若敏感值不得发送给外部工具，应在工具执行边界另行检查。
 
 ### 2. 流式路径使用滑动缓冲
 
@@ -558,7 +556,7 @@ def process(self, event: ProtocolEvent) -> bool:
     return True
 ```
 
-文本按 delta（增量片段）传输时，一个邮箱或 URL 可能被拆到多个片段。Transformer 使用 `lookback=128` 的尾部缓冲，暂不释放最后一段文本，等后续片段拼接后再检测。
+文本按 delta（增量片段）传输时，一个邮箱或 URL 可能被拆到多个片段。Transformer 默认保留末尾 128 个字符，等待后续片段拼接后再检测。这会延迟部分展示；缓冲长度有限，不能保证任意长度、跨任意分片的自定义模式都能在释放前识别。
 
 源码：`pii.py:201-218`
 
@@ -590,7 +588,7 @@ def _mutate_tool_output_delta(
 
 `values` 事件的处理会生成脱敏后的新结构，原始 State 仍留给 State Hook 在下一轮独立处理。流式 Transformer 保护的是事件消费者，不是自动修改图内状态。
 
-## 四、三种治理策略如何组合
+## 六、三种治理策略如何组合
 
 可以用三个问题区分它们：
 
@@ -598,14 +596,14 @@ def _mutate_tool_output_delta(
 | --- | --- |
 | 历史太长，需要保留摘要后的任务上下文 | `SummarizationMiddleware` |
 | 旧工具结果太占 token，但不值得再摘要 | `ContextEditingMiddleware` |
-| 不允许敏感值进入模型、State 或事件消费者 | `PIIMiddleware`，并分别配置 State Hook 与 Transformer |
+| 需要处理特定文本中的敏感值 | 按 PII Hook 和 Transformer 的实际字段范围配置，并检查其他出口 |
 
 组合时要特别关注顺序：
 
 - 如果摘要模型也不能看到原始 PII，应让输入脱敏发生在摘要之前，并确认 `before_model` 节点顺序。
 - 上下文编辑只改模型请求副本，不能代替 State 级脱敏。
 - 流式脱敏只保护事件消费者，不能代替模型调用前的 State Hook。
-- 摘要生成会产生新的摘要文本；如果原始消息已被脱敏，摘要中只能保留脱敏后的内容。
+- 摘要生成的是新的模型文本，不能保证永远不重建或生成敏感值；必要时还要检测摘要输出。
 
 这三种策略的持久性不同：
 
@@ -627,33 +625,12 @@ PIIMiddleware 的 Stream Transformer
   → 只改变调用方看到的事件视图
 ```
 
-## 工程判断
+## 七、工程判断
 
-### 值得照搬
+用同一段工具结果可以看出三条路径的差别：摘要可能将它归纳后从当前 messages 移除；上下文编辑把本次请求中的正文换成占位符；PII 处理则只针对检测规则覆盖的内容。三者的产物、可恢复细节和存储残留都不同。
 
-- 摘要前先找安全截断点，不能把 AI 工具调用和 ToolMessage 结果拆开。
-- 上下文编辑使用消息副本和 `request.override()`，避免为了减少模型输入而破坏检查点历史。
-- PII 规则、检测器和处理策略独立封装，方便内置类型与自定义正则共存。
-- 流式脱敏使用按运行和工具调用隔离的缓冲区，避免跨 delta 泄露完整敏感值。
+隐私检查应按数据实际经过的位置进行。输入到达 before_model 前可能已写入检查点或追踪；after_model 修正消息也不会删除旧版本。配置 PII 不能直接承诺原文从未入库，更不能用 UI 上看不到原文来证明所有出口已处理。
 
-### 需要补一层
+流式场景应覆盖敏感值横跨两个片段、长于缓冲、出现在工具参数以及出现在多模态块中的情况。确定性 hash 保留可关联性，也可能被枚举，适合的处理方式由数据用途决定。
 
-- 摘要模型调用失败时，当前实现返回错误文本；生产系统应决定是继续、保留原历史还是直接终止。
-- `apply_to_input` 只处理最后一条用户消息，历史用户消息需要额外策略。
-- `apply_to_output` 的 State Hook 只检查最后一条 AIMessage 的 `content`，工具参数和事件流要单独覆盖。
-- 需要合规证明时，同时检查 State、Checkpoint、日志、Tracing（追踪）和 Streaming（流式）路径，不能只验证 UI 看不到原文。
-
-### 不要照搬
-
-- 不要把摘要当成无损压缩；摘要模型可能遗漏原始约束、工具结果或拒绝原因。
-- 不要用占位符清空工具结果后，继续假设模型仍然拥有原始结果。
-- 不要只配置流式 Transformer 就认为模型调用前已经脱敏。
-- 不要把 `hash` 当成不可识别；确定性哈希仍然可能被字典攻击或关联分析还原。
-
-## 读完后应该能判断什么
-
-- 摘要、历史编辑和 PII 脱敏分别改的是 State、Request 还是事件流。
-- 为什么摘要要额外调用模型，为什么上下文编辑不需要额外模型调用。
-- 为什么工具调用和工具结果必须保持 `tool_call_id` 配对。
-- PII 的 State Hook 与流式 Transformer 各自覆盖哪些内容，哪些内容仍需要补充治理。
-- 多个上下文和隐私中间件组合时，如何判断脱敏是否发生在摘要、模型请求、检查点和流输出之前。
+长任务中的文件卸载和记忆快照见 [Deep Agents 10](../deepagents/10-summarization-and-context-offloading.md) 与 [13](../deepagents/13-memory-middleware.md)。那些机制改变数据位置，也仍需要区分模型可见内容与实际保存内容。

@@ -4,11 +4,12 @@ sidebar_label: 04 Middleware 执行边界
 description: 从一轮模型调用的请求、响应和 State 流转入手，区分图上的生命周期 Hook 与模型、工具节点内部的包装 Hook，说明它们如何组合、更新状态和控制有限路由。
 ---
 
-# LangChain 源码 04：Middleware 的执行边界
+# LangChain 源码解析 04：Middleware 的执行边界
 
-## 源码定位
+## 一、源码定位
 
-> **阅读基线**：`langchain` 1.3.7，源码位于 `libs/langchain_v1/`。
+> **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
+> 源码路径相对 LangChain 仓库根目录；版本与阅读路线见 [系列导读](index.md)。
 >
 > **本篇范围**：专门解释 Middleware 的对象模型、Hook 分类、调用顺序、请求/响应对象、状态扩展和有限跳转。`create_agent()` 的完整装配过程见 [03：`create_agent()` 如何组装 Agent 图](./03-create-agent-assembly.md)；State Schema 的合并和图状态边界见 [05：State、Graph 与运行时边界](./05-state-graph-runtime.md)。
 >
@@ -33,7 +34,7 @@ description: 从一轮模型调用的请求、响应和 State 流转入手，区
 >    - Middleware 通过 LangChain 工厂接入节点、条件边和中断 API。
 >    - 本篇只确认使用了哪些 API，不追踪 LangGraph 包内部实现。
 >
-## 先看一轮调用怎么走
+## 二、先看一轮调用怎么走
 
 这篇要回答一个具体问题：同一个 Middleware 为什么既能出现在 Agent 图里，又能包住一次模型或工具调用？
 
@@ -57,37 +58,21 @@ Agent State
 
 读源码时，顺序也应跟着这条链走：先看 `AgentMiddleware` 提供哪些扩展面，再看生命周期 Hook 如何进入图，接着看 `wrap_model_call` 和 `wrap_tool_call` 如何组成调用栈，再回到请求、响应、State 和路由的边界。
 
-## 一、`AgentMiddleware` 是什么
+## 三、`AgentMiddleware` 是什么
 
 `AgentMiddleware` 是这些扩展面的协议容器。一个实例可以同时声明状态字段、客户端工具、生命周期 Hook、模型/工具包装器和流事件转换器，工厂会把它们接到不同的运行位置。
 
-```python
-class AgentMiddleware(Generic[StateT, ContextT, ResponseT]):
-    # Middleware 可以同时声明状态、工具、生命周期 Hook 和包装 Hook。
-    state_schema: type[StateT]
-    tools: Sequence[BaseTool]
-    transformers: Sequence[TransformerFactory] = ()
-
-    def before_agent(self, state, runtime): ...
-    def before_model(self, state, runtime): ...
-    def after_model(self, state, runtime): ...
-    def after_agent(self, state, runtime): ...
-
-    def wrap_model_call(self, request, handler): ...
-    def wrap_tool_call(self, request, handler): ...
-```
-
-每个 Middleware 实例同时可以声明：
-
-- 要增加哪些 State 字段；
-- 要注册哪些工具；
-- 要实现哪些生命周期 Hook；
-- 要包住模型还是工具调用；
-- 是否要注册流事件转换器。
+| 声明或方法 | 工厂接入位置 | 处理对象 |
+| --- | --- | --- |
+| state_schema | 内部、输入和输出 Schema | 状态字段及合并规则 |
+| tools | ToolNode | 模型可以请求的客户端工具 |
+| before_agent、before_model、after_model、after_agent | 图节点 | State 与 Runtime |
+| wrap_model_call、wrap_tool_call | 节点内的 handler 栈 | 一次模型或工具调用 |
+| transformers | 编译图的事件扩展 | 支持该扩展的事件流 |
 
 工厂因此会先收集 Middleware，再分别决定图拓扑和调用栈。
 
-## 二、节点型 Hook：有图位置的生命周期逻辑
+## 四、节点型 Hook：有图位置的生命周期逻辑
 
 生命周期 Hook 是工厂直接注册到图里的节点。它们决定一个 Middleware 在 Agent 运行的哪个阶段看到 State，以及它能否影响后继节点。
 
@@ -96,10 +81,10 @@ class AgentMiddleware(Generic[StateT, ContextT, ResponseT]):
 四个节点型 Hook 覆盖的范围不同：
 
 ```text
-before_agent  整次 Agent 运行开始前，只执行一次
+before_agent  常规运行入口，不在工具回环中
 before_model  每轮调用模型前执行
 after_model   每轮模型调用后执行
-after_agent   整次 Agent 运行结束前，只执行一次
+after_agent   自然结束阶段，返回模型后可能再次进入
 ```
 
 这里的 A、B、C 指的是 **三个 Middleware 实例**，不是三个 Hook：
@@ -140,11 +125,9 @@ Agent 最终结束：
         → END
 ```
 
-`before_agent` 只在整次运行开始时执行一次，`before_model` 和 `after_model` 随模型循环重复执行，`after_agent` 只在运行结束时执行一次。多个 Middleware 组合时，`before_*` 按注册顺序进入，`after_*` 按反向顺序退出。这个顺序描述的是图节点之间的生命周期关系，不能和后面的包装器嵌套顺序混用。
+上述顺序假设没有显式跳转、恢复重放或异常。before_model 和 after_model 围住一次模型节点执行；包装器内部重试不会重新经过这些节点。after_agent 可以请求回到模型，因此未必只执行一次，也不能替代异常清理用的 finally。多个 Middleware 组合时，`before_*` 按注册顺序进入，`after_*` 按反向顺序退出。这个顺序描述的是图节点之间的生命周期关系，不能和后面的包装器嵌套顺序混用。
 
 ### 2. 工厂如何判断 Hook 是否存在
-
-工厂不会为每个 Middleware 都注册一组空节点，而是比较子类方法和 `AgentMiddleware` 默认实现是否相同：
 
 工厂不会为每个 Middleware 都注册一组空节点，而是比较类方法是否覆盖了父类默认实现：
 
@@ -198,7 +181,7 @@ def before_model(self, state, runtime):
     return {"model_calls": state.get("model_calls", 0) + 1}
 ```
 
-没有返回的字段会继续交给图状态协议保留和合并。节点更新如何进入下一节点、`messages` 如何使用合并元数据，见 [05：节点如何更新 State](./05-state-graph-runtime.md#五节点如何更新-state)。
+没有返回的字段会继续交给图状态协议保留和合并。节点更新如何进入下一节点、`messages` 如何使用合并元数据，见 [05：节点如何更新 State](./05-state-graph-runtime.md#七节点如何更新-state)。
 
 它可以：
 
@@ -208,7 +191,7 @@ def before_model(self, state, runtime):
 
 `Command` 是 LangGraph 节点通用的返回协议；工厂不会像处理 `ExtendedModelResponse.command` 那样检查节点型 Hook 返回的 `Command`。本篇不把 `Command(goto=...)` 当作 `create_agent()` 的 Middleware 路由接口，因为它要和图已有的静态、条件边一起理解。需要在 Agent 生命周期中表达“结束、回模型、进工具”时，应使用下面的 `jump_to` 约定并声明 `can_jump_to`。
 
-## 三、包装型 Hook：调用面上的拦截器
+## 五、包装型 Hook：调用面上的拦截器
 
 生命周期 Hook 处理图上的位置；需要围住一次具体调用时，则进入包装型 Hook。
 
@@ -258,7 +241,7 @@ def wrap_tool_call(self, request, handler):
 
 但它只控制一个 `ToolCallRequest`。模型同时返回三个工具调用时，三个调用如何派发由图路由决定，包装器不会接管整个批次。
 
-## 四、多个包装器如何组成洋葱调用栈
+## 六、多个包装器如何组成洋葱调用栈
 
 无论包装模型还是工具，多个 Middleware 都会按同一套顺序组合。
 
@@ -296,9 +279,24 @@ for wrapper in reversed(wrappers[:-1]):
 - fallback 是等 retry 用尽后触发，还是每次尝试都可能触发；
 - 工具权限检查是否覆盖模拟结果和缓存命中。
 
+把"进入"和"返回"两段拆开画，顺序的后果才看得清。以 `Retry` 为例——它重试时只重入自己内层的 `handler`，外层不会被重新执行：
+
+```mermaid
+flowchart TD
+    A["Auth 前置"] --> B["Retry 前置"]
+    B --> C["Fallback 前置"]
+    C --> CALL["真实模型 / 工具调用"]
+    CALL --> C2["Fallback 后置"]
+    C2 --> B2{"Retry 后置<br/>本次失败且还有次数？"}
+    B2 -->|"重试：只重入内层"| C
+    B2 -->|"成功或次数用尽"| A2["Auth 后置"]
+```
+
+若计数逻辑写在自定义包装器中，置于 Retry 外层会只计一次，置于其内层则每次重入都计数。但内置 ModelCallLimitMiddleware 使用 before_model/after_model 节点；调整它与 Retry 的列表顺序，不会把节点变成包装器，也不会自动统计每次网络重试。Fallback 与 Retry 都属于包装器，嵌套关系才直接决定先重试当前模型还是先尝试备用模型。
+
 修改 Middleware 顺序时，要把调用前和调用后的路径都画出来。
 
-## 五、`ModelRequest`：一次模型调用的快照
+## 七、`ModelRequest`：一次模型调用的快照
 
 包装器要改写模型调用时，操作入口就是这份请求快照。
 
@@ -316,7 +314,7 @@ for wrapper in reversed(wrappers[:-1]):
 | `runtime` | 运行时上下文 |
 | `model_settings` | 额外模型参数 |
 
-`messages` 明确排除 `system_message`；`state` 和 `runtime` 则随请求一起传入包装器。前者是本次调用要处理的对话消息，后两者让包装器可以读取图状态和运行时上下文。
+工厂单独传递配置中的 system_message，不会主动从 state["messages"] 删除用户自行加入的 SystemMessage；如果两边都放了系统消息，最终请求可能同时包含它们。state 和 runtime 则随请求一起传入包装器。前者是本次调用要处理的对话消息，后两者让包装器可以读取图状态和运行时上下文。
 
 工厂在模型节点中创建它：
 
@@ -336,7 +334,7 @@ request = ModelRequest(
 
 工厂在真正调用模型时才把 `system_message` 放到 `messages` 前面。Middleware 可以用 `override(system_message=...)` 改写本次调用的系统提示词，但不应该把临时提示词写进 `state["messages"]`。
 
-### 用 `override()` 生成新请求
+### 1. 用 `override()` 生成新请求
 
 快照可被包装器层层传递，因此改写请求时要避免原地污染上游看到的对象。
 
@@ -358,7 +356,7 @@ new_request = request.override(
 
 这里的“不可变”是推荐的使用模式，不是 Python 层面的绝对冻结。`override()` 内部调用 `dataclasses.replace()`，属于**浅复制**：它会替换传入字段，但未替换的 `messages`、`tools`、`state`、`model_settings` 仍与原请求共享引用。要修改消息或工具集合，应先创建新列表再传给 `override()`；不要把 `request.messages.append(...)` 当成不会影响外层请求的操作。直接属性赋值同样仍可发生，但会产生弃用警告。
 
-## 六、`ModelResponse`、`ExtendedModelResponse` 与 State 更新
+## 八、`ModelResponse`、`ExtendedModelResponse` 与 State 更新
 
 请求穿过包装栈后，工厂会把返回值转换成图状态更新。
 
@@ -395,7 +393,7 @@ class ExtendedModelResponse(Generic[ResponseT]):
     command: Command[Any] | None = None
 ```
 
-工厂会把 `model_response` 继续转换成 `messages` / `structured_response` 更新，再把 `command` 作为额外 State 更新应用。`messages` 使用消息 reducer 追加；普通非 reducer 字段发生冲突时，命令顺序会影响最终值，不能把它理解成一个无条件的“外层覆盖全部内层”机制。
+工厂会把 `model_response` 继续转换成 `messages` / `structured_response` 更新，再把 `command` 作为额外 State 更新应用。messages 按消息 ID 合并；其他字段遵循各自的通道和 Reducer 规则。保留命令顺序不等于保证普通字段能按顺序覆盖，同一步的多次写入可能冲突。
 
 `_build_commands()` 会拒绝这个 `Command` 的 `goto`、`resume` 和 `graph` 字段，只允许附加 `update`。多个包装器都返回命令时，工厂按**内层在前、外层在后**保留它们；`messages` 依照 reducer 追加，普通非 reducer 字段同时写入则可能触发同一步更新冲突。
 
@@ -411,7 +409,7 @@ ModelResponse
 
 包装器返回结果时不能破坏消息协议，尤其不能丢失工具调用对应的消息和 ID。
 
-## 七、`jump_to`：声明有限目的地的控制流约定
+## 九、`jump_to`：声明有限目的地的控制流约定
 
 除了由模型结果驱动默认循环，生命周期 Hook 还可以通过 State 发出有限的路由信号。
 
@@ -444,9 +442,9 @@ jump_to="end" → 最终出口
 
 `_add_middleware_edge()` 本身不会把 `jump_to` 的值与 `can_jump_to` 再逐项比较。`can_jump_to` 用来声明该节点的条件边目的地；未知字符串会因 `_resolve_jump()` 返回 `None` 而走默认后继。`"model"`、`"tools"`、`"end"` 这类框架可识别但未声明的值不属于受支持用法，不能依赖其运行结果。它也不是跨图的通用权限系统，模型出口的 `_make_model_to_tools_edge()` / `_make_model_to_model_edge()` 只按 `jump_to` 的值解析，不读取 Hook 的 `can_jump_to` 元数据。
 
-`jump_to` 使用 `EphemeralValue` 通道，消费后不会传给下一节点，也不会留在最终输出中。若需求是“模型调用失败后换一个模型”，使用 `wrap_model_call`；若需求是“本轮状态满足条件后结束”，使用节点型 Hook 加 `jump_to`。
+jump_to 使用 EphemeralValue 通道，供当前更新后的路由与后续读取使用，在下一次没有该字段写入的更新步清除；它不是 Python 读取一次即删除的变量。PrivateStateAttr 使其在默认输入、输出 Schema 中省略。若需求是“模型调用失败后换一个模型”，使用 `wrap_model_call`；若需求是“本轮状态满足条件后结束”，使用节点型 Hook 加 `jump_to`。
 
-## 八、装饰器为什么能生成 Middleware
+## 十、装饰器为什么能生成 Middleware
 
 前面使用的 Hook 装饰器之所以能参与图装配，是因为它们会生成真正的 Middleware 实例。
 
@@ -479,7 +477,7 @@ return cast(
 
 适合用装饰器的场景是单个简单 Hook。`@wrap_model_call` 和 `@wrap_tool_call` 也会生成同类实例，但它们只安装被装饰函数对应的同步或异步包装方法，不会自动补齐另一条包装执行路径。需要多个 Hook、复杂状态或多个工具时，直接继承 `AgentMiddleware` 更容易维护。
 
-## 九、Middleware 还有三个扩展面
+## 十一、Middleware 还有三个扩展面
 
 Hook 解决执行时机，Middleware 还可以从 State、工具和流事件三个方向扩展 Agent。它们进入主执行线的位置不同，排查问题时不要混在一起看。
 
@@ -548,13 +546,13 @@ State 执行线
 
 选型可以直接按这三条判断：
 
-- 要阻止模型继续调用：用节点 Hook；
+- 要按 State 改变后续图路由：用节点 Hook；要跳过当前模型 handler，也可以在包装器中短路；
 - 要修改模型本次请求：用 `wrap_model_call`；
 - 要处理调用方通过流式接口看到的事件：才考虑 Transformer。
 
 在 `create_agent()` 中，Transformer 工厂会在编译阶段注册，并在每次运行时创建对应实例。它不是 `graph.add_node()` 添加的图节点，也不会出现在 `before_model: A → B → C` 这样的 Hook 链里。
 
-## 十、真实 Middleware 应该怎么读
+## 十二、真实 Middleware 应该怎么读
 
 接口分类落到具体实现时，最容易混淆的是“一个 Middleware 同时占用多个扩展面”的情况。
 
@@ -572,7 +570,7 @@ State 执行线
 
 不要先按文件名背功能。先确认它需要图节点、调用包装器、State 字段还是事件转换器。
 
-## 十一、同步与异步要分开看节点和包装器
+## 十三、同步与异步要分开看节点和包装器
 
 同步和异步路径需要分开检查。节点 Hook 与包装 Hook 的回退规则并不一致。
 
@@ -596,27 +594,18 @@ wrap_tool_call  / awrap_tool_call
 - 两条路径返回的 State 更新和 `ToolMessage` 配对信息是否一致；
 - 外部模型、工具客户端和资源释放逻辑是否与所选调用方式匹配。
 
-## 落地时的边界
+## 十四、落地时的边界
 
-把图节点、调用包装器和附加扩展面放回工程实践，可以得到几条直接的选型约束：
+扩展点应由要改变的数据与时机决定。计数、计划和跨轮判断需要 State 更新；临时模型选择或上下文裁剪可以只改 ModelRequest；一个工具的授权与重试在 wrap_tool_call 中执行；流式展示另查事件通道。
 
-- 需要状态更新、暂停或有限路由：使用节点型 Hook。
-- 需要重试、缓存、降级或请求改写：使用包装型 Hook。
-- Middleware 顺序是行为契约，修改顺序必须补组合测试。
-- 修改模型请求使用 `override()`，不要依赖直接赋值。
-- `wrap_tool_call` 只控制单次工具执行，不控制工具调用批次。
-- `tool_call_id` 是工具结果配对协议，不应被 Middleware 任意改写。
-- 动态工具不是天然安全能力，仍需要权限、来源和参数校验。
-- Trace 中看到的图节点不一定包含完整的包装调用栈。
+同一次图节点内，handler 可以被调用零次或多次。例如重试包装器两次调用模型，after_model 仍只观察最后交回图的一次结果。需要统计费用时，应另外记录真实模型尝试与用量，不能用图节点次数代替。
 
-## 排查时先定位扩展面
+保留状态更新和外部副作用的区别也很关键。组合器丢弃失败尝试暂存的 Command，不会回滚该尝试已经调用的外部服务。工具重试与恢复要复用业务动作身份，由执行服务判断是否已经提交。
 
-出现顺序、状态或路由问题时，可以沿着前面的分层逐项定位：
+## 十五、排查时先定位扩展面
 
-- 这个需求需要图上的生命周期位置，还是只需要拦截一次调用？
-- Middleware 列表顺序是否改变了调用前后的路径？
-- 模型请求是否通过 `override()` 修改，而不是原地赋值？
-- `jump_to` 是否声明了正确的允许目标？
-- 状态、工具和事件扩展是否放在了正确的扩展面？
+排查顺序问题时，先把图节点链和包装器调用栈分开：列表顺序分别作用于两者，重试只重入它的内层 handler。请求被意外改写时，检查是否修改了 override 浅复制后仍共享的消息对象。
 
-遇到顺序问题，先看 Middleware 列表在对应扩展面上的顺序；遇到状态或路由问题，先看图节点 Hook 的返回值；遇到重试、降级或请求改写问题，直接追 `handler` 和 `ModelRequest`。流式输出异常则应从 `transformers` 查起。
+状态没有保留时，检查返回的局部更新是否声明在 Schema 中、使用了哪个 Reducer；工具结果无法配对时，核对 tool_call_id；流式输出与最终状态不一致时，检查具体接口是否消费了已注册的 Transformer，不能假定所有流入口都有相同处理。
+
+内置实现见 [06](06-middleware-overview.md)，重试组合见 [07](07-call-governance.md)，审批协议见 [08](08-human-in-the-loop.md)。

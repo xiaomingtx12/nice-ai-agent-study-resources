@@ -4,11 +4,12 @@ sidebar_label: 05 State、Graph 与运行时边界
 description: 沿 Agent State 穿过输入、内部执行和输出三道边界，解释默认字段、Schema 合并、节点更新、模型工具循环和图编译参数。
 ---
 
-# LangChain 源码 05：State、Graph 与运行时边界
+# LangChain 源码解析 05：State、Graph 与运行时边界
 
-## 源码定位
+## 一、源码定位
 
-> **阅读基线**：`langchain` 1.3.7，源码位于 `libs/langchain_v1/`；LangGraph 作为 `langchain` 的依赖包使用。
+> **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。LangGraph 作为 `langchain` 的依赖包使用。
+> 源码路径相对 LangChain 仓库根目录；版本与阅读路线见 [系列导读](index.md)。
 >
 > **本篇范围**：专门解释 LangChain 侧 Agent State 如何定义、合并并交给 LangGraph 建图。LangGraph 只作为被导入和调用的依赖包出现，不追踪其仓库内部实现；03 讲工厂如何组装 Agent 图，04 讲 Middleware 的执行边界。
 >
@@ -31,7 +32,7 @@ description: 沿 Agent State 穿过输入、内部执行和输出三道边界，
 >    - **作用**：通过 `checkpointer` 参数提供状态持久化和恢复能力。
 >    - **阅读方式**：只看 LangChain 如何传入它，不展开 Saver 的具体实现。
 
-## 先画出 State 的边界
+## 二、先画出 State 的边界
 
 这里的 State 不是模型上下文的另一个名字。它是图节点之间共享的数据协议，同时决定哪些数据能进入 Agent、哪些数据只在图内流转、哪些结果最终返回给调用方：
 
@@ -46,7 +47,7 @@ description: 沿 Agent State 穿过输入、内部执行和输出三道边界，
 
 LangChain 负责定义字段、可见性和更新协议，再把它们交给 LangGraph 建图和执行。本文只追踪 LangChain 如何做这件事，不展开 LangGraph 内部的调度实现。
 
-## 一、默认 Agent State 有什么
+## 三、默认 Agent State 有什么
 
 默认状态定义在 `middleware/types.py`：
 
@@ -85,7 +86,7 @@ class _OutputAgentState(TypedDict, Generic[ResponseT]):
 | `jump_to` | Middleware 请求有限路由 | 内部字段 |
 | `structured_response` | 保存结构化输出 | 不作为输入，作为输出 |
 
-### `messages` 是协议字段
+### 1. `messages` 是协议字段
 
 `messages` 使用 `add_messages` 作为字段元数据。对 LangChain 侧来说，重要结论是：
 
@@ -96,7 +97,7 @@ class _OutputAgentState(TypedDict, Generic[ResponseT]):
 
 消息具体如何合并由 LangGraph 依赖包提供的 `add_messages` 处理。本文只关注 LangChain 为什么把它声明在 `AgentState` 上。
 
-### `jump_to` 是控制字段，不是业务状态
+### 2. `jump_to` 是控制字段，不是业务状态
 
 `jump_to` 同时携带：
 
@@ -111,9 +112,9 @@ PrivateStateAttr
 - 它服务当前路由，不应该像消息历史一样持续累积；
 - 它只供图内部使用，不应该暴露给 Agent 调用方。
 
-`jump_to` 的 Hook 使用方式和白名单控制见 04。
+jump_to 的 Hook 使用方式和目的地声明见 [04](04-middleware-control-plane.md)；can_jump_to 是装配信息，不是业务权限白名单。
 
-### `structured_response` 是输出字段
+### 3. `structured_response` 是输出字段
 
 结构化结果需要在图内部暂存，但调用方通常只希望从输出中读取它。因此它使用 `OmitFromInput`：
 
@@ -123,7 +124,7 @@ PrivateStateAttr
 
 这比把结构化结果塞回最后一条文本消息更稳定，也让调用方不需要重新解析模型文本。
 
-## 二、State 如何形成三套 Schema
+## 四、State 如何形成三套 Schema
 
 默认 State 只是内部字段的起点。工厂还要把它拆成三套边界不同的 Schema：
 
@@ -150,7 +151,22 @@ Output Schema
   → 调用结果
 ```
 
-## 三、Schema 的合并顺序
+三套 Schema 从同一组类型声明分别生成；下图展示共同的数据来源，具体过滤顺序由下一节的 _resolve_schema 决定：
+
+```mermaid
+flowchart TD
+    M1["Middleware A .state_schema"] --> M2["Middleware B .state_schema"]
+    M2 --> BASE["调用方 state_schema<br/>或默认 AgentState"]
+    BASE --> S["合并后的内部 State<br/>节点与 Middleware 可读写全部字段"]
+    BASE -->|"逐声明过滤 input 标记"| IN["Input Schema"]
+    BASE -->|"逐声明过滤 output 标记"| OUT["Output Schema"]
+    IN --> RUN["图运行"]
+    RUN --> OUT
+```
+
+内部 State 的同名字段采用后遍历的定义。输入、输出 Schema 则各自边遍历边过滤，并非对最终内部 Schema 做一次筛选；后面的省略标记不会删除已收录的同名字段。下一节用实际分支解释这个区别。
+
+## 五、Schema 的合并顺序
 
 三套 Schema 来自同一组状态定义，但合并顺序会决定同名字段采用哪一个定义。工厂先选择基础状态：
 
@@ -189,9 +205,28 @@ def _resolve_schemas(schemas: list[type]) -> tuple[type, type, type]:
     )
 ```
 
-字段按顺序合并，同名字段由后面的定义覆盖前面的定义。因此，调用方的 `state_schema` 可以覆盖 Middleware 的同名字段，后注册的 Middleware 也会覆盖先注册的 Middleware。内部 State 保留合并后的字段，输入和输出 Schema 再根据 `OmitFromSchema` 元数据过滤。
+内部 State 没有 omit_flag，同名字段由后遍历的定义覆盖。输入、输出分别调用 _resolve_schema，下面是实际收集字段的主体，省略最终 TypedDict 构造：
 
-## 四、字段可见性由注解决定
+```python
+all_annotations = {}
+for hints in schema_hints.values():
+    for field_name, field_type in hints.items():
+        should_omit = False
+        if omit_flag:
+            metadata = _extract_metadata(field_type)
+            for meta in metadata:
+                if isinstance(meta, OmitFromSchema) and getattr(meta, omit_flag) is True:
+                    should_omit = True
+                    break
+        if not should_omit:
+            all_annotations[field_name] = field_type
+```
+
+关键在于最后只有赋值，没有删除。假设前一个 Middleware 将 audit_note 声明为普通字段，应用 Schema 后来为同名字段加上 PrivateStateAttr：内部 State 使用应用定义，但输入、输出遍历到私有声明时只是跳过，前面已收录的 audit_note 仍然存在。这是本快照的实现边界，不能将“应用 Schema 最后覆盖”推导为“应用私有标记必然隐藏所有同名字段”。
+
+另外 schema_hints 以类型对象为字典 key，同一个类型重复出现会合并为同一项；覆盖值不会把 key 移到最后。通常各自定义 Schema 是不同类型，但排查重复注册时应以实际遍历顺序为准。敏感或内部字段宜使用明确归属的名称，并核对工厂生成的输入、输出 Schema。
+
+## 六、字段可见性由注解决定
 
 合并顺序确定字段定义后，注解中的可见性标记再决定字段能否穿过调用边界。源码定义了三个常用标记：
 
@@ -208,7 +243,7 @@ OmitFromOutput = OmitFromSchema(input=False, output=True)
 PrivateStateAttr = OmitFromSchema(input=True, output=True)
 ```
 
-三个标记的区别如下：
+在字段没有被其他 Schema 以可见形式重复声明时，三个标记的区别如下：
 
 | 标记 | 内部 State | 调用输入 | 调用输出 | 用途 |
 | --- | --- | --- | --- | --- |
@@ -219,11 +254,11 @@ PrivateStateAttr = OmitFromSchema(input=True, output=True)
 
 这里的“隐藏”不只是序列化时少显示一个键。字段被 Input Schema 过滤后，即使调用方在 `invoke()` 输入中提交它，它也不会作为初始内部 State 传给节点；字段被 Output Schema 过滤后，内部 Middleware 仍可读写它，只是调用结果不包含它。`OmitFromInput` 字段也可以由 Middleware 在图内写入，随后出现在输出中。
 
-工程上不要把“是否让调用方看到”交给节点实现临时判断。它应该写进状态 Schema 的类型元数据，让工厂在装配期统一生成边界。
+这些标记控制普通输入与输出通道，不是数据保密机制。内部字段仍可能出现在检查点、调试读取、节点更新事件或应用日志中。涉及保密要求时，还应检查实际存储与输出接口，不能只验证 invoke 的返回字典。
 
-## 五、节点如何更新 State
+## 七、节点如何更新 State
 
-### 节点返回的是局部更新
+### 1. 节点返回的是局部更新
 
 边界确定后，节点只需要返回本次执行产生的局部更新：
 
@@ -255,7 +290,7 @@ return {
 - 普通字段会再次按其 Channel 或 Reducer 规则写入；并行步骤中，无 Reducer 字段的多次写入还可能产生冲突；
 - 读代码的人很难判断哪些字段是这次节点真正修改的。
 
-### 三类节点返回形态
+### 2. 三类节点返回形态
 
 LangChain Agent 中常见的节点返回形态可以这样看：
 
@@ -279,6 +314,7 @@ def _build_commands(
         # structured_response 是独立状态字段，不塞进 messages。
         state["structured_response"] = model_response.structured_response
 
+    # ……省略对附加 Command 的 goto、resume、graph 字段的拒绝检查……
     # Middleware 的附加 Command 保持为独立更新，交给后续状态协议处理。
     commands: list[Command[Any]] = [Command(update=state)]
     commands.extend(middleware_commands or [])
@@ -295,7 +331,7 @@ AIMessage / ModelResponse
   → 交给图执行层合并
 ```
 
-### “更新”不等于“覆盖”
+### 3. “更新”不等于“覆盖”
 
 节点返回 `{"messages": [new_message]}` 时，LangChain 只声明了消息字段的局部更新。`messages` 字段上的 `add_messages` 元数据会告诉 LangGraph 依赖包如何合并它：
 
@@ -305,7 +341,7 @@ AIMessage / ModelResponse
 
 对于自定义字段，是否追加、覆盖或使用 Reducer，取决于字段 Schema 的声明。文章在 LangChain 侧只关注“Reducer 元数据如何被声明”，不追踪依赖包内部的合并实现。
 
-### State 更新如何进入下一节点
+### 4. State 更新如何进入下一节点
 
 一次节点执行可以画成：
 
@@ -320,7 +356,7 @@ AIMessage / ModelResponse
 
 Middleware 的 `before_model` 能更新计数，模型节点能追加消息，工具节点能追加 `ToolMessage`，原因相同：它们都遵守“读取 State，返回局部更新”的协议。
 
-## 六、自定义状态放在哪一层
+## 八、自定义状态放在哪一层
 
 局部更新遵守同一套字段规则，自定义状态也应按归属放到合适的位置。有两种扩展 Agent State 的方式：
 
@@ -361,7 +397,7 @@ agent = create_agent(
 
 这种方式适合应用层必须拥有的字段，但要注意它会覆盖同名 Middleware 字段的定义。
 
-### 状态字段的选择原则
+### 3. 状态字段的选择原则
 
 - 节点之间需要共享、并且属于本次 Agent 执行的数据，放 State；
 - 只属于一个包装器内部的临时变量，放 Request 或局部变量；
@@ -370,7 +406,7 @@ agent = create_agent(
 
 不要为了方便把所有数据都塞进 `messages`。消息字段承载的是对话和工具协议，不是通用的状态字典。
 
-## 七、StateGraph 在 LangChain 工厂中的位置
+## 九、StateGraph 在 LangChain 工厂中的位置
 
 Schema 已经生成后，工厂才把合并结果交给从 LangGraph 依赖包导入的 `StateGraph`：
 
@@ -417,7 +453,7 @@ START
 
 图构建器和执行器的内部实现属于 LangGraph 包本身，不在本系列中继续下钻。
 
-## 八、模型—工具循环如何读 State
+## 十、模型—工具循环如何读 State
 
 图已经确定节点和边后，循环是否继续仍要由当前 State 决定。模型出口的 `_make_model_to_tools_edge()` 按下面的优先级路由：
 
@@ -467,7 +503,7 @@ return model_destination
 
 - `jump_to` 优先于消息判断；
 - 最后一条 `AIMessage` 决定本轮模型是否提出动作；
-- 后续 `ToolMessage.tool_call_id` 决定动作是否已经完成；
+- 后续 ToolMessage.tool_call_id 表示调用已有协议结果，不证明外部业务动作成功；
 - 未完成的普通工具调用被拆成多个 `Send("tools", [tool_call])`，分别派发给工具节点；
 - 工具调用都已配对，但 State 还没有 `structured_response` 时，工厂会回到模型。这条边服务于人工注入的工具消息等场景，不应被简化成“工具调用完成就一定结束”。
 
@@ -496,7 +532,7 @@ return model_destination
 
 也就是说，工具节点完成后只有两类明确的直接退出条件：当前轮的客户端工具调用全部标记为 `return_direct=True`，或执行到了结构化输出工具。其他情况回到循环入口，由 `before_model` 链或 `model` 继续处理结果。模型—工具循环之所以能够继续，不是因为节点里保留了一个 Python 列表，而是因为模型消息和工具消息共同形成了可判断的状态协议。
 
-## 九、建图与编译参数的职责边界
+## 十一、建图与编译参数的职责边界
 
 State、输入、输出和 Context 的归属在建图时就已经确定。`context_schema` 属于 `StateGraph(...)` 的构造参数，和 `state_schema`、`input_schema`、`output_schema` 一起定义图的类型边界；它不传给 `graph.compile()`。
 
@@ -542,7 +578,7 @@ LangChain 侧需要区分这些参数的用途和作用域：
 
 编译前，工厂还会给图默认配置 `recursion_limit=9_999`，并写入 LangSmith 追踪元数据。它们通过 `.with_config(config)` 挂到已编译的图上，不属于 `StateGraph` 的状态字段。
 
-### Transformer 不属于 State 更新链
+### 1. Transformer 不属于 State 更新链
 
 这里的 `transformers` 容易和 State 的“转换”混在一起。它处理的是运行期间产生的流式事件，作用对象是调用方通过 `stream()` 或 `astream_events()` 看到的输出面。编译后的顺序固定为：`ToolCallTransformer`、`SubagentTransformer`、Middleware 声明的 Transformer、调用方传入的 Transformer。
 
@@ -572,9 +608,9 @@ Transformer 处理事件
 
 如果只改 State，已经发给用户的流式片段不会自动被追回；如果只改流，也不代表 Checkpoint 中的 State 已经脱敏。具体的 `PIIMiddleware` 装配位置放在 06 篇说明。
 
-## 十、几个容易混淆的边界
+## 十二、几个容易混淆的边界
 
-### State 与 `ModelRequest`
+### 1. State 与 `ModelRequest`
 
 State 是节点之间共享的图数据；`ModelRequest` 是一次模型调用的输入快照。
 
@@ -589,15 +625,15 @@ ModelRequest
 
 不要把一次请求的临时改写直接写回长期 State。
 
-### State 与 Context
+### 2. State 与 Context
 
 State 适合会被节点更新、合并和判断的数据。Context 适合调用开始时提供的运行时依赖，例如用户身份、租户配置或外部客户端。
 
-### State 与 Store
+### 3. State 与 Store
 
-State 属于当前 Agent 执行；Store 属于跨执行共享。用户偏好、长期业务记录和跨对话数据不要伪装成 Agent State。
+State 属于图状态，配置 Checkpointer 后可以沿同一 thread 跨多次调用保存；Store 提供应用主动访问的跨 thread 数据入口。需要跨对话共享的偏好适合 Store，需要恢复当前任务进度的数据适合 State；两者都不会仅因存在就自动进入模型请求。
 
-### `jump_to` 与图 API
+### 4. `jump_to` 与图 API
 
 Middleware 通过 `jump_to` 请求 `create_agent()` 约定的有限路由，取值是 `"model"`、`"tools"` 或 `"end"`。节点型 Hook 还应通过 `can_jump_to` 声明工厂需要为该节点装配哪些条件边。
 
@@ -605,23 +641,16 @@ Middleware 通过 `jump_to` 请求 `create_agent()` 约定的有限路由，取�
 
 `Command(goto=...)` 是 LangGraph 节点的更底层控制协议，要和图中已有静态边、条件边一起理解。它不是这个工厂约定下推荐的 Middleware 路由接口；需要在 Agent 生命周期中请求结束、回模型或进入工具节点时，使用 `jump_to` 并让声明与取值保持一致。
 
-## 落地约束
+## 十三、恢复图状态与确认外部动作
 
-- Agent 必需字段放进应用 `state_schema`；可复用能力的内部字段放进 Middleware Schema。
-- 只影响一次模型调用的改写放进 `ModelRequest.override()`，不要污染 State。
-- 消息、工具调用和工具结果保持协议化，不要用普通字符串替代消息结构。
-- `jump_to` 只承载有限控制信号，不要把它当作任意节点跳转机制。
-- `checkpointer`、`store`、`cache` 作用域不同，不能统称为记忆。
-- `cache` 是否命中还取决于图节点的缓存策略，不能把传入缓存后端等同于整个 Agent 自动缓存。
-- LangGraph 是本篇的下游建图依赖；排查 LangChain Agent 问题时，先确认工厂传入的 Schema、节点和参数是否正确。
+用一次审批后的写入来检验状态设计：模型提出调用，after_model 可能中断；恢复后工具写入外部服务，再返回 ToolMessage。检查点可以保存图执行进度，但外部写入与保存消息不在同一事务中。
 
-## 排查状态问题
+若外部写入已提交、图状态尚未持久化就失败，恢复时可能再次进入执行路径。messages 中有无结果不能代替业务查询，tool_call_id 也不天然是跨重启稳定的业务幂等键。重要写入需要在执行服务中识别同一动作并返回已有结果。
 
-- 这个字段应该放在内部 State、Input Schema、Output Schema、Context 还是 Store。
-- 同名状态字段最终由哪个 Schema 定义生效。
-- `structured_response` 为什么不需要出现在输入中。
-- 工具循环依赖哪些消息状态判断继续或结束。
-- `checkpointer`、`store`、`cache` 和 `context_schema` 分别解决什么问题。
-- 遇到图运行异常时，是否应该先回到 LangChain 工厂检查装配结果。
+对普通字段，明确它是覆盖值还是累积值；对消息，独立新消息使用新的 ID，修正旧消息保留原 ID；对私有字段，核对最终输入、输出与可观察事件。状态协议定义清楚后，再配置 Checkpointer 和 Store，才能知道恢复的是哪份数据。
 
-读 05 篇时只需要抓住一条线：LangChain 定义 State 的字段、可见性和更新方式，工厂把这套协议交给 LangGraph 建图；运行时的每次路由，都从当前 State 读出结果。
+## 十四、按数据位置排查状态问题
+
+先检查字段是否进入最终内部 Schema，再检查节点是否真的返回更新，接着查看 Reducer 如何合并，最后确认读取的是 invoke 输出、检查点还是模型请求。四个位置的内容本来就可能不同。
+
+状态合并与通道见 [LangGraph 01](../langgraph/01-state-schema-channels-and-reducers.md)，检查点与恢复见 [LangGraph 06](../langgraph/06-checkpoints-store-and-recovery.md)，Middleware 返回协议见 [04](04-middleware-control-plane.md)。

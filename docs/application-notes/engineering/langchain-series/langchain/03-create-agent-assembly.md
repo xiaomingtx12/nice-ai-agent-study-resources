@@ -4,11 +4,12 @@ sidebar_label: 03 create_agent() 组装 Agent 图
 description: 沿 create_agent() 的真实顺序，追踪输入配置如何变成模型、工具、Middleware、状态 Schema、图拓扑和编译结果。
 ---
 
-# LangChain 源码 03：`create_agent()` 如何组装 Agent 图
+# LangChain 源码解析 03：`create_agent()` 如何组装 Agent 图
 
-## 源码定位
+## 一、源码定位
 
-> **阅读基线**：`langchain` 1.3.7，源码位于 `libs/langchain_v1/`。
+> **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
+> 源码路径相对 LangChain 仓库根目录；版本与阅读路线见 [系列导读](index.md)。
 >
 > **本篇范围**：只沿 `create_agent()` 的装配期主线，从输入参数一路看到 `graph.compile()`。Middleware 的调用栈见 [04：Middleware 执行边界](./04-middleware-control-plane.md)；State Schema 和图状态边界见 [05：State、Graph 与运行时边界](./05-state-graph-runtime.md)。
 >
@@ -30,7 +31,7 @@ description: 沿 create_agent() 的真实顺序，追踪输入配置如何变成
 > 5. LangGraph 依赖包：`langgraph`
 >    - **作用**：`create_agent()` 导入 `StateGraph`、`END`、`START`、`Send`、`Command` 等 API 完成建图和编译。这里只看 LangChain 调用了什么，不追踪 LangGraph 内部实现。
 
-## 先看工厂产出什么
+## 二、先看工厂产出什么
 
 `create_agent()` 接收模型、工具、Middleware、状态 Schema 和运行配置，返回一张已经编译的 `CompiledStateGraph`。中间经过的是几组可以在源码中定位的装配动作：
 
@@ -54,45 +55,13 @@ model
 
 后文始终区分两个时间点：装配期决定节点、工具、状态字段和边；执行期消费这些装配结果。这样读工厂代码时，不会把“创建节点”和“调用模型”混成同一个动作。
 
-## 一、入口参数：工厂先确定 Agent 的边界
+## 三、入口参数：工厂先确定 Agent 的边界
 
 `create_agent()` 的签名已经暴露了 Agent 的主要扩展面：
 
-```python
-def create_agent(
-    model: str | BaseChatModel,
-    tools: Sequence[BaseTool | Callable[..., Any] | dict[str, Any]] | None = None,
-    *,
-    system_prompt: str | SystemMessage | None = None,
-    middleware: Sequence[AgentMiddleware[StateT_co, ContextT]] = (),
-    response_format: ResponseFormat[ResponseT] | type[ResponseT] | dict[str, Any] | None = None,
-    state_schema: type[AgentState[ResponseT]] | None = None,
-    context_schema: type[ContextT] | None = None,
-    checkpointer: Checkpointer | None = None,
-    store: BaseStore | None = None,
-    interrupt_before: list[str] | None = None,
-    interrupt_after: list[str] | None = None,
-    debug: bool = False,
-    name: str | None = None,
-    cache: BaseCache[Any] | None = None,
-    transformers: Sequence[TransformerFactory] | None = None,
-) -> CompiledStateGraph[...]:
-```
+model 和 tools 可以按位置传入，其余参数为仅限关键字参数。返回的是已编译的 CompiledStateGraph，类型参数描述内部状态、运行时 Context、输入与输出；它不是尚未编译的 StateGraph 构建器。
 
-签名里的 `*` 表示：只有 `model` 和 `tools` 可以按位置传入，其余参数都必须使用关键字传入。返回值不是一个尚未编译的 `StateGraph` Builder，而是：
-
-```python
-CompiledStateGraph[
-    AgentState[ResponseT],
-    ContextT,
-    _InputAgentState,
-    _OutputAgentState[ResponseT],
-]
-```
-
-也就是已经编译完成、带有输入状态类型、输出状态类型和运行时上下文类型的图对象。
-
-签名里的类型和默认值先把 Agent 的边界画了出来。
+下表对应该版本工厂签名，按参数解释装配职责：
 
 | 参数 | 实现中的类型 | 默认值 |
 | --- | --- | --- |
@@ -152,7 +121,7 @@ built_in_tools = [tool for tool in tools if isinstance(tool, dict)]
 regular_tools = [tool for tool in tools if not isinstance(tool, dict)]
 ```
 
-`built_in_tools` 在八节与结构化输出工具一起进入 `final_tools` 传给 `bind_tools()`；`regular_tools` 在四节与 Middleware 工具合并后创建 `ToolNode`。
+built_in_tools 进入本轮模型绑定；regular_tools 与 Middleware 工具合并后创建 ToolNode。服务端工具和客户端执行入口由此分开。
 
 **`system_prompt`：字符串变成 `SystemMessage`**
 
@@ -209,7 +178,7 @@ transformers=None → 不追加用户自定义 Transformer
 
 工厂的作用是把这些入口形态归一化为后续节点可以直接消费的对象。
 
-## 二、入口参数如何进入模型调用
+## 四、入口参数如何进入模型调用
 
 这一阶段先看 `system_prompt` 如何进入模型调用链，以及用户工具如何被拆成客户端工具和 provider 原生工具。
 
@@ -230,7 +199,7 @@ create_agent(system_prompt=...)
 - Middleware 可以在一次模型调用前通过 `ModelRequest` 改写系统消息；
 - 工具循环回到模型时，工厂可以用同一个系统消息重新组装本轮模型输入。
 
-## 三、结构化输出如何改变图的行为
+## 五、结构化输出如何改变图的行为
 
 `response_format` 不是"模型返回后再套一个 Parser"。它在工厂中提前介入，改变了三个关键行为：
 
@@ -286,14 +255,14 @@ if tool_strategy_for_setup:
 
 这里的 `ProviderStrategy` 是 API 层的策略名，不表示工厂会针对每个 provider 分别适配参数。`1.3.7` 的 `ProviderStrategy.to_model_kwargs()` 固定生成 OpenAI 风格的 `response_format={"type": "json_schema", ...}`，再交给模型适配器处理；阅读源码时不要把它误解成一个通用的 provider 参数转换层。
 
-## 四、Middleware 如何进入工厂
+## 六、Middleware 如何进入工厂
 
 工厂不会在这里执行 Middleware，而是把同一个实例拆成几类能力，分别接入工具节点、图节点、模型包装栈和 State Schema：
 
 ```text
 middleware
   ├─ middleware_tools         → 注入 available_tools，与用户工具一起进入 ToolNode
-  ├─ before_agent / after_agent  → 注册为一次性节点，在 agent 首尾各执行一次
+  ├─ before_agent / after_agent  → 注册为入口与结束阶段节点，显式跳转可改变执行次数
   ├─ before_model / after_model  → 注册为循环节点，每轮模型调用前后都执行
   ├─ wrap_model_call         → 组合为洋葱 handler，由模型节点在调用前逐层包装
   ├─ wrap_tool_call          → 传入 ToolNode，在工具执行前后逐层包装
@@ -312,10 +281,10 @@ if (
 
 两个版本都继承默认实现时，工厂才不增加该 Hook 节点。`wrap_model_call` 和 `wrap_tool_call` 也按同步、异步版本分别收集并组合。Hook 内部的洋葱顺序、`ModelRequest` 替换和 `jump_to` 跳转见 [04：Middleware 执行边界](./04-middleware-control-plane.md)。
 
-Middleware 工具收集完成后，工具节点才真正创建：
+Middleware 工具收集完成后，工具节点才真正创建。存在工具包装器时，即使初始工具列表为空也会保留 ToolNode，供动态工具的执行入口使用。工具声明和执行如何配合见 [11](11-tool-dynamics.md)。
 
 ```python
-available_tools = middleware_tools + regular_tools  # regular_tools 来自一.1 的归一化拆分（dict vs 非 dict）
+available_tools = middleware_tools + regular_tools  # 合并中间件与用户的客户端工具
 tool_node = (
     ToolNode(tools=available_tools,
              wrap_tool_call=wrap_tool_call_wrapper,
@@ -325,9 +294,9 @@ tool_node = (
 )
 ```
 
-## 五、合并 State Schema
+## 七、合并 State Schema
 
-Middleware 可以往 State 里加字段（如摘要中间件加的 `summary`），调用方也可以通过 `state_schema` 覆盖。合并顺序决定了最终谁赢：
+Middleware 可以往 State 里加字段（如调用限额中间件的计数），调用方也可以通过 `state_schema` 声明字段。合并顺序决定了最终谁赢：
 
 ```python
 base_state = state_schema if state_schema is not None else AgentState
@@ -335,9 +304,9 @@ state_schemas: list[type] = [*(m.state_schema for m in middleware), base_state]
 resolved_state_schema, input_schema, output_schema = _resolve_schemas(state_schemas)
 ```
 
-Middleware Schema 在前，调用方 Schema 在最后。同名字段由调用方覆盖。合并后三套 Schema 交给 LangGraph 的 `StateGraph()`，输入/输出 Schema 可以比内部 State 更窄。字段注解、合并算法的具体规则、reducer 行为见 [05：State、Graph 与运行时边界](./05-state-graph-runtime.md)。
+Middleware Schema 在前，基础 Schema 在后；内部同名字段按实际遍历顺序覆盖。输入、输出 Schema 各自过滤字段声明，不能推断后加的私有标记会删除此前公开的同名字段；重复类型还会按字典 key 合并。具体算法与边界见 [05](05-state-graph-runtime.md)。
 
-## 六、注册图节点和确定生命周期位置
+## 八、注册图节点和确定生命周期位置
 
 ### 1. 固定节点与扩展节点
 
@@ -394,13 +363,30 @@ START
        └─ after_agent → END
 ```
 
-`before_agent` 不在工具循环中重复执行；`before_model` 会在每次重新调用模型前执行。这个区分直接决定摘要、计数、初始化和清理逻辑应该挂在哪个 Hook 上。
+上面是最小形态。把 Middleware 节点、工具回环和退出条件都画进来，带工具的 Agent 拓扑是这样：
 
-## 七、模型节点：State → 模型调用 → 结果
+```mermaid
+flowchart TD
+    START([START]) --> BA["before_agent<br/>常规入口执行"]
+    BA --> BM["before_model<br/>每轮循环都执行"]
+    BM --> M["model"]
+    M --> AM["after_model<br/>审批 / 校验 / 计数"]
+    AM -->|"pending tool_calls 非空<br/>Send 逐个派发"| T["tools"]
+    AM -->|"无 tool_calls 或 jump_to=end"| AA["after_agent<br/>收尾与资源释放"]
+    T -->|"还有结果要交回模型"| BM
+    T -->|"return_direct 或结构化输出已完成"| AA
+    AA --> END([END])
+```
+
+两条常规回环都接回循环入口：有 before_model 时先经过它，否则进入 model。需要写回 State 的调用前逻辑可放在 before_model；只改本次请求视图可放在 wrap_model_call。after_agent 适合自然结束后的处理，但不是 try/finally，异常、中断或取消时不能依赖它必然释放资源。
+
+before_agent 不在常规工具回环中；before_model 每次走到模型入口时执行，但包装器内部重试 handler 不会自动再走一次 before_model。结束 hook 若请求回到模型，after_agent 也可能多次执行。
+
+## 九、模型节点：State → 模型调用 → 结果
 
 模型节点负责把当前 State 转成一次模型调用，再把结果写回图状态。它的内部流程分两层：
 
-**外层：Middleware 包装判断。** 如果没有 `wrap_model_call` 中间件，直接走 `_execute_model_sync()`；有的话进入洋葱栈——Middleware 可以在 `handler(request)` 前后插入逻辑，并通过 `request.override()` 替换本次调用的任意参数。
+**外层：Middleware 包装判断。** 如果没有 `wrap_model_call` 中间件，直接走 `_execute_model_sync()`；有的话进入洋葱栈——Middleware 可以在 `handler(request)` 前后插入逻辑，并通过 `request.override()` 替换允许覆盖的请求字段。
 
 ```python
 # 无中间件：直通。
@@ -431,7 +417,7 @@ handled_output = _handle_model_output(output, effective_response_format)
 
 模型节点完成请求和结果转换后，条件边接管后续路由。
 
-中间件改写系统消息是常见操作。下面这个例子只改当前这一次调用，不会污染 Agent State（回顾二节的三条好处）：
+中间件改写系统消息是常见操作。下面这个例子只改当前这一次调用，不会污染 Agent State：
 
 ```python
 request = request.override(
@@ -442,7 +428,7 @@ return handler(request)
 
 `_handle_model_output()` 在 ③ 之后根据策略做结果分发：`ProviderStrategy` → 解析 `structured_response` 写入 State；`ToolStrategy` → 解析特殊工具调用，回灌带 `tool_call_id` 的 `ToolMessage`；无策略 → 直接返回消息更新。
 
-## 八、模型绑定和结构化结果回灌
+## 十、模型绑定和结构化结果回灌
 
 `_get_bound_model()` 定义在装配期，但由 `_execute_model_sync()` / `_execute_model_async()` 在**每次模型调用时**执行。Middleware 可以通过 `request.override()` 改写本次请求的模型、工具、响应格式和 `model_settings`，因此不能把它理解成 `create_agent()` 时只做一次的决定。
 
@@ -480,9 +466,9 @@ return request.model.bind(**request.model_settings), None
 
 因此，`AutoStrategy` 在本轮被选为 `ProviderStrategy` 时走第一条；能力不支持时走 `ToolStrategy`。普通工具分支只表示本轮没有有效的结构化输出策略。
 
-## 九、工具节点：LangGraph 的 prebuilt 执行器
+## 十一、工具节点：LangGraph 的 prebuilt 执行器
 
-`tools` 节点使用的是 LangGraph prebuilt 的 `ToolNode`。工厂直接从 `langgraph.prebuilt.tool_node` 导入它，并在四节把 `available_tools` 和 `wrap_tool_call` 包装器交给它：
+`tools` 节点使用的是 LangGraph prebuilt 的 `ToolNode`。工厂直接从 `langgraph.prebuilt.tool_node` 导入它，并将 available_tools 和 wrap_tool_call 包装器交给它：
 
 ```python
 tool_node = ToolNode(
@@ -492,12 +478,12 @@ tool_node = ToolNode(
 )
 ```
 
-单个工具的执行和把结果包装成 `ToolMessage` 追加到 State 都在 `ToolNode` 内部完成；工厂不参与单个工具的执行，但会在工具节点之后通过条件边读取 State，决定回到模型还是退出。03 对工具节点的装配职责到“创建 `ToolNode` 并注册为 `tools` 节点”为止：
+ToolNode 负责分发工具并整理返回的 ToolMessage 或 Command，状态合并则由图运行时执行；工厂不参与单个工具的执行，但会在工具节点之后通过条件边读取 State，决定回到模型还是退出。03 对工具节点的装配职责到“创建 `ToolNode` 并注册为 `tools` 节点”为止：
 
 - 具体执行链（`invoke → run → _run → _format_output`）见 [02：聊天模型、消息与工具](./02-core-abstractions.md)；
 - `wrap_tool_call` 的拦截与工具结果改写见 [04：Middleware 执行边界](./04-middleware-control-plane.md)。
 
-## 十、条件边：Agent 的循环逻辑
+## 十二、条件边：Agent 的循环逻辑
 
 模型输出后，工厂根据最后一条 `AIMessage` 中的 `tool_calls` 计算下一条边。
 
@@ -505,14 +491,13 @@ tool_node = ToolNode(
 
 ```python
 pending_tool_calls = [
-    call
-    for call in last_ai_message.tool_calls
-    if call["id"] not in tool_message_ids           # 已有 ToolMessage 配对 → 已处理
-    and call["name"] not in structured_output_tools  # 结构化输出工具 → 不进入普通 tools 节点
+    c
+    for c in last_ai_message.tool_calls
+    if c["id"] not in tool_message_ids and c["name"] not in structured_output_tools
 ]
 ```
 
-只有同时满足"没有配对 ToolMessage"且"不是结构化输出工具"的 tool_call 才进入 `pending_tool_calls`。
+只有没有配对 ToolMessage、且不属于结构化输出工具的调用才进入 pending_tool_calls。这里依据消息 ID 去重，不查询外部业务动作是否已经提交；恢复后的幂等执行仍需由工具与业务服务保证。
 
 **第二步：六层判断路由。**
 
@@ -542,7 +527,7 @@ pending_tool_calls = [
                                          └──────────────────┘
 ```
 
-`Send("tools", [call])` 的含义：每个待处理的工具调用独立派发到 `tools` 节点（九节的 `ToolNode`），由 LangGraph 负责并行调度。这不同于 `RunnableParallel` 的固定构造期分支——Send 的数量和内容由模型运行时输出决定。
+`Send("tools", [call])` 的含义：每个待处理的工具调用独立派发到 `tools` 节点（前述 ToolNode），由 LangGraph 负责并行调度。这不同于 `RunnableParallel` 的固定构造期分支——Send 的数量和内容由模型运行时输出决定。
 
 `_make_model_to_tools_edge()` 和 `_make_model_to_model_edge()` 只调用 `_resolve_jump()`，不会在这里读取某个 Hook 的 `can_jump_to` 声明。`can_jump_to` 的作用是让 `_add_middleware_edge()` 为普通 Middleware 节点注册可选目的地；不要把它理解成对所有 `jump_to` 状态更新的统一运行时鉴权。
 
@@ -597,7 +582,7 @@ def model_to_model(state: dict[str, Any]) -> str | None:
 - 没有 `tool_node`、但存在 `structured_output_tools` 时，工厂只注册 `_make_model_to_model_edge()`。
 - 两者都没有且没有 `after_model` Hook 时，模型节点直接连到最终出口；存在 `after_model` Hook 时，由该 Hook 的边决定默认出口和允许的跳转。
 
-## 十一、编译并返回图
+## 十三、编译并返回图
 
 工厂最后把运行能力作为参数交给 `graph.compile()`：
 
@@ -632,43 +617,24 @@ return graph.compile(
 - Transformer 不参与 State 的 reducer 或节点更新；它处理的是运行时对外复用的流事件通道；
 - 内置 Transformer 和 Middleware 自带 Transformer 的具体装配位置放在 06 篇。
 
-## 十二、完整流程回放
+## 十四、完整流程回放
 
-给定：
+以“搜索资料后输出 Answer”为例，装配和执行应分开观察：
 
-```python
-# 这个调用展示的是装配输入，返回值会是编译后的 Agent 图。
-agent = create_agent(
-    model=model,
-    tools=[search, save_result],
-    middleware=[limit_calls, summarize],
-    response_format=Answer,
-    state_schema=MyState,
-    checkpointer=checkpointer,
-)
-```
+| 阶段 | 工厂或运行时做什么 | 此时尚未发生什么 |
+| --- | --- | --- |
+| 装配 | 初始化模型、登记 search 工具、准备 Answer 的响应策略，编译节点与边 | 没有搜索，也没有生成答案 |
+| 第一次模型节点执行 | 根据当前请求绑定工具与策略，模型提出 search 调用 | 工具函数尚未执行 |
+| 条件路由与工具执行 | 未配对调用进入 ToolNode，结果以 ToolMessage 回到 State | 工具成功不代表 Answer 已生成 |
+| 再次模型节点执行 | 模型消费搜索结果，按有效策略返回结构化数据 | schema 通过不代表答案事实正确 |
+| 结束阶段 | 满足路由结束条件，经过配置的结束 hook，返回输出状态 | 不会自动发布答案或提交外部业务结果 |
 
-可以按以下顺序回放：
+response_format=Answer 改变的是模型绑定、结果解析和循环出口；调用方仍从返回状态中读取 structured_response。checkpointer 只是在编译时接入持久化能力，真正保存状态发生在运行期间。
 
-1. 本例的 `model` 已是模型对象，直接进入后续流程；若传入模型字符串，工厂才调用 `init_chat_model()`。本例没有 `system_prompt`，因此不会创建 `SystemMessage`。
-2. `search` 和 `save_result` 被作为客户端工具准备给 `ToolNode`。
-3. `Answer` 被包装成结构化输出策略，并提前准备候选工具。
-4. Middleware 的工具、节点型 Hook、包装型 Hook 和状态 Schema 被分别收集。
-5. `MyState` 与 Middleware Schema 合并，生成内部、输入和输出 Schema。
-6. 工厂创建 `StateGraph`，注册 `model`、`tools` 和 Middleware 节点。
-7. 工厂连接入口、模型循环、工具回环和最终出口。
-8. 模型节点根据最终策略绑定模型，返回消息和结构化结果。
-9. 条件边根据工具调用状态选择结束、工具派发或下一轮模型调用。
-10. `graph.compile()` 接收持久化、中断、缓存和流事件配置，返回 `CompiledStateGraph`。
+源码中的 model_to_tools、tools_to_model 和 model_to_model 分别处理工具派发、工具后的回环和无普通工具时的结构化重试。它们与 Middleware 的跳转共同决定实际执行路线，因此“模型没有 tool_calls 就结束”只适合解释最简循环。
 
-这就是 `create_agent()` 的完整装配过程。
+## 十五、扩展点选择与后续阅读
 
-## 读完这篇之后
+新增能力时先选择它影响的对象：临时模型参数交给请求包装器，需要保存的数据放进 State schema，可独立调用的动作注册为工具，超出标准循环的节点拓扑则交给 LangGraph。
 
-- 可以从 `create_agent()` 参数推断会出现哪些节点。
-- 可以按源码顺序解释模型、工具、响应格式和 Middleware 如何进入图。
-- 可以区分 `entry_node`、`loop_entry_node` 和 `exit_node`。
-- 可以说明模型节点为什么只负责请求和返回，循环由条件边控制。
-- 可以判断一个新能力应该放在工厂装配、Middleware 机制还是 State Schema 中。
-
-`create_agent()` 的职责边界也就清楚了：它负责把模型、工具、Middleware 和状态配置装配成一张可编译的 Agent 图；运行这张图，则交给 LangGraph。
+后续 [04](04-middleware-control-plane.md) 追踪同一轮调用中的 hook 与包装器顺序，[05](05-state-graph-runtime.md) 解释更新怎样进入 State、哪些字段会输出，以及恢复能保证什么。

@@ -4,19 +4,18 @@ sidebar_label: 08 人在环路：HITL 审批协议
 description: 拆解 HumanInTheLoopMiddleware 的审批协议：如何筛选工具调用、构造 interrupt 请求、处理四种人工决策并恢复 Agent 执行。
 ---
 
-# LangChain 源码 08：人在环路——HITL 审批协议
+# LangChain 源码解析 08：人在环路——HITL 审批协议
 
-## 源码定位
+## 一、源码定位
 
-> **阅读基线**：`langchain` 1.3.7（`libs/langchain_v1/`）。
+> **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
+> 路径相对 LangChain 仓库根目录；版本说明见 [系列导读](index.md)。 `langgraph/types.py` 相对 LangGraph 依赖包目录。
 >
-> **核心路径**：
->
-> - 审批请求、决策类型、工具筛选和 `HumanInTheLoopMiddleware`：`langchain/agents/middleware/human_in_the_loop.py`。
-> - `interrupt()`、`Command(resume=...)` 和中断恢复协议：`langgraph/types.py`。
-> - `after_model` 节点如何连接到工具节点和下一轮模型调用：`langchain/agents/factory.py`。
+> - 审批协议：`libs/langchain_v1/langchain/agents/middleware/human_in_the_loop.py` → HITLRequest、HITLResponse、_should_interrupt()、_process_decision()、after_model()。
+> - 后继路由：`libs/langchain_v1/langchain/agents/factory.py` → _make_model_to_tools_edge()、_add_middleware_edge()。
+> - 依赖包内路径：`langgraph/types.py` → interrupt()、Command（恢复语义对照 LangGraph 1.2.10）。
 
-## 先记住一条判断
+## 二、从工具请求到人工决策的完整链路
 
 HITL（Human in the loop，人在环路）不是在工具函数里弹出一个确认框，而是一条完整的图执行协议：
 
@@ -26,12 +25,12 @@ HITL（Human in the loop，人在环路）不是在工具函数里弹出一个�
   → interrupt(HITLRequest) 暂停图
   → 调用方使用 Command(resume=...) 提交人工决策
   → after_model 根据决策重建工具调用和 ToolMessage
-  → tools 节点只执行最终保留下来的调用
+  → 图路由只派发没有配对结果的待执行调用
 ```
 
 `HumanInTheLoopMiddleware` 选择 `after_model`，因为这时模型已经给出了工具名和参数，但工具节点还没有执行副作用。
 
-## 一、审批请求不是原始 ToolCall
+## 三、审批请求不是原始 ToolCall
 
 源码把“模型要执行什么”和“人类可以做什么”拆成两套结构：
 
@@ -97,7 +96,7 @@ class HITLResponse(TypedDict):
 
 一次 `HITLRequest` 可以包含多个工具调用。人工返回的 `decisions` 必须与被中断工具调用一一对应，顺序也必须保持一致。
 
-## 二、`interrupt_on`：默认放行，显式收紧
+## 四、`interrupt_on`：默认放行，显式收紧
 
 构造函数会把 `interrupt_on` 里的配置归一化：
 
@@ -182,9 +181,9 @@ def _should_interrupt(
 
 `when` 应该只做判断。它位于 `interrupt()` 之前，不能在里面写数据库、发送消息或执行工具，否则恢复时可能重复产生副作用。
 
-## 三、`after_model` 如何组织一次审批
+## 五、`after_model` 如何组织一次审批
 
-`after_model` 首先找到最后一条 `AIMessage`，再只收集命中 `interrupt_on` 且通过 `when` 判断的工具调用。未命中的调用会保留原样，自动进入后续流程。
+`after_model` 首先找到最后一条 `AIMessage`，再只收集命中 `interrupt_on` 且通过 `when` 判断的工具调用。未命中的调用保留原样，但同一 after_model 节点发生中断时，整批调用都还未进入后续工具节点；它们要等审批恢复后才继续。
 
 源码：`human_in_the_loop.py:384-443`
 
@@ -246,7 +245,7 @@ def after_model(
 
 1. 一轮中可以批量审批多个工具调用，不是每个工具调用都单独触发一次中断。
 2. 审批决策只按 `interrupt_indices` 对应的顺序消费，未配置审批的工具不会占用决策位置。
-3. 决策数量不匹配时直接抛错，避免把一个工具的决策错误应用到另一个工具。
+3. 决策数量不匹配时直接抛错；数量相同但顺序错误无法由这个检查识别，审批端仍需保持动作与决定的对应关系。
 
 恢复后，源码按原始工具调用顺序重建消息：
 
@@ -275,7 +274,7 @@ for idx, tool_call in enumerate(last_ai_msg.tool_calls):
         # 未进入审批的工具调用保持原样
         revised_tool_calls.append(tool_call)
 
-# AIMessage 只保留最终允许继续处理的工具调用
+# 更新调用列表；reject/respond 也保留原调用，并在下方补入配对结果
 last_ai_msg.tool_calls = revised_tool_calls
 
 return {"messages": [last_ai_msg, *artificial_tool_messages]}
@@ -283,7 +282,7 @@ return {"messages": [last_ai_msg, *artificial_tool_messages]}
 
 这里没有直接调用工具。Hook 返回的是新的消息状态，后续是否进入工具节点由 Agent 图的条件边判断。
 
-## 四、四种决策怎样改变执行
+## 六、四种决策怎样改变执行
 
 核心逻辑在 `_process_decision()`：
 
@@ -360,9 +359,9 @@ def _process_decision(
 
 `edit` 必须保留原始 `id`。这个 ID（标识符）是模型工具调用和 `ToolMessage` 的配对键；修改工具名或参数不等于创建一条新的工具调用协议。
 
-如果决策类型没有出现在 `allowed_decisions` 中，源码直接抛出 `ValueError`。人工端不能通过提交未授权的决策绕过工具策略。
+如果决策类型没有出现在 allowed_decisions 中，源码直接抛出 ValueError。它只校验决策种类，不验证提交人的身份。edit 分支还能修改工具名，且这里不会按新工具重新运行 interrupt_on 或 when；编辑后的工具是否允许执行，仍需在接收审批或工具执行边界核验。
 
-## 五、为什么中断放在 `after_model`
+## 七、为什么中断放在 `after_model`
 
 LangChain Agent 的相关图路径是：
 
@@ -387,9 +386,9 @@ model
 - 读取 State、构造 `ActionRequest`、执行纯函数判断可以重复。
 - 写数据库、发送邮件、提交任务等副作用不能放在 `interrupt()` 前，除非操作本身具备幂等性（idempotency，重复执行结果一致）。
 
-这也是它没有放进 `wrap_tool_call` 的原因：工具包装器位于单次工具执行内部，恢复时不应把“审批”和“工具 handler 已执行一半”混在一起。
+放在 after_model 可以一次聚合整批待审动作。工具包装器也能在调用 handler 之前实现中断，但要自行处理单调用的中断、并行与恢复；不能从内置方案的选择推出包装器天生无法审批。
 
-## 六、与 `interrupt_before=["tools"]` 的区别
+## 八、与 `interrupt_before=["tools"]` 的区别
 
 两者都能在工具执行前暂停，但控制粒度不同：
 
@@ -402,33 +401,12 @@ model
 
 两者也可以组合，但要明确暂停职责。若同一批工具调用同时触发两套中断，恢复流程会变成两阶段，调用方必须保存并匹配两次恢复状态。
 
-## 工程判断
+## 九、工程判断
 
-### 值得照搬
+以一轮两个动作举例：search 无需审批，send_email 需要审批。中间件只为 send_email 创建 action_request，但图停在 after_model 时，两项都没有由后续 ToolNode 派发。恢复时若 reject，send_email 的原调用保留并配上错误 ToolMessage，路由只派发 search；之后模型可读取查询结果和拒绝原因再回答。
 
-- 把人工审批定义成结构化请求和结构化决策，不让 UI 文本直接改变图状态。
-- 在工具副作用发生前暂停，并让恢复后的流程继续走统一 `ToolNode`。
-- 用 `tool_call_id` 保持模型调用、人工生成结果和工具消息之间的配对。
-- 对批量审批校验决策数量，避免顺序错位。
+reject 对应的文本会提示模型不要重试，但不会永久封禁工具。后续模型若提出新的 send_email 调用，仍会重新走配置的审批。respond 则把人的输入作为成功工具消息，表示已有协议结果，不证明邮件实际发送或远端业务完成。
 
-### 需要补一层
+恢复会重跑 interrupt 前的 when 和 description。它们若依赖易变外部条件，待审集合和顺序可能变化；审批记录应关联确切的中断、动作参数和资源版本，恢复端校验其仍对应当前任务。模型提供的说明文本不能代替执行服务对权限和实体的判断。
 
-- `args_schema` 当前没有在 `_create_action_and_config()` 中传入 `ReviewConfig`，编辑参数校验不能只依赖这个字段声明。
-- `edit` 允许修改工具名，应用仍需检查编辑后的工具是否已注册、是否有权限、参数是否符合工具 Schema。
-- 审批请求中的 `description` callable 应保持纯函数，不能在生成展示文本时访问外部系统并产生副作用。
-- 需要审计时，应记录原始 `ToolCall`、人工决策、编辑后的调用和最终 `ToolMessage`，而不是只记录一条“已批准”日志。
-
-### 不要照搬
-
-- 不要在 `interrupt()` 前执行不可重复的外部操作。
-- 不要把 `reject` 当成普通工具异常；源码会明确告诉模型“工具未执行，除非用户要求，否则不要重试”。
-- 不要丢弃或重新生成 `tool_call_id`。
-- 不要把图级 `interrupt_before` 和中间件级审批当成同一种恢复协议。
-
-## 读完后应该能判断什么
-
-- 为什么 HITL 要放在 `after_model`，而不是工具 handler 内部。
-- `HITLRequest` 如何把多个工具调用和各自的审批策略聚合到一次中断中。
-- `approve`、`edit`、`reject`、`respond` 分别如何改变 `ToolCall` 和 `ToolMessage`。
-- 为什么恢复前的逻辑必须可重放，审批前不能产生不可逆副作用。
-- 何时使用图级 `interrupt_before`，何时使用 `HumanInTheLoopMiddleware`。
+上线前至少对照 approve、edit、reject、respond 的工具执行次数、调用 ID 和消息更新；再检查错误数量与错误顺序的恢复值、同 thread 恢复及中断前代码的重复执行。图中断与恢复见 [LangGraph 07](../langgraph/07-interrupts-and-command.md)。

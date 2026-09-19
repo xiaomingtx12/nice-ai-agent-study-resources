@@ -1,225 +1,186 @@
 ---
 sidebar_position: 14
 sidebar_label: 12 RAG 组件与检索链路
-description: 沿 Loader、Document、TextSplitter、Embeddings、VectorStore 与 Retriever 的真实数据流，分清 RAG 基础组件各自负责的转换和边界。
+description: 沿 Document 切分、向量写入、查询编码和 Retriever 分派追踪 RAG 数据流，解释来源标识、缓存和模型上下文之间的边界。
 ---
 
-# LangChain 源码 12：RAG 组件与检索链路
+# LangChain 源码解析 12：RAG 组件与检索链路
 
-## 源码定位
+## 一、源码定位
 
-> **阅读基线**：`langchain-core` 1.4.6、`langchain-text-splitters`。  
+> **阅读基线**：langchain 1.3.7、langchain-core 1.4.6、langchain-text-splitters 1.1.2、langchain-classic 1.0.8；仓库快照 `76c32db9b38dfc287c958dc2a914d4834f022c1c`。路径均相对 LangChain 仓库根目录。
 >
-> **核心路径**：
->
-> - **RAG 的入口边界**：`libs/core/langchain_core/document_loaders/base.py`——`BaseLoader.load()` / `lazy_load()` / `load_and_split()` 在这里分层，正文一节说明 Loader 交付什么而不绑定文件格式。
-> - **贯穿索引与检索的数据容器**：`libs/core/langchain_core/documents/base.py`——`Document` 的 `page_content`、`metadata`、`id` 与 `__str__` 兼容逻辑在这里定义，正文二节对应。
-> - **切分的实现与选择**：`libs/text-splitters/langchain_text_splitters/{base.py,character.py}`——`TextSplitter._merge_splits()` 的 overlap 规则和 `RecursiveCharacterTextSplitter` 的递归分隔符退化在正文三节展开。
-> - **文档与查询的双通道协议**：`libs/core/langchain_core/embeddings/embeddings.py`——`embed_documents` / `embed_query` 在这里定义，正文四节用它说明写入与搜索分别编码。
-> - **检索的存取与可读实现**：`libs/core/langchain_core/vectorstores/{base.py,in_memory.py}`——`VectorStore.as_retriever()` 在抽象里，`InMemoryVectorStore` 提供从 Document 到相似度结果的完整路径，正文四、五节对应。
-> - **RAG 的出口**：`libs/core/langchain_core/retrievers.py`——`BaseRetriever.invoke()` 把查询收敛为 `list[Document]`，正文五节说明它为何是 Runnable、为何不一定来自向量库。
+> - 加载协议：`libs/core/langchain_core/document_loaders/base.py` → BaseLoader.load、lazy_load、alazy_load。
+> - 文档容器：`libs/core/langchain_core/documents/base.py` → BaseMedia、Document。
+> - 切分与 metadata 复制：`libs/text-splitters/langchain_text_splitters/base.py` → TextSplitter.create_documents、split_documents、_merge_splits。
+> - 递归分隔：`libs/text-splitters/langchain_text_splitters/character.py` → RecursiveCharacterTextSplitter._split_text。
+> - 向量协议：`libs/core/langchain_core/embeddings/embeddings.py` → Embeddings。
+> - 写入与相似度查询：`libs/core/langchain_core/vectorstores/in_memory.py` → InMemoryVectorStore.add_documents、_similarity_search_with_score_by_vector。
+> - 检索分派：`libs/core/langchain_core/vectorstores/base.py` → VectorStore.as_retriever、VectorStoreRetriever._get_relevant_documents。
+> - Runnable 检索入口：`libs/core/langchain_core/retrievers.py` → BaseRetriever.invoke。
+> - Classic 向量缓存：`libs/langchain/langchain_classic/embeddings/cache.py` → CacheBackedEmbeddings.embed_documents、embed_query、from_bytes_store。
 
-RAG 的基础链路不是"把文件塞进向量库"。它是一串类型转换：
+## 二、用一条资料和一个问题区分索引与查询
 
-- 外部数据先成为带 metadata 的 `Document`；
-- 再变成可检索的 chunk（切片）；
-- 文档与查询分别被 Embedding 映射为向量；
-- VectorStore 完成存取与相似度搜索；
-- Retriever 最终把查询收敛为 `list[Document]`。
+RAG（检索增强生成）先找出能支持回答的资料，再将资料交给模型。以 policy.md 中的退货说明为例，系统需要保存条款正文、来源和版本；用户问“收货多久以后还能申请”时，再用问题检索对应条款。
+
+这包含两条数据流：
 
 ```text
-外部数据
-  → Loader
-  → list[Document]
-  → TextSplitter
-  → chunks: list[Document]
-  → Embeddings + VectorStore
-  → Retriever
-  → list[Document]
-  → Prompt / Tool / Agent 上下文
+索引：外部资料 → Loader → Document → Splitter → 切片 → 文档向量与存储
+查询：问题 → 查询向量 → 搜索 → Document 列表 → 证据格式化 → 模型回答
 ```
 
-每一箭头都应有可独立评估的输入输出。把"召回不准"笼统归咎于向量库，会掩盖解析、切分、metadata、query、过滤和重排中的真实问题。
+Document 是正文与元数据容器；Embeddings 负责把文本编码为向量；VectorStore 存取向量及相关文档；Retriever 将查询封装成返回文档列表的调用接口。检索完成还没有生成答案，也没有自动核实引用是否支持答案。
 
-## 一、Loader：外部数据到 `Document`
+## 三、Loader 交付 Document，不负责检索
 
-`BaseLoader` 的核心是 `lazy_load()`：实现应以生成器逐个产出 `Document`，避免大数据源被一次性读入内存。
-
-- `load()` 只是 `list(self.lazy_load())` 的便利方法；
-- `aload()` 对应异步迭代入口。
+BaseLoader 建议子类实现 lazy_load，逐份产生 Document。load 与 aload 都会把结果收集为列表，下面是省略文档字符串后的实际方法：
 
 ```python
-documents = loader.load()
-# 外部文件 / 网页 / 数据库记录 → list[Document]；
-# 此时还没有切分、向量化或任何"检索语义"。
+def load(self) -> list[Document]:
+    return list(self.lazy_load())
+
+async def aload(self) -> list[Document]:
+    return [document async for document in self.alazy_load()]
 ```
 
-`BaseLoader.load_and_split()` 虽仍存在，但源码明确标为 deprecated（已弃用）；它默认偷偷创建 `RecursiveCharacterTextSplitter`。实际应用应显式选择 Loader 与 Splitter，才能记录 chunk 参数并针对数据类型评估效果。
+因此调用 aload 不表示结果按文档逐项返回；需要增量消费时使用 alazy_load。默认异步加载也可能通过执行器调用同步实现，原生异步能力由具体 Loader 决定。
 
-具体 Loader 多数不在当前 `langchain-core` 快照内，而由 community 或 provider 集成包实现。这是包边界，不是 RAG 管道缺失：core 只规定 Loader 交付 `Document` 的方式。
+Document 的 page_content 保存文本，metadata 保存来源、章节、租户或版本等应用字段，id 可作为标识。metadata 中写入 tenant 并不会自动执行权限过滤；谁能看到资料，由检索与交付路径使用这些字段来决定。
 
-## 二、`Document`：保留文本与来源，而不是消息
+load_and_split 仍保留在基类中，文档字符串明确建议视为弃用；未指定切分器时会创建 RecursiveCharacterTextSplitter。显式分开加载与切分，可以检查解析文本并记录切分配置，避免把解析错误误当成检索问题。
 
-`Document` 的主体是 `page_content`，并继承 `BaseMedia` 的 `metadata` 与可选 `id`。它用于 retrieval workflow，不应和模型 Message 混用。
+## 四、Splitter 怎样保留来源并生成切片
+
+TextSplitter.split_documents 只提取原文与 metadata，再交给 create_documents：
 
 ```python
-from langchain_core.documents import Document
-
-doc = Document(
-    page_content="退款申请需在签收后七天内提交。",
-    metadata={"source": "policy.md", "section": "refund"},
-)
-# page_content 是检索与后续 prompt 格式化的文本；
-# metadata 承担来源展示、权限过滤、租户隔离等应用语义。
+texts, metadatas = [], []
+for doc in documents:
+    texts.append(doc.page_content)
+    metadatas.append(doc.metadata)
+return self.create_documents(texts, metadatas=metadatas)
 ```
 
-`Document.__str__()` 有意只格式化 `page_content` 与 `metadata`，避免后来加入 `id` 等字段时改变“把 Document 直接格式化进 prompt”的历史行为。这是兼容处理，不代表直接 stringify Document 就是生产 RAG 的最佳上下文拼装方式。
-
-## 三、TextSplitter：原文到可召回 chunk
-
-`TextSplitter.split_documents()` 取每份 Document 的文本和 metadata，交给 `create_documents()`；后者为每个 chunk 复制 metadata 并创建新的 `Document`。
-
-这意味着 source 等属性能跟随切片，但"哪个 chunk 与前后文如何关联"仍要靠应用的 metadata 设计。
-
-`RecursiveCharacterTextSplitter` 默认依次尝试：
+create_documents 遍历每段文本的切分结果，深复制 metadata，并创建新的 Document。以下摘录内层循环：
 
 ```python
-["\n\n", "\n", " ", ""]
-# 优先在段落、行、词边界切；
-# 当前分隔符仍无法满足 chunk_size 时，再递归退化到更细粒度。
+for chunk in self.split_text(text):
+    metadata = copy.deepcopy(metadatas_[i])
+    if self._add_start_index:
+        offset = index + previous_chunk_len - self._chunk_overlap
+        index = text.find(chunk, max(0, offset))
+        metadata["start_index"] = index
+        previous_chunk_len = len(chunk)
+    new_doc = Document(page_content=chunk, metadata=metadata)
+    documents.append(new_doc)
 ```
+
+原 Document.id 没有沿这段路径传给切片。若要稳定更新、去重或引用，应另外设计 source_id、版本和 chunk_id；只依赖入库时随机生成的 ID，重新切分后容易留下重复或过期记录。start_index 来自文本查找，也需要与解析后的原文对应。
+
+RecursiveCharacterTextSplitter 默认尝试段落、换行、空格和字符级分隔。能放入目标长度的片段交给 _merge_splits 合并，过长片段再用更细分隔符递归。默认 length_function 是 len，因此 chunk_size 默认按字符计，不是 token 预算。
+
+_merge_splits 输出一块后移除旧片段，使后续块保留一定重叠。重叠受片段边界影响，不承诺相邻块精确重复 chunk_overlap 个字符。自定义分隔符若无法继续拆分，也可能保留超长块；表格、代码与标题层级需要按文档类型评估。
+
+## 五、文档写入与问题检索分别编码
+
+Embeddings 定义 embed_documents 和 embed_query，两者允许采用不同的任务编码方式。它本身不继承 Runnable；Retriever 才负责把检索暴露为 Runnable 调用。
+
+InMemoryVectorStore.add_documents 先批量编码正文。下面保留编码与存储循环，省略 ID 数量校验和迭代器准备：
 
 ```python
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,
-    chunk_overlap=80,
-)
-chunks = splitter.split_documents(documents)
-# Document → 更小的 Document；
-# overlap 只是保留相邻文本，不会自动解决跨章节语义、表格或代码块边界。
+texts = [doc.page_content for doc in documents]
+vectors = self.embedding.embed_documents(texts)
+# ……校验 ids 并准备 id_iterator……
+ids_ = []
+for doc, vector in zip(documents, vectors, strict=False):
+    doc_id = next(id_iterator)
+    doc_id_ = doc_id or str(uuid.uuid4())
+    ids_.append(doc_id_)
+    self.store[doc_id_] = {
+        "id": doc_id_,
+        "vector": vector,
+        "text": doc.page_content,
+        "metadata": doc.metadata,
+    }
 ```
 
-`TextSplitter._merge_splits()` 会在长度达到上限时输出当前片段，并按 overlap 规则从缓冲区移除旧文本。
+显式 ids 优先，否则用 Document.id，再否则生成 UUID。同一个 ID 再写入会覆盖这个内存字典条目；它不是数据库事务或持久索引。metadata 在这里直接引用 doc.metadata，写入后原地修改该字典可能影响存储记录，需要稳定快照时由调用方管理副本。
 
-`chunk_size` 与 `chunk_overlap` 不是框架默认值就能替业务决定的参数：问答需要的证据粒度、文档结构、Embedding 模型和后续重排都会影响选择。
-
-## 四、Embeddings 与 VectorStore：两条向量化路径
-
-`Embeddings` 只规定两个同步抽象方法：
+查询先执行 embed_query，再调用 _similarity_search_with_score_by_vector。该方法取出全部记录、应用可选 filter，随后做余弦相似度计算并截取前 k 项：
 
 ```python
-embed_documents(texts: list[str]) -> list[list[float]]
-embed_query(text: str) -> list[float]
-# 文档与查询可能需要不同的 provider 端编码路径；
-# 不应默认它们只是同一函数的不同参数名。
+similarity = cosine_similarity([embedding], [doc["vector"] for doc in docs])[0]
+# 按相似度降序取结果索引。
+top_k_idx = similarity.argsort()[::-1][:k]
 ```
 
-两个容易忽略的实现细节：
+这里的 k 控制返回条数，不代表只比较 k 份文档。InMemoryVectorStore 对通过过滤的记录计算相似度，适合看清机制和小规模使用；其他向量库可能采用近似索引，并具有不同的更新一致性、过滤语法和距离定义。
 
-- 异步默认实现会把同步方法放进 executor（执行器）——只有 provider 集成自己重写异步方法时，才具有原生异步 I/O；
-- Embedding 本身不是 Runnable——它描述的是向量计算协议，不是"任意输入接任意输出"的链式组件。
+文档与查询应使用兼容的向量空间。更换模型、维度或预处理后，需要重新构建对应索引；即使维度相同，也不能据此判断两个模型的向量可混用。
 
-**向量缓存：`CacheBackedEmbeddings`**——在 Embedding 之上包一层缓存，避免重复计算相同文本的向量。它实现了 core 的 `Embeddings` 协议（`langchain_classic/embeddings/cache.py:108`），但类本身在 Classic 兼容层，不在 v1 主线：
+## 六、Retriever 把搜索方式变成统一调用
+
+VectorStore.as_retriever 返回持有该向量库的 VectorStoreRetriever，不复制数据或建立新索引。它的 _get_relevant_documents 按 search_type 分派，以下摘录主体：
 
 ```python
-from langchain_classic.embeddings import CacheBackedEmbeddings
-from langchain_classic.storage import LocalFileStore
-from langchain_openai import OpenAIEmbeddings
-
-store = LocalFileStore("./my_cache")
-
-underlying_embedder = OpenAIEmbeddings()
-embedder = CacheBackedEmbeddings.from_bytes_store(
-    underlying_embedder, store, namespace=underlying_embedder.model
-)
-
-# 第一次计算并写入缓存；第二次相同文本直接从缓存读取
-embeddings = embedder.embed_documents(["hello", "goodbye"])
+kwargs_ = self.search_kwargs | kwargs
+if self.search_type == "similarity":
+    docs = self.vectorstore.similarity_search(query, **kwargs_)
+elif self.search_type == "similarity_score_threshold":
+    docs_and_similarities = self.vectorstore.similarity_search_with_relevance_scores(
+        query, **kwargs_
+    )
+    docs = [doc for doc, _ in docs_and_similarities]
+elif self.search_type == "mmr":
+    docs = self.vectorstore.max_marginal_relevance_search(query, **kwargs_)
+else:
+    msg = f"search_type of {self.search_type} not allowed."
+    raise ValueError(msg)
+return docs
 ```
 
-机制要点（`cache.py:165-199`）：
+调用参数覆盖同名 search_kwargs。声明支持某个 search_type 不等于每个 VectorStore 都实现了对应方法，例如相关性分数转换或 MMR 仍可能由具体实现抛出未实现错误。
 
-- 文本先哈希成缓存 key（默认 SHA-1，源码明确警告它不抗碰撞，新应用应换 BLAKE2/SHA-256）；
-- `embed_documents` 先 `mget` 查缓存，只对缺失的文本调底层 embedder，再 `mset` 批量回填——文档向量**默认缓存**；
-- `embed_query` **默认不缓存**（无 `query_embedding_store` 时直接透传）——查询几乎不重复，缓存无收益还占存储。
+BaseRetriever.invoke 处理配置、回调和调用生命周期，再交给 _get_relevant_documents。结果是 list[Document]，可进入 LCEL 或包装成工具；关键词检索、SQL 和企业搜索同样能实现这个协议，并不要求底层一定有 Embeddings。
 
-**为什么它不在 v1 主线**：缓存协议（`BaseStore`）与哈希编码都属 Classic 层。v1 里若需要同样的效果，做法是自己在 `Embeddings` 实现外面套一层 cache-aside 逻辑，或直接使用集成包的缓存能力——协议允许，但没有内置封装器。
+## 七、向量缓存缓存的是编码结果
 
-`VectorStore` 则定义文档写入与查询接口。`InMemoryVectorStore.add_documents()` 的实现能把数据路径看得很清楚：
+CacheBackedEmbeddings 位于 langchain-classic 1.0.8，但实现的是 core 的 Embeddings 协议，可以与上述组件配合。它使用的 Store 抽象来自 core，不能因封装器属于 Classic 就推断整个缓存协议都属于 Classic。
 
-1. 取出每个 `doc.page_content`；
-2. 批量调用 `embedding.embed_documents(texts)`；
-3. 保存 `id`、`vector`（向量）、原文本和 metadata。
-
-查询时 `similarity_search_with_score()` 会先执行 `embed_query(query)`，再与已存向量计算余弦相似度并重建 `Document`。
+embed_documents 先读取缓存中的向量，找出缺失位置，再按批次调用底层编码器并回填。以下是实际缺失处理，省略首次 mget 与最终返回：
 
 ```python
-from langchain_core.vectorstores import InMemoryVectorStore
-
-vector_store = InMemoryVectorStore(embedding=embeddings)
-vector_store.add_documents(chunks)
-# 写入时：Document 文本 → 文档向量；
-# store 仍保留文本与 metadata，检索结果才能恢复成 Document。
-
-hits = vector_store.similarity_search("退款期限", k=4)
-# 查询文本 → 查询向量 → 相似度排序 → list[Document]。
+all_missing_indices: list[int] = [
+    i for i, vector in enumerate(vectors) if vector is None
+]
+for missing_indices in batch_iterate(self.batch_size, all_missing_indices):
+    missing_texts = [texts[i] for i in missing_indices]
+    missing_vectors = self.underlying_embeddings.embed_documents(missing_texts)
+    self.document_embedding_store.mset(
+        list(zip(missing_texts, missing_vectors, strict=False)),
+    )
+    for index, updated_vector in zip(missing_indices, missing_vectors, strict=False):
+        vectors[index] = updated_vector
 ```
 
-生产环境的 Chroma、Qdrant 等实现通常位于伙伴集成包。换向量库不应改变上层 Retrieval 契约，但过滤语法、索引构建、距离度量和一致性保证仍是实现差异——不能完全当作可无代价替换。
+from_bytes_store 将文本键转换为带 namespace 的哈希键并序列化向量。namespace 应覆盖模型、维度和会影响编码的配置；缓存层不会从文本自动识别模型已经升级。默认键算法使用 SHA-1 派生 UUID，也支持其他算法或自定义编码器。
 
-## 五、Retriever：把“怎样找”藏到 `query -> Document[]` 后面
+查询缓存默认关闭，是否开启取决于查询重复率、更新策略与存储成本，不能预设查询永远不重复。向量缓存命中也不表示检索答案有效：文档权限、版本和正文可读性仍要在检索路径核对。
 
-`VectorStore.as_retriever()` 创建 `VectorStoreRetriever`。它可选择 `similarity`、`similarity_score_threshold` 或 `mmr`，再在 `_get_relevant_documents()` 分派给底层向量库对应的搜索方法。
+## 八、证据怎样进入模型，失败怎样定位
 
-```python
-retriever = vector_store.as_retriever(
-    search_type="mmr",
-    search_kwargs={"k": 4, "fetch_k": 20},
-)
+检索得到 Document 后，应用还需组织引用标识、正文和来源，并控制总输入长度。将文档转成文本不会自动验证证据内容，模型也可能忽视条件或引用错误条款。
 
-documents = retriever.invoke("退款申请什么时候截止？")
-# str → list[Document]；
-# Retriever 是 Runnable，能进入 LCEL，也能被包装为 Agent 工具。
-```
+| 现象 | 先检查哪份中间结果 |
+| --- | --- |
+| 目标材料完全没有命中 | Loader 输出、切片内容和入库 ID |
+| 命中片段但缺少例外条件 | 原文章节边界、相邻块和父文档 |
+| 内容相似但答非所问 | 查询向量、候选排序与实际证据标签 |
+| 命中材料正确但回答错误 | 最终拼给模型的证据、指令和引用 |
+| 出现过期或越权材料 | 版本删除策略、过滤条件和结果授权 |
 
-`BaseRetriever` 的公开入口是 `invoke` / `ainvoke` / `batch` / `abatch`；自定义检索器实现 `_get_relevant_documents()` 即可。
+metadata 是承载约束的数据，不会自行执行约束。InMemoryVectorStore 的 filter 接收 Callable[[Document], bool]；其他库常使用字典表达式，切换存储前应核对接口。只在最终回答隐藏来源，不能阻止未授权正文进入模型。
 
-它不要求底层一定是向量库：关键词、SQL、图数据库、企业搜索或混合检索都可返回相同的 `Document` 列表。
-
-## 六、检索结果怎样回到模型
-
-Retriever 的输出还不是答案。至少还要处理三件事：
-
-1. **上下文格式化**：将多个 Document 变成可读文本，同时保留引用标识；
-2. **预算控制**：按 token、得分、来源或权限截断，不能盲目拼全部 chunk（切片）；
-3. **生成与引用**：Prompt 说明证据使用方式，应用决定是否展示 source（来源）、何时拒答或回退搜索。
-
-两种组装方式：
-
-- **确定链路**——这些步骤可用 [01：Runnable 抽象与 LCEL](./01-runnable-and-lcel.md) 组合；
-- **自主检索**——如果模型需要自己判断"是否检索、查哪个知识库、是否继续调用其他工具"，则将 Retriever 包装为 Tool（工具），交由 [03：`create_agent()`](./03-create-agent-assembly.md) 的模型—工具循环调度。
-
-## 七、RAG 故障定位：按数据边界排查
-
-| 现象 | 优先检查的边界 | 常见误判 |
-| --- | --- | --- |
-| 资料根本没被检出 | Loader、metadata、写入是否完成 | 直接换模型或调大 `k` |
-| 命中内容碎片化或缺前提 | Splitter、chunk overlap、文档结构 | 以为换向量库就会修复 |
-| 相似但不回答问题 | Embedding/query、检索类型、metadata filter | 把“语义相似”当成“可回答” |
-| 模型无视已召回资料 | 上下文格式、Prompt、token 预算 | 反复修改检索参数 |
-| 检出不该看的资料 | metadata 过滤和访问控制 | 只在最终回答层隐藏来源 |
-
-RAG 的每层都可替换，但替换前必须明确失败发生在“资料没变成正确 Document”“切分不保留所需语义”“检索排序不对”还是“正确证据没有进入模型视图”。
-
-## 读完后应该能判断什么
-
-- Loader、Splitter、Embedding、VectorStore、Retriever 的输入输出各是什么；
-- 为什么 `Document` 是贯穿索引和检索的容器，却不应该直接等同于消息；
-- `as_retriever()` 如何把向量库封装为 Runnable，以及为什么 Retriever 不一定来自向量库；
-- `CacheBackedEmbeddings` 缓存什么、不缓存什么（文档向量缓存、查询向量默认不缓存），以及它为什么在 Classic 层；
-- 为什么 `load_and_split()` 与 Classic 的一键 RAG chain 不应作为新项目主线；
-- 应将 RAG 放在固定 LCEL 链里，还是包装成 Tool 交给 Agent，自主检索只在后者确有必要时引入。
-
-本篇只覆盖基础链路。召回质量不够时的进阶手段——查询改写、混合检索、MMR 细节、父子切片、压缩重排与评估指标——在 [13：RAG 高级检索技术](./13-advanced-retrieval-techniques.md) 展开。
+固定的检索与生成流程可用 [01](01-runnable-and-lcel.md) 的组合协议；模型需要自行决定何时检索时，再将检索器注册为 [03](03-create-agent-assembly.md) 中的工具。查询改写、融合与父子回查的源码见 [13](13-advanced-retrieval-techniques.md)。

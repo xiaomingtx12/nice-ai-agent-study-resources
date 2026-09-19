@@ -1,150 +1,137 @@
 ---
 sidebar_position: 13
 sidebar_label: 11 工具动态化：选择、模拟与 provider 搜索
-description: 看 wrap_model_call 怎样在"编译期固定工具列表"的边界内动态改写模型视图，以及 wrap_tool_call 怎样模拟工具执行。
+description: 从工具声明与执行入口出发，拆解工具预选、模拟执行和供应商延迟加载，说明运行时校验、额外调用和组合边界。
 ---
 
-# LangChain 源码 11：工具动态化——选择、模拟与 provider 搜索
+# LangChain 源码解析 11：工具动态化——选择、模拟与 provider 搜索
 
-## 源码定位
+## 一、源码定位
 
-> **阅读基线**：`langchain` 1.3.7（`libs/langchain_v1/`）。  
+> **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
+> 源码路径相对 LangChain 仓库根目录；版本与阅读路线见 [系列导读](index.md)。
 >
 > **核心路径**：
+>
+> - 动态工具校验：`libs/langchain_v1/langchain/agents/factory.py` → _get_bound_model()。
 >
 > - **选择器实现**：`libs/langchain_v1/langchain/agents/middleware/tool_selection.py`——`LLMToolSelectorMiddleware` 在 `wrap_model_call` 里用小模型预选工具，正文一节展开。
 > - **模拟器实现**：`libs/langchain_v1/langchain/agents/middleware/tool_emulator.py`——`LLMToolEmulator` 用 `wrap_tool_call` 拦截并模拟工具输出，正文二节展开。
 > - **provider 搜索实现**：`libs/langchain_v1/langchain/agents/middleware/provider_tool_search.py`——`ProviderToolSearchMiddleware` 注入 provider 端搜索工具并延迟加载工具 Schema，正文三节展开。
 
-## 为什么读这一篇
+三种中间件改动的是不同环节：选择器决定主模型这次看到哪些工具，模拟器决定调用结果从哪里来，供应商搜索决定工具定义何时进入模型上下文。它们都使用请求包装接口，但不能混称为“减少工具数量”。
 
-[03 篇](./03-create-agent-assembly.md) 有一条硬边界：工具列表在 `create_agent()` 编译期固定，`wrap_model_call` 只能改已注册工具的参数，不能添加新工具。
+## 二、工具声明与工具执行是两个入口
 
-本篇三个中间件都在这个边界内做"工具动态化"：
-
-- **选择器**是减少工具数量；
-- **模拟器**是改变工具行为；
-- **provider 搜索**是改变工具 Schema 的加载时机。
-
-三条路径都遵守"编译期注册、运行期调整"的约束。
-
-## 一、选择器：用小模型预选工具
-
-`LLMToolSelectorMiddleware` 处理"工具很多、每轮全量发送太贵"的问题。真实实现（`tool_selection.py:273-313`）：
+默认情况下，工厂要求模型请求里的客户端工具已登记在 ToolNode。当前版本还提供动态执行入口，`libs/langchain_v1/langchain/agents/factory.py` 的 _get_bound_model 有如下真实分支，省略错误文本构造：
 
 ```python
-def wrap_model_call(self, request, handler):
-    selection_request = self._prepare_selection_request(request)
-    if selection_request is None:
-        return handler(request)          # 无工具或无需选择：直接透传
+has_wrap_tool_call = wrap_tool_call_wrapper or awrap_tool_call_wrapper
 
-    # 用结构化输出约束选择模型的返回：工具名做成 Literal 枚举
-    type_adapter = _create_tool_selection_response(selection_request.available_tools)
-    schema = type_adapter.json_schema()
-    structured_model = selection_request.model.with_structured_output(schema)
+available_tools_by_name = {}
+if tool_node:
+    available_tools_by_name = tool_node.tools_by_name.copy()
 
-    response = structured_model.invoke(
-        [
-            {"role": "system", "content": selection_request.system_message},
-            selection_request.last_user_message,   # 取最近一条 HumanMessage
-        ]
-    )
-
-    if not isinstance(response, dict):
-        raise AssertionError(f"Expected dict response, got {type(response)}")
-
-    modified_request = self._process_selection_response(
-        response, selection_request.available_tools,
-        selection_request.valid_tool_names, request,
-    )
-    return handler(modified_request)     # override 生成精简后的请求
+# 存在工具包装器时，由包装器承接动态工具；否则校验登记名称。
+if not has_wrap_tool_call:
+    unknown_tool_names = []
+    for t in request.tools:
+        if isinstance(t, dict):
+            continue
+        if isinstance(t, BaseTool) and t.name not in available_tools_by_name:
+            unknown_tool_names.append(t.name)
 ```
 
-设计要点：
+因此 wrap_model_call 可以向请求加入动态工具声明，配合 wrap_tool_call 解析并执行。校验被跳过只表示工厂允许这条扩展路径；一个只会重试的包装器不会自动知道如何执行新工具。动态处理方要准备实际 BaseTool 或短路返回合法结果，并负责权限与参数校验。
 
-- **没有新增工具**——`selected` 是已注册工具的子集，完全符合"编译期固定"边界；
-- **`always_include` 工具不参与选择**，且构造期校验其确实存在于绑定工具集（`tool_selection.py:181-188`）——不在则抛 `ValueError`；
-- **`max_tools` 截断**：选择模型超量输出时只取前 N 个，`system_prompt` 会显式告知模型这一规则（第 201-207 行）；`always_include` 工具不计入 `max_tools`（第 144-146 行）；
-- **选择也是一次模型调用**：`wrap_model_call` 内部先调选择模型、再调主模型——嵌套模型调用是拦截器线的合法用法。选择模型的返回被 `with_structured_output` 约束成工具名枚举的 dict，非法返回直接断言失败。
+下面的选择器与搜索中间件主要处理已有工具，模拟器则短路执行。它们是三种具体实现，不是动态工具能力的全部限制。
 
-## 二、模拟器：用模型假装工具
+## 三、选择器：用一次辅助调用筛选客户端工具
 
-`LLMToolEmulator` 反过来——工具本身存在，但执行被替换。真实实现（`tool_emulator.py:109-157`）：
+LLMToolSelectorMiddleware 的 _prepare_selection_request 先排除供应商字典工具，将 always_include 与可选工具分开，再取最后一条 HumanMessage。选择模型接收工具名称和描述形成的系统提示，以及这条用户消息；不会自动看到此前所有工具结果。
+
+未指定选择模型时使用 request.model，并不保证是更小、更便宜的模型。always_include 也不是构造期校验，而是在每次准备当前请求时核对；如果前一层已移除该工具，会在这里报错。
+
+wrap_model_call 通过动态 JSON Schema 约束候选名称，然后由 _process_selection_response 再做确定性检查。下面是选名的实际分支：
 
 ```python
-def wrap_tool_call(self, request, handler):
-    tool_name = request.tool_call["name"]
+selected_tool_names: list[str] = []
+invalid_tool_selections = []
 
-    # 只模拟声明过的工具，其余走真实执行
-    should_emulate = self.emulate_all or tool_name in self.tools_to_emulate
-    if not should_emulate:
-        return handler(request)
+for tool_name in response["tools"]:
+    if tool_name not in valid_tool_names:
+        invalid_tool_selections.append(tool_name)
+        continue
+    # 去重，并在可选工具范围内应用 max_tools。
+    if tool_name not in selected_tool_names and (
+        self.max_tools is None or len(selected_tool_names) < self.max_tools
+    ):
+        selected_tool_names.append(tool_name)
 
-    # 构造模拟提示词
-    prompt = (
-        f"You are emulating a tool call for testing purposes.\n\n"
-        f"Tool: {tool_name}\n"
-        f"Description: {request.tool.description if request.tool else 'No description available'}\n"
-        f"Arguments: {request.tool_call['args']}\n\n"
-        f"Generate a realistic response that this tool would return "
-        f"given these arguments.\n"
-        f"Return ONLY the tool's output, no explanation or preamble."
-    )
-
-    response = self.model.invoke([HumanMessage(prompt)])
-
-    # 短路：不调用 handler，直接返回模拟的 ToolMessage
-    return ToolMessage(
-        content=response.content,
-        tool_call_id=request.tool_call["id"],
-        name=tool_name,
-    )
+if invalid_tool_selections:
+    msg = f"Model selected invalid tools: {invalid_tool_selections}"
+    raise ValueError(msg)
 ```
 
-这是 [04 篇](./04-middleware-control-plane.md) 介绍的"拦截器可以短路 handler"的完整用例：`wrap_tool_call` 不调用 `handler`，而是用一次模型调用生成 `ToolMessage`。用途是测试工具调用链、原型阶段避免真实副作用。注意模拟消息的 `tool_call_id` 仍取自原请求——配对协议不被破坏。
+非法工具名触发 ValueError；非字典响应在包装器中触发 AssertionError，缺字段等形状错误还有对应的普通 Python 异常。不能只凭 schema 里存在枚举就省略运行时校验。
 
-**边界提醒**：模拟器输出的是模型"想象"的结果，不是真实执行结果。它验证的是"Agent 对工具结果的消费逻辑"，不是工具本身正确性——混淆两者会让测试产生假阳性。
+最终工具列表保留选中的 BaseTool，再附加 always_include 和原请求中的供应商字典工具。max_tools 只限制可选部分，因此最终总数可以更大。入选名额按模型返回顺序决定，但选中工具对象按原 available_tools 的顺序重建，不保证最终声明顺序与模型排名一致。
 
-## 三、Provider 搜索：延迟加载工具 Schema
+例如主任务是“查订单后发送通知”，最近用户消息没有列出中间查询结果；后续轮次仍按这条用户消息预选，可能漏掉下一步需要的工具。关键收尾工具可设 always_include，或让自定义选择器读取可信任务状态。是否值得预选，应比较额外一次模型调用与减少 schema 后的整体成本和完成率。
 
-`ProviderToolSearchMiddleware` 解决"绑定了大量工具、每轮全量发送 Schema 太大"的问题。核心逻辑在 `_prepare_request`（`provider_tool_search.py:104-154`）：
+## 四、模拟器：保留协议配对，替换结果来源
+
+LLMToolEmulator 根据 emulate_all 或名称集合决定是否模拟。未命中的调用交给 handler；命中后构造包含工具名、描述和参数的提示词，调用模拟模型。下面保留返回分支，省略前面的提示词构造：
 
 ```python
-def _prepare_request(self, request):
-    # 1. 校验 searchable_tools 都真实绑定在模型上，否则 ValueError
-    #    （provider_tool_search.py:125-132）
-    # 2. 无延迟工具时原样返回（无论 provider 是否支持）
-    # 3. 有延迟工具时：
-    #    - 推断模型 provider（当前支持 Anthropic / OpenAI）
-    #    - 把目标工具标记 defer_loading（Schema 不随请求发送）
-    #    - 注入 provider 的服务端工具搜索工具 dict
-    bound_tools = [_defer_tool_if_needed(tool, self.searchable_tool_names) for tool in tools]
-    return request.override(tools=[*bound_tools, dict(_SERVER_TOOL_SEARCH_TOOLS[provider])])
+response = self.model.invoke([HumanMessage(prompt)])
+
+# 返回配对结果，不进入真实工具 handler。
+return ToolMessage(
+    content=response.content,
+    tool_call_id=request.tool_call["id"],
+    name=tool_name,
+)
 ```
 
-与选择器的差别：选择器是**减少本轮工具**，provider 搜索是**减少本轮工具 Schema 体积**——工具仍在声明列表里，但完整 Schema 只在模型需要时由 provider 端按需取回。`extras["defer_loading"]` 标记是实现机制。
+原 tool_call_id 保持不变，父 Agent 因而可以沿标准工具协议继续运行。默认 ToolMessage 状态为 success，但这里只证明模拟调用生成了结果，不能证明数据库写入、文件生成或邮件发送发生。
 
-**这条边界直接依赖 provider 能力**：
+模拟器适合测试编排面对不同工具结果时怎样选择下一步。它本身仍会调用模型，输出也可能波动；需要稳定回归时可使用固定结果。被模拟工具参数还会发送给模拟模型，避免真实工具副作用不等于没有外部数据传输。
 
-- Anthropic / OpenAI 之外有延迟工具时抛 `ValueError`；
-- 没有延迟工具时无论 provider 都透传。
+## 五、供应商搜索：保留工具对象，设置延迟加载标记
 
-动态化的可用范围由下游能力决定——不是所有 provider 都支持服务端工具搜索。
+ProviderToolSearchMiddleware 在请求准备阶段验证 searchable_tools 是否存在。工具名称在集合中，或原 extras 已设置 defer_loading=True，都会进入延迟加载路径；未选中任何延迟工具时直接透传。
 
-## 四、三个动态化方向的边界
+真正设置标记的是 _defer_tool_if_needed，以下为主体：
 
-| 中间件 | 改什么 | 用哪个 Hook | 边界 |
+```python
+if not _is_deferred_tool(tool, tool_names):
+    return tool
+if not isinstance(tool, BaseTool):
+    return tool
+extras = {**(tool.extras or {}), "defer_loading": True}
+return tool.model_copy(update={"extras": extras})
+```
+
+它复制工具并合并 extras，不删除原参数 schema，也不在应用侧建立一个检索索引。_prepare_request 确认供应商受支持后，追加服务端搜索声明：
+
+```python
+bound_tools = [_defer_tool_if_needed(tool, self.searchable_tool_names) for tool in tools]
+return request.override(tools=[*bound_tools, dict(_SERVER_TOOL_SEARCH_TOOLS[provider])])
+```
+
+本快照的映射包含 Anthropic 和 OpenAI；有延迟工具但供应商无法识别或不在映射中时抛 ValueError。适配器如何把 extras 转为请求、供应商怎样向模型提供搜索结果，属于下一层实现。仅从中间件不能推断完整 schema 一定未通过网络发送，也不能据此量化请求字节或 token 节省。
+
+延迟加载后的业务工具仍需要执行端：搜索帮助模型发现工具，不会替应用完成 lookup_order 或 send_email。服务端搜索工具字典与客户端业务工具的生命周期不同。
+
+## 六、组合时核对候选、执行与数据出口
+
+| 机制 | 主要输入 | 主要输出 | 额外行为 |
 | --- | --- | --- | --- |
-| `LLMToolSelectorMiddleware` | 工具数量（子集） | `wrap_model_call` | 不新增工具，构造期校验 always_include |
-| `LLMToolEmulator` | 工具行为（模拟） | `wrap_tool_call` | 短路 handler，输出非真实结果 |
-| `ProviderToolSearchMiddleware` | 工具 Schema 加载时机 | `wrap_model_call` | 依赖 provider 服务端搜索能力 |
+| 选择器 | 当前工具集合、最近用户消息 | 精简的 request.tools | 一次辅助模型调用 |
+| 模拟器 | 已提出的工具名与参数 | 人工合成的 ToolMessage | 一次模拟模型调用，跳过真实工具 |
+| 供应商搜索 | 工具对象与供应商信息 | 带延迟标记的工具及搜索声明 | 依赖供应商搜索协议 |
 
-共同约束来自 [03 篇](./03-create-agent-assembly.md) 的编译期固定工具列表：三者都只调整"模型视图"（数量、行为、Schema），不向 `request.tools` 添加未注册工具——这正是 `DYNAMIC_TOOL_ERROR_TEMPLATE` 想要维持的并发安全边界。
+选择器若放在搜索中间件外层，可能先移除 searchable_tools 中登记的工具，导致内层的存在性检查失败；反过来放置时，仍需确保搜索声明与剩余工具定义一致。不能只看各自单独运行成功，就认为任意组合顺序都有效。
 
-## 读完后应该能判断什么
-
-- 在"编译期固定工具"边界内，工具动态化只能调整哪些维度；
-- 选择器为什么排除 dict 形式的 provider 工具；
-- 模拟器短路 handler 的用途与假阳性风险；
-- provider 搜索与选择器解决的是不同问题（Schema 体积 vs 工具数量）；
-- 实现自己的工具动态化中间件时，先检查改的是数量、行为还是加载时机，再选 Hook。
+动态工具的执行权限应在实际执行入口核验。缩小模型可见列表能减少误选，但不是权限系统；模拟成功也不应进入真实业务完成率。装配与动态工具校验见 [03](03-create-agent-assembly.md)，包装器顺序见 [04](04-middleware-control-plane.md)。

@@ -4,13 +4,21 @@ sidebar_label: 00 项目概览与仓库结构
 description: 从 LangChain monorepo 的包边界出发，分清 langchain-core、v1 Agent、Classic、文本切分器和服务商集成各自负责什么。
 ---
 
-# LangChain 源码 00：项目概览与仓库结构
+# LangChain 源码解析 00：项目概览与仓库结构
 
-## 源码定位
+## 一、源码定位
 
-> **阅读基线**：`langchain` 1.3.7。  
+> **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
+> 源码路径相对 LangChain 仓库根目录；版本与阅读路线见 [系列导读](index.md)。
 
-## 一、LangChain 在三框架中的位置
+> - 发布包与版本：`libs/core/pyproject.toml`、`libs/langchain_v1/pyproject.toml`、`libs/langchain/pyproject.toml`
+> - 组合协议：`libs/core/langchain_core/runnables/base.py` → `Runnable`、`RunnableSequence`
+> - 标准 Agent 工厂：`libs/langchain_v1/langchain/agents/factory.py` → `create_agent()`
+> - 模型初始化：`libs/langchain_v1/langchain/chat_models/base.py` → `init_chat_model()`
+
+路径均相对 LangChain 仓库根目录。后续文章沿用同一快照；涉及 Classic、文本切分器或 LangGraph 时，分别标明所属包与入口。
+
+## 二、LangChain 在三框架中的位置
 
 ```text
 LangGraph
@@ -23,16 +31,16 @@ Deep Agents
   └─ 面向长任务预装文件、技能、记忆、子 Agent 与上下文治理
 ```
 
-LangChain 的工程价值是把不同服务商与不同业务组件收敛为可组合协议。在这个收敛目标下，它内部有两条能力主线，划分依据是**数据流是否在构造期确定**：
+LangChain 为模型、工具与检索组件提供统一输入输出，并提供两种常用组织方式：LCEL 把步骤组合成可调用对象，标准 Agent 图管理模型与工具的循环。二者都可以含运行时分支，差别在于循环、状态和恢复由哪一层负责：
 
 | 主线 | 数据流形态 | 对应文章 |
 | --- | --- | --- |
-| core 协议 + LCEL | 步骤和输入输出在链构造时已经固定 | [01 Runnable 抽象与 LCEL](./01-runnable-and-lcel.md)、[02 聊天模型、消息与工具](./02-core-abstractions.md) |
-| v1 `create_agent()` + Middleware | 下一步由模型根据中间结果临时决定 | [03 工厂](./03-create-agent-assembly.md)、[04 Middleware](./04-middleware-control-plane.md)、[05 Runtime](./05-state-graph-runtime.md) |
+| core 协议 + LCEL | 组合关系通常预先声明，分支可根据运行时输入选择 | [01 Runnable 抽象与 LCEL](./01-runnable-and-lcel.md)、[02 聊天模型、消息与工具](./02-core-abstractions.md) |
+| v1 `create_agent()` + Middleware | 工厂建立标准图，模型输出与 hook 更新决定走哪条边 | [03 工厂](./03-create-agent-assembly.md)、[04 Middleware](./04-middleware-control-plane.md)、[05 Runtime](./05-state-graph-runtime.md) |
 
 两条主线共享同一批 core 数据对象；区别在于循环、状态与恢复是否需要框架代为管理。RAG 横跨两条主线：检索结果既可作固定链中的一步，也可包装成 Agent 的工具（[12：RAG 组件与检索链路](./12-rag-components-and-retrieval.md)）。
 
-## 二、`libs/` 目录地图：发布包边界先于实现细节
+## 三、`libs/` 目录地图：发布包边界先于实现细节
 
 ```text
 libs/
@@ -60,21 +68,34 @@ libs/
 
 文本切分在 `libs/text-splitters/`，`RecursiveCharacterTextSplitter` 通过可选依赖进入 RAG 管道。`libs/partners/` 只包含部分官方维护的集成，OpenAI、Anthropic、向量库及很多 Loader 的具体实现是独立包甚至独立仓库。core 的责任是定义“模型 / Embedding / VectorStore 必须提供什么方法”，不维护厂商实现；`standard-tests` 用统一测试约束集成行为。
 
-## 三、包边界决定阅读顺序
+## 四、包边界决定阅读顺序
 
 后续文章按依赖方向排列，而不是按 API 复杂度：
 
 ```text
 00 仓库与包边界
-  → 01 核心对象与 Runnable 协议
-  → 02 LCEL 表达式如何组合确定步骤
-  → 03 create_agent 如何为不确定步骤加入工具循环
-  → 04 Middleware 如何在循环上加入控制面
-  → 05 LangGraph Runtime 如何执行、保存和恢复该图
-  → 06 RAG 如何把外部资料接入链或工具
-  → 07 Deep Agents 如何在同一扩展面上增加长任务默认策略
+  ↓
+协议层
+  01 Runnable 协议与 LCEL：确定步骤怎么组合
+  02 聊天模型、消息与工具：被组合的对象由哪些协议定义
+  ↓
+Agent 主线
+  03 create_agent：为不确定步骤加入工具循环
+  04 Middleware：在循环上加入控制面
+  05 State、Graph 与运行时：图怎么执行、保存和恢复
+  ↓
+治理专题（可按需跳读）
+  06 内置中间件总览    07 调用治理    08 HITL
+  09 上下文与隐私      10 工具注入    11 工具动态化
+  ↓
+外部知识
+  12 RAG 组件与检索链路 → 13 RAG 高级检索技术
 ```
 
-这不是顺序偏好：`create_agent()` 的 `model`、`tools`、`middleware` 参数本身就是 core 协议的实例，不先读协议，工厂代码里的 `BaseChatModel`、`BaseTool`、`ToolNode` 都会成为未解释的符号。
+`create_agent()` 接受模型名称或模型对象、工具及 AgentMiddleware。模型和工具复用 core 协议；AgentMiddleware 是 v1 的扩展接口，ToolNode 则是 LangGraph 提供的工具执行节点。阅读时按这些具体职责识别对象，比把所有参数都视为 Runnable 更准确。
 
-阅读范围也可以裁剪：步骤固定、只需一次或少量模型调用的任务，LCEL 往往比 Agent 更直接；需要自定义图拓扑、复杂恢复或非标准循环时再下沉 LangGraph。选择标准见 [01 篇"Runnable 抽象与 LCEL"](./01-runnable-and-lcel.md#八runnable-在-agent-中的实际位置)。
+06 之后的治理专题彼此独立，可以按手上的问题挑着读：调用老失败看 07，工具要审批看 08，上下文撑爆看 09。
+
+Deep Agents 不在本目录里，是同级的 [Deep Agents 专栏](../deepagents/index.md)。它复用这里的 Agent 与 Middleware 扩展面，另外增加 Backend、Skills、Memory、SubAgent 和长任务上下文治理。
+
+阅读范围也可以裁剪：步骤固定、只需一次或少量模型调用的任务，LCEL 往往比 Agent 更直接；需要自定义图拓扑、复杂恢复或非标准循环时再下沉 LangGraph，那部分是 [LangGraph 专栏](../langgraph/index.md) 的范围。组合与运行时的区别见 [01：Runnable 抽象与 LCEL](./01-runnable-and-lcel.md)。
