@@ -1,355 +1,165 @@
 ---
 title: 00：LLM Wiki 怎样生产并被 Agent 使用
-description: 从 OpenWiki 的源码追踪代码和外部证据如何进入 Wiki，以及生成后的 Wiki 怎样作为 Agent 可以按需读取的项目知识层。
+description: 从运行上下文到概念页和语义链接，理解 OpenWiki 怎样组织知识、写入 Markdown，并供后续 Agent 按需读取。
 sidebar_position: 1
 ---
 
-# OpenWiki 00：LLM Wiki 是怎样生产出来的
+# OpenWiki 00：LLM Wiki 怎样生产并被 Agent 使用
 
-> 源码定位
-> - Agent 运行入口：`src/agent/index.ts` - `runOpenWikiAgent` / `runOpenWikiAgentCore`
-> - 运行上下文与更新判断：`src/agent/utils.ts` - `createRunContext` / `getUpdateNoopStatus`
-> - 目录与文档收尾：`src/agent/okf-middleware.ts` / `src/okf/index-sync.ts`
-> - 运行时装配：`src/agent/index.ts` - `createModel` / `createDeepAgent`
+> 源码基线：OpenWiki `0.2.4`，commit `3076d557f8a14`；依赖锁定 `deepagents@1.11.1`。
 >
-> 本组文章对应 OpenWiki `0.2.4` 和 `deepagents@1.11.1`。重点是理解实现机制，不展开 CLI、凭据和各个 provider 的产品细节。
+> - 运行入口：`src/agent/index.ts` · `runOpenWikiAgent` / `runOpenWikiAgentCore`
+> - 上下文：`src/agent/utils.ts` · `createRunContext`
+> - 提示词：`src/agent/prompt.ts` · `createSystemPrompt` / `createUserPrompt` / `getOutputPromptConfig`
+> - 外部 Agent 入口：`src/code-mode.ts` · `ensureCodeModeRepoSetup` / `createCodeModeAgentsSnippet`
 
-OpenWiki 维护的不是一次性生成的 Markdown，而是一份可以继续被 Agent 使用、也能随着源码变化逐步更新的 Wiki。
+OpenWiki 生成的 Wiki 是一组可以再次读取和更新的 Markdown 页面。一次文档任务会反复调用模型和工具：读取证据、选择页面、写入文件，再根据工具反馈修正。页面在运行过程中就会落盘，事件流结束后，应用再比较内容变化并保存运行记录。
 
-它的分工很简单：代码准备证据、限制文件访问并完成结构化收尾；Deep Agents 提供文件工具、任务规划和 Agent 循环；模型负责理解源码、组织主题和写正文。换句话说，OpenWiki 的核心控制面主要在代码里，Agent 更像一个受约束的语义工作者。模型可以决定页面怎么写，但不能单独决定能读写哪些路径，也不能取代索引、状态和校验逻辑。
+以 repository 模式更新代码文档为例，源码和 Git 提供变化线索，已有 Wiki 提供页面结构，模型判断哪些解释需要修改。后续 coding agent 从 `quickstart.md` 和目录链接进入这些页面，按需补读源码。
 
-## 一、先把 LLM Wiki 想清楚
+## 命令决定任务，输出模式决定目录
 
-LLM Wiki 不是把整个代码仓库复制成 Markdown，也不是一次 Prompt 直接返回一篇长文。它更像一层“给人读、也给 Agent 继续检索”的知识整理结果。
+`init`、`update`、`chat` 是三种命令；`repository` 和 `local-wiki` 是两种输出模式。它们分别回答“做什么”和“在哪棵文件树上做”。
 
-以一个代码仓库为例，原始材料可能是：
+| 输出模式 | 默认运行根 | 文件工具中的路径 | 主要证据 |
+| --- | --- | --- | --- |
+| `repository` | 目标代码仓库 | `/` 对应仓库，Wiki 在 `/openwiki/` | 源码、README、测试、Git，及可选运行记录 |
+| `local-wiki` | `~/.openwiki/wiki/` | `/` 对应个人 Wiki，入口为 `/quickstart.md` | 来源采集结果、已有 Wiki、按来源要求读取的本地材料 |
 
-```text
-src/agent/index.ts
-src/connectors/
-README.md
-Git 提交记录
-已有 openwiki 页面
+这些路径是 Backend（文件后端）向工具暴露的虚拟路径。它把工具的读写请求转换成实际 I/O；虚拟根的存在本身不代表宿主机被隔离。
+
+`src/agent/index.ts` · `runOpenWikiAgent`（第 131–132 行，节选）：
+
+```ts
+// 只有显式指定 outputMode，调用者传入的 cwd 才成为实际运行根。
+const outputMode = options.outputMode ?? "local-wiki";
+const runtimeCwd = options.outputMode ? cwd : openWikiLocalWikiDir;
 ```
 
-Agent 读完这些材料后，会把它们整理成主题页面，例如：
+调用者只传 `cwd`、没有显式传 `outputMode` 时，运行根仍然采用个人 Wiki 目录。CLI 的 code 模式会显式选择 repository，避免把个人知识页面和项目文档写到一起。
+
+`init` 建立初始页面；`update` 维护已有页面；`chat` 处理交互消息。chat 不挂载文档翻译和索引中间件，也关闭 docs-only 写入检查，所以问答模式并不天然只读。
+
+## 入口先判断是否需要启动模型
+
+`runOpenWikiAgent` 加载运行环境、同步随包 Skills（可按需读取的操作说明），然后只在 repository 模式加载 `.openwikiignore`。该规则对象会继续传入 Git 摘要、提示词和 Backend。
+
+无额外用户消息的 `update` 会调用 `getUpdateNoopStatus`，根据上次 Git HEAD、运行状态和当前变更判断是否可以跳过。返回 `skipped: true` 时不创建模型或执行图。这个入口实际没有额外检查 `outputMode === "repository"`；普通个人来源采集通过传入来源消息绕过这项 Git 判断，具体条件见 [03](./03-wiki-maintenance.md)。
+
+需要继续运行时，外层完成模型服务商及认证准备，把 provider、modelId 和运行参数交给 `runOpenWikiAgentCore`。模型服务适配不是正文生产过程，主链只需知道它最终返回统一的聊天模型对象。
+
+## RunContext 把本轮任务背景汇合起来
+
+`RunContext` 是本轮运行上下文，存放目标语言、Wiki brief（用户维护的文档目标）、上次运行元数据和 Git 摘要。它不包含整个仓库，也不包含全部 Wiki 正文。
+
+`src/agent/utils.ts` · `createRunContext`（第 57–67 行，节选）：
+
+```ts
+const lastUpdate = await readLastUpdate(cwd, outputMode);
+// 优先采用经过校验的参数；否则继承 Wiki 已保存的语言，
+// 避免未传 --language 的增量更新混用新旧语言。
+const requestedLanguage = resolveLanguage(language).language;
+// 默认英语明确保存为 en，让元数据及下一轮继承的语言都有具体值。
+const effectiveLanguage = requestedLanguage ?? lastUpdate?.language ?? "en";
+const languageContext = { language: effectiveLanguage };
+const wikiGoal = await readRunWikiGoal(cwd, outputMode);
+```
+
+语言优先级是本轮合法参数、上次 metadata、默认 `en`。repository 的 brief 来自 `openwiki/INSTRUCTIONS.md`；个人模式通过 onboarding 配置读取 Wiki 目标。文件中的“重点解释数据流”会影响任务选择，但不会替工具添加写权限。
+
+上下文按命令和输出模式分支：chat 的 Git 摘要是“不适用”；local-wiki 的摘要说明证据由 raw（原始材料）路径和连接器工具提供；repository 的 init/update 才调用 `createGitSummary` 获取变更线索。Git 与连接器的具体证据入口见 [01](./01-connectors-and-ingestion.md)。
+
+`createUserPrompt` 把这些字段写入本轮消息：init 携带 brief 和 Git context；update 额外携带上次 metadata，要求只修改受影响页面。`src/agent/index.ts` 中的 `createRunUserMessage` 再补运行根和虚拟路径说明。后续对话若设置 `isFollowup` 且有非空消息，会直接采用该消息。
+
+## 执行图通过工具逐页写入 Wiki
+
+`runOpenWikiAgentCore` 在运行前记录 Wiki 内容快照，然后创建模型、状态保存器和 Backend。`createDeepAgent` 是 Deep Agents 的装配入口，将这些对象、连接器工具、提示词和 Middleware（生命周期中间件）组成可执行 graph。graph 在这里指模型调用、工具执行和生命周期 hook 连接成的运行结构，具体装配与文件边界见 [02](./02-agent-assembly.md)。
+
+下面是一次成功文档运行的过程示意，模型选择的具体页面和工具次数并不固定：
+
+```text
+运行前：读取上下文，记录 Wiki 内容快照
+  ↓
+beforeAgent：update 按计划翻译旧页面，迁移缺失的页面元数据
+  ↓
+模型读取源码 / Wiki / 来源证据
+  ↔ 工具返回文件内容、采集结果或错误
+  ↓
+按提示词要求写 _plan.md，再调用 write_file / edit_file 写概念页
+  ↔ 写后结构校验把问题追加到工具结果，模型可继续修正
+  ↓
+afterAgent：检查 Mermaid，按文件树生成 index.md
+  ↓
+事件流结束：清理 _plan.md，比较快照，按条件保存运行元数据
+```
+
+`_plan.md` 记录本轮页面、证据和关系，属于提示词要求的临时工作文件；它不是代码预先计算的页面清单，也不是长期任务数据库。页面主题及跨页链接仍由模型选择，索引同步只保证目录清单与可见文件树对应。
+
+写入是即时的。模型说“完成”之前，文件可能已经改变；后续调用失败也不会自动撤销这些变更。正常完成、部分完成和没有页面变化会在 [03](./03-wiki-maintenance.md) 对应不同的元数据处理。
+
+## 页面正文、导航与运行记录各有用途
+
+下面是 repository 产物目录的示意，业务页面名由模型根据项目决定：
 
 ```text
 openwiki/
-├─ quickstart.md
+├─ INSTRUCTIONS.md       用户维护的 Wiki brief
+├─ quickstart.md         模型维护的阅读入口
+├─ index.md              代码根据当前目录重建
 ├─ architecture/
-│  ├─ overview.md
-│  └─ agent-harness.md
-└─ integrations/
-   └─ connectors.md
+│  ├─ overview.md        模型维护的概念页
+│  └─ index.md           代码根据子目录重建
+└─ .last-update.json     应用保存的更新记录
 ```
 
-这些页面不是源码文件的逐个翻译。`overview.md` 可能把多个源码文件中的入口、状态、工具调用和写入流程合并成一个主题；`connectors.md` 则可能只保留连接器的共同机制，把 Gmail、Slack 等来源差异压缩到合适的位置。
+普通概念页使用 OKF（Open Knowledge Format）front matter，即 Markdown 开头的 YAML 元数据块。OpenWiki 要求 `type` 是非空字符串；`title` 和 `description` 供目录生成器使用，`tags` 可以表达跨页分类。元数据可被程序检查，正文是否准确仍取决于证据与解释。
 
-所以，LLM Wiki 的核心工作是“从源码组织知识”，而不是“把源码改写一遍”。页面之间的 Markdown 链接还会表达依赖、调用、归属和数据流，方便人和后续 Agent 顺着关系继续阅读。
+`index.md` 是派生导航，适合按目录重建；`quickstart.md` 则需要模型解释阅读顺序和项目重点。`INSTRUCTIONS.md` 属于用户输入，`.last-update.json` 属于更新协议，这两者都不能当作普通生成页面处理。
 
-## 二、OKF 到底是什么
+## 概念页和正文链接怎样组成知识结构
 
-OKF 可以先理解成 Wiki 页面顶部的一小段结构化元数据规范。它不是正文，也不是另一种数据库；它让程序知道一个 Markdown 页面是什么、叫什么、如何被索引。
+OpenWiki 要求每个概念有一个主要说明页面，其他页面引用它，而不是各自复制一段解释。一个概念可以是组件、工作流或领域对象，不必对应一个源码文件。例如，`src/ingestion.ts` 和 `src/agent/index.ts` 共同支撑“来源更新工作流”；单个入口文件里的模型适配、文件权限和运行收尾则可以属于不同主题。
 
-一个概念页可能长这样：
+`createSystemPrompt` 将这项组织要求写成概念节点与有向关系：
 
-```md
----
-type: Architecture
-title: Agent Runtime
-description: 说明 Agent 如何创建、运行并把结果写入 Wiki。
-tags: [agent, runtime, wiki]
----
-
-# Agent Runtime
-
-这里是模型根据源码写出的正文。
-```
-
-其中：
-
-- `type` 是页面类型，OpenWiki 当前要求它存在且是非空字符串；
-- `title` 和 `description` 供人阅读，也供目录索引展示；
-- `tags` 是可选的分类标签；
-- 下面的 Markdown 正文才是页面真正的知识内容。
-
-OpenWiki 的 OKF 约束来自 `src/okf/frontmatter.ts`。运行前，如果旧页面缺少可用的 `type`，代码会根据一级标题或文件名补一个最小 front matter；模型再有机会把 `type`、`title` 和 `description` 补得更准确。运行中，模型写完概念页后，Middleware 会重新读取落盘文件检查 front matter。
-
-因此，OKF 解决的是“页面怎样被机器识别和维护”，不负责判断正文是否正确。正文是否准确，仍然要靠源码证据、模型归纳和人工复核。
-
-`index.md` 是特殊情况。它是目录索引，不是普通概念页，OpenWiki 会根据目录和 front matter 确定性重建它；`INSTRUCTIONS.md` 是用户维护的 Wiki brief；`.last-update.json` 是运行状态，也不属于知识正文。
-
-## 三、一次 Wiki 文件是怎么生产出来的
-
-以 repository `init` 为例，过程可以拆成几个动作：
-
-1. **准备上下文**：代码读取 Wiki brief、Git 摘要、语言和既有 Wiki 状态，组成 `RunContext`。
-2. **创建 Agent**：OpenWiki 把模型、Connector 工具、文件 Backend、Prompt、Skills 和 Middleware 交给 `createDeepAgent`。
-3. **调查源码**：模型通过 `ls`、`glob`、`grep`、`read_file` 和 Git 工具寻找入口、模块边界和运行关系。必要时可以用 `task` 让子代理做窄范围研究。
-4. **写临时计划**：模型把准备创建的页面、证据和页面关系写进 `_plan.md`。它只是本轮工作文件，不是最终 Wiki 页面。
-5. **调用文件工具写 Wiki**：模型根据证据调用 `write_file` 或 `edit_file`，直接在虚拟路径下创建 `quickstart.md`、章节页和概念页。Backend 再把这些操作落到真实的 `openwiki/` 目录。
-6. **代码做结构收尾**：Middleware 检查 front matter，修复无效 Mermaid，按目录重建 `index.md`；运行结束后删除 `_plan.md`。
-7. **保存更新依据**：程序比较运行前后的 Wiki 快照，并写入 `.last-update.json`，让下一次 `update` 知道从哪个 Git 状态继续检查。
-
-关键点是：模型不是先在内存里生成一篇完整 Wiki，再由程序保存；它是在 Agent 循环中边读证据、边调用文件工具，逐个创建和修改 Markdown 文件。程序负责提供文件工作台和边界，模型负责决定页面内容和组织方式。
-
-## 四、Wiki 的生产链
-
-一次代码 Wiki 更新可以压缩成下面这条链：
+`src/agent/prompt.ts` · `createSystemPrompt`（第 156–160 行，提示词字符串节选）：
 
 ```text
-代码 / Git / Connector
-        ↓
-受限的原始证据和运行上下文
-        ↓
-Deep Agents Agent 循环
-        ↓
-Backend 写入 Wiki
-        ↓
-Middleware 校验、翻译、降级和索引同步
-        ↓
-内容快照与 .last-update.json
-        ↓
-下一次 update 继续维护
+OKF relationship modeling:
+- Treat every non-reserved Markdown document as a concept node. Standard Markdown links between concept documents are directed relationship edges; tags, resource fields, directory placement, source-code references, and index.md links do not replace concept-to-concept links.
+- Model meaningful runtime, dependency, ownership, data-flow, security, lifecycle, and user-flow relationships, not only navigation from ${output.quickstartPath}.
+- Put a concept link in the sentence that explains the relationship. Use the surrounding prose to state its meaning, such as \`dispatches to\`, \`depends on\`, \`shares infrastructure with\`, \`is configured through\`, \`is surfaced by\`, or \`is secured by\`.
+- Do not add links solely to increase graph density, and do not automatically add reciprocal links. Add an inverse link only when it helps explain the target concept and is supported by evidence.
 ```
 
-这条边界是理解 OpenWiki 的入口：模型做开放式判断，代码做可验证的限制和收尾。后面的文章分别追踪证据入口、Agent 装配、Deep Agents 能力以及持续维护。
+这里有三种不同的信息，读者需要分别识别：
 
-## 五、规则与配置怎样进入一次运行
-
-OpenWiki 的规则不是集中放在一个配置文件里，而是分成几层。每层解决的问题不同：
-
-| 来源 | 典型位置 | 主要作用 | 谁真正执行 |
-| --- | --- | --- | --- |
-| Wiki brief | repository 模式的 `openwiki/INSTRUCTIONS.md`；personal 模式的 `~/.openwiki/INSTRUCTIONS.md` | 说明文档范围、重点和用户目标 | 代码读取后放进 Prompt，Agent 根据它组织内容 |
-| 忽略规则 | repository 根目录的 `.openwikiignore` | 排除不应被读取、搜索、写入或展示的路径 | `OpenWikiIgnore`、Backend 和 Git 摘要代码 |
-| 运行参数 | `--init`、`--update`、`--mode`、`--language`、`--modelId` 和用户消息 | 决定本次运行模式、语言、模型和具体任务 | CLI 解析器、运行时和 Prompt |
-| 本地运行配置 | `~/.openwiki/onboarding.json`、`~/.openwiki/.env` | 保存 personal 模式的来源、连接器配置、provider 和凭据引用 | onboarding、connector 和 provider 代码 |
-| 外部 Agent 入口 | repository 根目录的 `AGENTS.md`、`CLAUDE.md` | 告诉其他 coding agent 先去哪里发现 Wiki | 外部 coding agent 自己加载 |
-| 内置系统规则 | `src/agent/prompt.ts`、`docs-only-backend.ts`、各 Middleware | 定义 OpenWiki 的研究、写作、安全、结构和维护纪律 | OpenWiki 代码、Backend 和 Middleware |
-
-其中，`openwiki/INSTRUCTIONS.md` 是最值得用户直接维护的文件。它相当于 Wiki brief，例如：
-
-```md
-# Wiki brief
-
-- 重点解释运行时架构、数据流和扩展点。
-- 优先覆盖 API、存储和部署流程。
-- 暂不展开 CLI 参数和 provider 产品差异。
-```
-
-程序在 `createRunContext` 阶段读取它，把内容放入 `RunContext.wikiGoal`；`createUserPrompt` 再把它放进 `init/update` 的用户消息。它影响“写什么、重点写到哪里”，但不能授权 Agent 读取 secret，也不能允许它把文件写到 `/openwiki` 之外。
-
-`.openwikiignore` 则是访问范围配置，语法接近 `.gitignore`：
-
-```gitignore
-.env
-secrets/
-dist/
-!dist/public-api.json
-```
-
-它不是只给模型看的提示。运行开始时，`OpenWikiIgnore.load` 解析规则；之后同一个规则对象会同时传给 Git 摘要、`createSystemPrompt` 和 `OpenWikiLocalShellBackend`。因此，被排除的路径会从发现结果和 Git 证据中消失，直接读取或写入会被拒绝；规则生效时，任意 shell 搜索也会被收紧为少量维护命令。最后一条匹配规则生效，所以 `!dist/public-api.json` 可以重新包含一个之前被排除的路径。
-
-### 配置是怎样汇合的
-
-repository `update` 的简化加载顺序如下：
-
-```text
-CLI / 环境变量 / 用户消息
-          ↓
-解析 command、mode、language、model
-          ↓
-加载 .openwikiignore
-          ↓
-createRunContext
-  ├─ 读取 openwiki/INSTRUCTIONS.md
-  ├─ 读取 openwiki/.last-update.json
-  └─ 生成过滤后的 Git 摘要
-          ↓
-createSystemPrompt
-  ├─ 内置 OpenWiki 规则
-  ├─ repository / personal 模式规则
-  ├─ language 规则
-  └─ .openwikiignore 规则
-          ↓
-createDeepAgent
-  ├─ Backend 接收 docsOnly 和 ignore
-  ├─ Middleware 按 command 挂载
-  └─ Agent 收到本轮 user prompt
-```
-
-`AGENTS.md` 和 `CLAUDE.md` 不在这条 Wiki 生成配置链的中心位置。`openwiki code` 的 CLI setup 会在其中写入或刷新一段受管理的 OpenWiki 入口，让外部 coding agent 知道先读取 `openwiki/quickstart.md`；但 OpenWiki Agent 不把它们当成 Wiki brief，也不负责根据正文内容改写它们。它们负责“发现 Wiki”，`INSTRUCTIONS.md` 才负责“告诉 OpenWiki 要写什么”。
-
-### 哪些规则是软约束，哪些是硬边界
-
-理解配置时，不能把所有内容都叫作 Prompt：
-
-| 规则 | 例子 | 性质 |
+| 表达方式 | 回答的问题 | 例子 |
 | --- | --- | --- |
-| 内容目标 | “重点说明数据流，暂不展开 CLI” | 进入 Prompt 的软约束 |
-| 研究纪律 | “先读 quickstart，重要结论必须有源码证据” | 主要由 Prompt 影响 Agent 选择 |
-| 文件访问 | “不能读 secrets，repository 模式只能写 `/openwiki/`” | Backend 和 `.openwikiignore` 的代码边界 |
-| 页面结构 | OKF front matter、Mermaid、目录索引 | Middleware 和确定性函数处理 |
-| 更新判断 | Git 是否有变化、Wiki 是否真的变化 | `getUpdateNoopStatus` 和快照代码处理 |
-| 运行状态 | interrupted、metadata、pending translation | 运行收尾和 Middleware 处理 |
+| 概念页正文与 front matter | 这个对象是什么、怎样工作？ | Agent 工作流页解释采集后怎样启动 update |
+| 正文中的跨页链接 | 两个概念之间是什么关系？ | 连接器“向 Agent 工作流提供证据” |
+| quickstart、目录索引和标签 | 从哪里进入、哪些页面属于同类？ | integrations 目录列出连接器页，tags 标出 integration |
 
-因此，OpenWiki 的配置模型不是“把规则写进一个大 Prompt”。它更接近：
-
-```text
-用户配置决定目标和范围
-代码配置决定系统能做什么
-Agent 负责在边界内完成理解和写作
-```
-
-## 六、生成后的 Wiki 怎样给 Agent 使用
-
-Wiki 生成完成后，不会被整体拼接进下一次 Prompt，也不会自动变成模型的永久记忆。它首先是一组落盘的 Markdown 文件，Agent 通过文件工具按需读取。
-
-以 repository 模式为例，生成结果位于：
-
-```text
-<repository>/openwiki/
-├─ quickstart.md
-├─ index.md
-├─ architecture/
-└─ integrations/
-```
-
-OpenWiki 会在运行消息中告诉 Agent，文件工具使用的虚拟根目录是仓库根目录，Wiki 位于 `/openwiki`。因此 Agent 看到的路径是：
-
-```text
-/openwiki/quickstart.md
-/openwiki/index.md
-/openwiki/architecture/overview.md
-```
-
-Agent 的典型读取过程是：
-
-```text
-先读 /openwiki/quickstart.md
-        ↓
-顺着 quickstart/index 中的链接定位主题
-        ↓
-用 glob、grep、read_file 定向读取相关页面
-        ↓
-把页面内容作为当前任务的上下文
-        ↓
-Wiki 不足时，再回到源码或原始证据
-```
-
-这也是 `src/agent/prompt.ts` 中 “Wiki-first” 规则的实际含义：普通问题先查 Wiki，Wiki 能回答时不再为了“保险”把整个源码仓库重新读一遍；只有 Wiki 缺失、过期、含糊、相互矛盾，或者用户明确要求查看最新源码时，才继续查源代码或 Connector 原始数据。
-
-### OpenWiki 自己怎样使用 Wiki
-
-OpenWiki 的 `chat` Agent 和生成 Agent 使用同一套文件工作台。`createSystemPrompt` 负责规定“先查 Wiki”，`createRunUserMessage` 负责说明当前运行根目录和虚拟路径，Deep Agents 的文件工具负责真正读取文件。
-
-所以，运行时的分工是：
-
-| 部分 | 作用 |
-| --- | --- |
-| `systemPrompt` | 告诉 Agent Wiki 在哪里、应该先读哪些入口、什么时候允许回源 |
-| `createRunUserMessage` | 告诉 Agent `/` 对应哪个虚拟根目录，以及 `/openwiki` 的实际位置 |
-| `Backend` | 把虚拟路径映射到真实目录，并执行文件读写边界 |
-| `ls`、`glob`、`grep`、`read_file` | 让 Agent 按需发现和读取 Wiki 页面 |
-| Markdown 链接和 `index.md` | 让 Agent 从入口页继续定位相关主题 |
-
-这里没有一个“把 Wiki 全量塞给模型”的隐藏步骤。模型需要先调用文件工具，再把工具返回的相关页面放进当前上下文。这种方式能控制上下文规模，也允许 Agent 根据问题只读取架构、数据模型或某个集成页面。
-
-### 外部 coding agent 怎样使用 repository Wiki
-
-如果 OpenWiki 运行在 repository code mode，它还会在仓库根目录维护 `AGENTS.md` 和 `CLAUDE.md` 中的 OpenWiki 片段。片段的核心内容是：
+关系方向由链接所在页指向目标页，关系含义由附近的句子说明。下面是根据 `runSourceIngestion → runOpenWikiAgent` 调用关系编写的 Markdown 句子示意；页面路径采用本仓库 Wiki 已有位置：
 
 ```md
-## OpenWiki
-
-This repository uses OpenWiki for recurring code documentation.
-Start with `openwiki/quickstart.md`, then follow its links...
+连接器把采集结果交给 [Agent 工作流](../agent/workflow.md)，由后者读取证据并更新知识页。
 ```
 
-外部 coding agent 启动后，通常会自动读取根目录的 Agent 指令文件，于是得到下面这条入口：
+如果这句话位于 `openwiki/integrations/connectors.md`，它表达的是“连接器向工作流提供证据”。单独把两个页面放进同一个 index，或者给它们相同的 tag，并没有表达这一关系。反向链接也不自动成立，只有目标页需要解释来源时才补。
 
-```text
-Agent 启动
-  ↓
-读取 AGENTS.md / CLAUDE.md
-  ↓
-发现 openwiki/quickstart.md
-  ↓
-用自己的文件工具读取 Wiki
-  ↓
-结合 Wiki 定位源码、理解模块并完成任务
-```
+提示词还要求：证据支持时，一个实质概念应连接至少两个其他实质概念；孤立页面应补充关系、合并到较大主题，或者解释独立存在的原因。这个要求附带证据条件，不能为了数量创建空薄页面或无意义链接。初次生成倾向于少量完整页面，暂未覆盖的主题放入 quickstart 的 Backlog，并保留源码位置和暂缓原因。
 
-这里的 `AGENTS.md` 只是发现机制，不是 Wiki 内容注入器。它告诉 coding agent “先去哪里看”，真正的项目知识仍然来自后续读取的 Markdown 页面。DeepSWE 评测也采用同样的方式：把 `AGENTS.md` 和 `openwiki/` 一起放进 `/app`，不额外修改任务 Prompt。
+这种知识关系图保存在 Markdown 链接及正文中；[02](./02-agent-assembly.md) 的 Agent graph 则是驱动模型与工具调用的执行图。当前文档维护代码会校验 front matter 并重建目录，但没有据此建立持久化的“源码文件 → 概念页”依赖图，也不会通过索引同步自动证明语义链接正确。概念划分、关系选择和关系完整性检查仍由模型按提示词完成。
 
-在部分评测环境中，还会注册 `openwiki-retrieval-mcp`，提供针对 `/app` 和 `/app/openwiki` 的只读 `search`、`change_surface` 等检索能力。这是对文件读取的可选增强，不是 OpenWiki 生成 Wiki 后的默认必经步骤。即使没有这个 MCP，Agent 仍然可以通过 `AGENTS.md` 和普通文件工具使用 Wiki。
+这一取舍使 Wiki 保持普通文件，易于阅读和审阅；代价是跨页关系可能遗漏或过期。精确的变更影响计算若是产品要求，需要另行维护来源与页面的依赖信息，不能只依赖这些 Markdown 链接。
 
-### Wiki 和源码之间是什么关系
+## 生成后的 Wiki 怎样进入下一次 Agent 上下文
 
-Wiki 是经过整理的项目知识层，不是源码的替代品。Agent 使用它时可以遵循一个简单原则：
+OpenWiki 自己的提示词采用 Wiki-first：先读取 Wiki 能回答的部分，缺少细节、内容过期或用户要求原始证据时再回源。Wiki 保留在文件系统中，只有文件工具读回的页面片段才进入当前模型上下文；没有全库自动注入步骤。
 
-```text
-Wiki 负责快速建立整体认识和定位方向
-源码负责核对实现细节和最新行为
-```
+外部 coding agent 通过仓库根的指令文件发现 Wiki。`ensureCodeModeRepoSetup` 在 `AGENTS.md` 和 `CLAUDE.md` 中维护 `OPENWIKI:START` 到 `OPENWIKI:END` 的片段，保留其他手写内容。`createCodeModeAgentsSnippet` 指向 `openwiki/quickstart.md`，并提示沿链接阅读架构、流程、领域概念和源码位置。
 
-例如，用户询问“连接器怎样接入 Agent”，Agent 可以先读 Wiki 中的连接器和 Agent 装配页面，快速找到 `src/connectors/`、`src/agent/index.ts` 等源码入口；如果用户继续追问某个参数的精确默认值，Agent 再回到源码确认。
+这条消费链是“加载仓库指令 → 找到 quickstart → 按链接读取主题 → 必要时核对源码”。它依赖外部 Agent 实际加载这些指令并调用文件工具。OpenWiki 不会为外部 Agent 注入永久记忆，也没有在这条路径中建立向量检索库。
 
-因此，Wiki 的价值不是让 Agent 永远不读源码，而是把“每次从零探索仓库”变成“先读已有地图，再针对问题核实”。它是一层可查询、可更新的外部知识，不是向量数据库，也不是模型内部记忆。
-
-## 七、Wiki 的产物和边界
-
-Wiki 的长期价值来自页面之间的关系和运行状态。
-
-代码模式下，生成内容位于仓库的 `openwiki/` 目录。`quickstart.md` 是入口，目录 `index.md` 提供导航，概念页通过标准 Markdown 链接表达依赖、调用、归属和运行关系。普通概念页带 OKF front matter，`index.md` 和 `log.md` 是保留文档。
-
-一个简化的目录形态如下：
-
-```text
-repository/
-├─ openwiki/
-│  ├─ INSTRUCTIONS.md       # 用户维护的 Wiki brief
-│  ├─ quickstart.md         # 入口页
-│  ├─ index.md              # 由 Middleware 同步
-│  ├─ architecture/
-│  │  ├─ overview.md
-│  │  └─ index.md
-│  └─ .last-update.json     # 增量更新依据
-└─ src/
-```
-
-`index.md` 不是模型写作的一部分。OpenWiki 在运行结束时根据当前目录和页面清单重建它，模型只负责组织概念和正文。
-
-`INSTRUCTIONS.md` 也不是生成页面。它是用户维护的 Wiki brief，告诉 Agent 文档范围和重点；正常运行会读取它，但不会把它当成普通概念页改写。
-
-## 八、一次运行的最小闭环
-
-`runOpenWikiAgent` 先准备 `RunContext`、Git 摘要、模型、Backend 和 Prompt，再由 `createDeepAgent` 组装成可流式执行的 graph。Agent 通过文件工具和 Connector 读取证据，写入 Wiki；Middleware 和运行收尾逻辑再处理 front matter、Mermaid、索引、快照和 metadata。
-
-```text
-代码 / Git / Connector
-        ↓
-RunContext + createDeepAgent
-        ↓
-Agent 读取证据并写 Wiki
-        ↓
-Middleware + metadata 收尾
-        ↓
-下一次 update 根据 Wiki 和状态继续工作
-```
-
-这也是 OpenWiki 和普通“调用模型生成文档”脚本的区别：它把一次生成放进了一个可重复运行的维护闭环。
-
-## 九、怎么读后面的文章
-
-这组文章不再按源码目录平铺，而是沿着 Wiki 的生产过程组织：
-
-| 文章 | 主要问题 |
-| --- | --- |
-| [01：证据如何进入 Wiki](./01-connectors-and-ingestion.md) | Git、Connector、MCP 和原始文件怎样变成 Agent 可用的证据？ |
-| [02：Deep Agents 的装配与能力边界](./02-agent-assembly.md) | `createDeepAgent`、文件工具、Skills、规划、Sub-agent 和权限怎样协作？ |
-| [03：Wiki 怎样持续维护](./03-wiki-maintenance.md) | Middleware、快照、checkpoint、失败状态和测试怎样组成维护闭环？ |
-
-Provider 路由和 CLI 只是外围：前者把不同模型适配成统一 `ChatModel`，后者把请求送到 `runOpenWikiAgent`。理解主链时知道这层存在即可。
+这种文件式知识层适合能够访问同一工作区的 coding agent，页面可以随仓库一起审阅和维护。若消费端看不到文件树，需要另行提供文件服务或检索接口；若问题要求当前代码的精确行为，Wiki 提供定位方向，仍应回到所引用的实现。

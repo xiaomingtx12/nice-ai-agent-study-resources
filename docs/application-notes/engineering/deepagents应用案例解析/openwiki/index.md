@@ -1,56 +1,52 @@
 ---
 title: OpenWiki × Deep Agents 源码解析
-description: 从源码理解 LLM Wiki 的生产机制、Agent 消费方式，以及 Deep Agents 如何提供文件工作台和生命周期扩展。
+description: 沿证据准备、Agent 装配、页面写入和更新状态四条相接的调用链，理解 OpenWiki 的核心实现与适用边界。
 sidebar_position: 0
 ---
 
 # OpenWiki × Deep Agents 源码解析
 
-> 源码版本：OpenWiki `0.2.4`，Deep Agents `1.11.1`。
+> 源码基线：OpenWiki `0.2.4`，commit `3076d557f8a146e54cf0c6f3238f31a8d99a0537`；`pnpm-lock.yaml` 锁定 TypeScript/JavaScript 包 `deepagents@1.11.1`。下文路径均相对于 OpenWiki 仓库，不套用 Python Deep Agents 的实现。
+>
+> 主入口：`src/agent/index.ts` · `runOpenWikiAgent` → `runOpenWikiAgentCore`。
 
-这组文章只抓两条主线：
+OpenWiki 把源码和外部材料整理成可继续更新的 Markdown Wiki。模型通过工具逐页读取、写入和修正；应用代码负责选择运行目录、提供证据、限制部分文件操作、同步索引和保存更新状态。
 
-1. OpenWiki 怎样把代码和外部材料整理成一份可以持续更新的 LLM Wiki，以及生成后的 Wiki 怎样被 Agent 按需读取；
-2. OpenWiki 怎样使用 Deep Agents，而不是重新实现一套 Agent 框架。
+这组文章同时解释知识怎样组织、一次运行怎样执行：证据如何汇入概念页、正文链接如何表达关系、模型怎样选择受影响页面，以及文件写入后靠什么持续维护。
 
-CLI、凭据、provider 分支和遥测属于运行外围。它们只在能解释主链时出现，不单独展开。
+## 一次运行的主线
 
-## 先记住一条主链
+下图表示应用层调用顺序；写后校验发生在工具循环内部，页面收尾发生在事件流结束之前。
 
 ```text
-代码 / Git / Connector
-→ 受限证据
-→ RunContext + Prompt
-→ createDeepAgent
-→ 模型与工具循环
-→ Backend 写入 Wiki
-→ Middleware 做结构收尾
-→ 快照 / metadata 支持下一次 update
+CLI / 来源采集入口
+  → runOpenWikiAgent
+      加载环境和 Skills、忽略规则、update 跳过判断、模型配置
+  → runOpenWikiAgentCore
+      构造 RunContext、内容快照、模型、状态保存器和 Backend
+  → createDeepAgent → streamEvents
+      beforeAgent：翻译和旧页面迁移
+      模型 ↔ 工具：读取证据、写入页面、返回结构错误
+      afterAgent：Mermaid 降级、目录索引同步
+  → 应用层收尾
+      清理 _plan.md、比较内容快照、按条件写运行元数据
 ```
-
-这条链里，模型负责理解和写作；程序负责证据入口、文件边界、结构校验和运行状态。两者混在一起，就很难判断哪些行为可靠，哪些只是模型当前愿意遵守的指令。
 
 ## 文章导航
 
-| 文章 | 主要问题 | 核心源码 |
+| 文章 | 核心问题 | 主要入口 |
 | --- | --- | --- |
-| [00：LLM Wiki 怎样生产并被 Agent 使用](./00-project-overview.md) | Wiki 怎样生成、落盘，并通过 Wiki-first 和文件工具给 Agent 使用？ | `src/agent/index.ts`、`src/agent/prompt.ts`、`src/code-mode.ts` |
-| [01：证据如何进入 Wiki](./01-connectors-and-ingestion.md) | Git、Connector、MCP 和 raw 文件怎样进入 Agent？ | `src/connectors/`、`src/ingestion.ts` |
-| [02：Deep Agents 的装配与能力边界](./02-agent-assembly.md) | 规则与配置怎样进入 Prompt、Backend、Middleware，`createDeepAgent` 和 OpenWiki 扩展能力怎样协作？ | `src/agent/index.ts`、`src/agent/prompt.ts`、`src/agent/docs-only-backend.ts` |
-| [03：Wiki 怎样持续维护](./03-wiki-maintenance.md) | Middleware、状态、失败恢复和验证怎样组成闭环？ | `src/agent/*middleware.ts`、`src/agent/utils.ts` |
+| [00：LLM Wiki 怎样生产并被 Agent 使用](./00-project-overview.md) | 两种输出模式、概念页、语义关系和后续读取如何连接？ | `runOpenWikiAgent`、`createRunContext`、`createCodeModeAgentsSnippet` |
+| [01：证据如何进入 Wiki](./01-connectors-and-ingestion.md) | Git 与来源证据怎样进入模型，再经过筛选、去重和冲突处理形成知识？ | `runSourceIngestion`、`readRawItem`、`callMcpConnectorTool` |
+| [02：Deep Agents 的装配与能力边界](./02-agent-assembly.md) | 运行时怎样装配，模型又如何从源码变化选择页面并完成写入？ | `runOpenWikiAgentCore`、`OpenWikiLocalShellBackend` |
+| [03：Wiki 怎样持续维护](./03-wiki-maintenance.md) | 页面改完后，翻译、校验、索引、no-op 与异常恢复怎样改变运行状态？ | `createOpenWikiIndexMiddleware`、`persistRunMetadataIfChanged` |
 
-## 推荐阅读
+从 `00 → 01 → 02 → 03` 阅读可以跟完完整链路。关注文件权限时直接读 02；关注增量更新和失败恢复时直接读 03，每篇都在首次使用时解释必要概念。
 
-- 想理解 LLM Wiki：`00 → 01 → 03`
-- 想理解 Deep Agents 的用法：`02 → 03`
-- 想看完整源码链：`00 → 01 → 02 → 03`
+02–03 使用同一个 raw 文件读取规则更新案例，串起“Git 变化 → 模型判断文档影响 → 工具编辑 → 结构校验 → 快照与更新记录 → 下一次 update”。案例基于当前真实函数和路径推演；模型工具顺序和页面选择属于说明性假设，与代码固定执行的分支分别说明。
 
-## 分析边界
+## 阅读代码片段的约定
 
-本文只把结论分成三类：
+片段来自上述固定快照，只保留支撑当前解释的语句；不连续的节选会明确标出省略位置。中文注释用于说明关键条件，保留的原英文注释译成中文。示意调用链和产物目录使用文本块，与真实 TypeScript 源码分开。
 
-- **源码事实**：当前 OpenWiki 或 `deepagents@1.11.1` 代码直接表现出的行为；
-- **测试预期**：测试和评测代码明确要锁定的条件。本组文章不把未运行的测试写成“已通过”；
-- **工程推导**：由调用链、状态和边界推导出的适用范围，会明确标注为判断。
-
-Python Deep Agents 和 OpenWiki 使用的 TypeScript/JavaScript Deep Agents 可以做概念对照，但不能直接互换文件名、默认值或执行顺序。
+正文中的“允许”“跳过”“恢复”都限定到具体入口。例如，文件工具的 docs-only 检查不能等同于宿主机 shell 隔离；`interrupted` 也不等同于文件回滚或从失败节点续跑。
