@@ -1,261 +1,248 @@
 ---
 sidebar_position: 10
-sidebar_label: 08 流式输出与事件系统
-description: 追踪 LangGraph 的 7 种 StreamMode、Transformer 转换链路、v3 GraphRunStream 的调用方驱动模型，以及自定义事件如何穿过 Runtime。
+sidebar_label: 08 流式输出与事件
+description: 区分普通流与事件投影，沿事件产生、消费、abort 和执行器清理解释观察时机、运行取消与连接断开的边界。
 ---
 
-# LangGraph 源码 08：流式输出与事件系统
+# LangGraph 源码 08：运行事件如何到达调用方
 
 ## 源码定位
 
-> **适用版本**：`langgraph` 1.2.10。
+> **源码基线**：langgraph 1.2.10，本文使用的源码快照不含 Git 元数据，commit 未知。版本范围与文件指纹见[导读](./index.md#源码基线)。
 >
-> **核心路径**：
->
-> - `stream()` 与 `stream_events()` 入口：`libs/langgraph/langgraph/pregel/main.py`
-> - 七种 Transformer：`libs/langgraph/langgraph/stream/transformers.py`
-> - 流通道：`libs/langgraph/langgraph/stream/stream_channel.py`
-> - v3 运行流：`libs/langgraph/langgraph/stream/run_stream.py`
-> - 多路复用：`libs/langgraph/langgraph/stream/_mux.py`
+> - 事件出口：`libs/langgraph/langgraph/pregel/main.py` → `Pregel.stream()`、`_output()`、`stream_events()`、`_pregel_stream_v3()`。
+> - 状态事件：`libs/langgraph/langgraph/pregel/_loop.py` → `output_writes()`、`after_tick()`、`_emit()`。
+> - 消息回调：`libs/langgraph/langgraph/pregel/_messages.py` → `StreamMessagesHandler`。
+> - v3 消费与退出：`libs/langgraph/langgraph/stream/run_stream.py` → `GraphRunStream._pump_next()`、`GraphRunStream.abort()`、`AsyncGraphRunStream.abort()`；`libs/langgraph/langgraph/stream/_mux.py` → `StreamMux.push()`。
 
-## 这一篇的主题
+流式输出将图执行过程中的数据交给调用方。不同事件产生于不同时间：模型 token 可以在节点尚未结束时输出，任务更新可以在同轮其他任务未完成时输出，完整状态则通常在轮次提交后输出。**看到事件，不等于看到整轮成功或检查点已经落盘。**
 
-[第 07 篇](./07-interrupts-and-command.md)讲图的暂停与恢复——状态从哪里停下来、怎样继续。本篇讲图的观察——运行过程怎样被调用方看见：
+`stream()` 本身也是执行入口，调用方迭代它会推进运行；`invoke()` 只是消费同一执行机制并返回最终结果。选择 mode 决定观察什么，不改变字段 reducer 的含义。
 
-> **`stream()` 和 `stream_events()` 提供了七种观察模式，从 State 快照到模型 token 到自定义进度。v3 协议让调用方的迭代直接驱动图推进。**
+## 一、三个接口层次不能混用版本号
 
-流式数据是运行过程的投影，不是恢复状态的来源。中断恢复仍依赖[第 06 篇](./06-checkpoints-store-and-recovery.md)的 checkpointer。
-
-## 一、`stream()`：选择要观察的运行数据
-
-`stream()` 是 Runtime 的观察出口。源码支持这些 `stream_mode`：
-
-```python
-# libs/langgraph/langgraph/types.py:121-133
-StreamMode = Literal[
-    "values",
-    "updates",
-    "checkpoints",
-    "tasks",
-    "debug",
-    "messages",
-    "custom",
-]
-```
-
-| 想观察什么 | `stream_mode` | 适合场景 |
+| 入口 | 本文基线下的输出 | 实现路径 |
 | --- | --- | --- |
-| 每轮完整 State | `values` | 状态面板、过程展示 |
-| 节点或 task 的局部更新 | `updates` | 流程 UI、节点追踪 |
-| 模型消息 token | `messages` | 对话逐 token 输出 |
-| 节点主动写出的进度 | `custom` | 检索、解析、外部调用进度 |
-| checkpoint 创建事件 | `checkpoints` | 持久化观测 |
-| task 启动、完成和错误 | `tasks` | 运行诊断 |
-| checkpoint 与 task 的组合调试信息 | `debug` | 排障 |
+| `stream(version="v1" / "v2")` | 状态、消息或进度片段 | 运行时事件队列 → `_output()` |
+| `stream_events(version="v1" / "v2")` | Runnable 事件字典 | 委托父类事件接口 |
+| `stream_events(version="v3")` | `GraphRunStream` 运行流对象 | 普通 v2 流 → 协议事件 → 转换器与投影 |
 
-多个 mode 时，v1 以 `(mode, data)` 形式输出；v2 使用带 `type`、`ns` 和 `data` 的结构化流片段。
+`stream` 的 v2 与 `stream_events` 的 v2 不是同一种事件外形。`GraphRunStream` 则是实验性接口，提供 `values`、`messages` 等可独立消费的投影；它不是普通 stream 的所有 mode 默认都会经过的中间层。
 
-`stream()` 的完整签名：
+## 二、普通 stream 从多个位置收集事件
 
-```python
-# libs/langgraph/langgraph/pregel/main.py:2655-2671
-def stream(
-    self,
-    input: InputT | Command | None,
-    config: RunnableConfig | None = None,
-    *,
-    context: ContextT | None = None,
-    stream_mode: StreamMode | Sequence[StreamMode] | None = None,
-    output_keys: str | Sequence[str] | None = None,
-    interrupt_before: All | Sequence[str] | None = None,
-    interrupt_after: All | Sequence[str] | None = None,
-    subgraphs: bool = False,
-    version: Literal["v1", "v2"] = "v1",
-    ...
-) -> Iterator[dict[str, Any] | Any]:
-```
+公开 `StreamMode` 列出七种观察模式：
 
-`subgraphs=True` 时，事件增加 namespace（命名空间路径），用于定位父图节点和子图节点：
-
-```python
-for chunk in graph.stream(
-    {"draft": "release plan", "approved": False},
-    config,
-    stream_mode=["updates", "messages"],
-    subgraphs=True,
-):
-    print(chunk)
-    # ((parent_node,), "updates", {"child_key": "child_value"})
-    # ((parent_node, child_node), "updates", {"key": "value"})
-```
-
-### 自定义进度：`stream_mode="custom"`
-
-通过 `StreamWriter` 写入 custom mode：
-
-```python
-def retrieve(state: State, *, stream_writer):
-    stream_writer({"stage": "retrieving"})
-    return {"documents": load_documents(state["query"])}
-```
-
-`custom` 数据来自节点主动写入，Runtime 不会替节点解释业务含义。`StreamWriter` 来自运行上下文注入（`get_stream_writer()`），与 `config` 和 `runtime` 属于同一注入机制。
-
-## 二、Stream Transformer：每种 mode 背后的转换器
-
-`libs/langgraph/langgraph/stream/transformers.py` 定义了七种 Transformer，每种负责把 Pregel 原始事件转换成对应 stream mode 的输出：
-
-| Transformer | 对应 mode | 作用 |
+| mode | 事件来源 | 读取时需要知道的边界 |
 | --- | --- | --- |
-| `ValuesTransformer` | `values` | 捕获每轮 State 快照，形成可排空的流 |
-| `UpdatesTransformer` | `updates` | 捕获节点或 task 产生的局部更新 |
-| `MessagesTransformer` | `messages` | 捕获模型流式消息的 token 级别输出 |
-| `CustomTransformer` | `custom` | 捕获节点通过 `StreamWriter` 写入的业务事件 |
-| `CheckpointsTransformer` | `checkpoints` | 捕获 Saver 创建的 checkpoint 事件 |
-| `TasksTransformer` | `tasks` | 捕获 task 启动、完成和错误生命周期 |
-| `DebugTransformer` | `debug` | 组合 checkpoint 和 task 的调试信息 |
-| `LifecycleTransformer` | — | 捕获图的开始、结束、中断等生命周期事件 |
-| `SubgraphTransformer` | — | 包装子图事件，注入 namespace |
+| `values` | 输入、轮次提交等时刻读取通道值 | 正常轮次是合并后视图；中断收尾还可能包含已成功任务的待合并结果 |
+| `updates` | 任务结果写入映射 | 局部更新不是 reducer 合并后的整份 State |
+| `messages` | 模型消息回调 | 常见负载为消息片段和 metadata；可能早于节点完成 |
+| `custom` | 节点主动调用 writer | 业务进度，不自动更新 State |
+| `tasks` | 任务开始和完成记录 | 可包含错误或中断，用于诊断 |
+| `checkpoints` | Loop 输出检查点视图 | 不是数据库提交成功回执 |
+| `debug` | 任务与检查点诊断组合 | 负载更大，可能包含完整状态 |
 
-所有 Transformer 都继承 `StreamTransformer`，它定义了统一的事件处理接口：
+Loop 的 `_emit()` 将数据组织成 `(namespace, mode, payload)`，放入流队列。`messages` 通过 `StreamMessagesHandler` 接收模型回调；`custom` 通过运行上下文中的 `stream_writer` 写入同一出口。主循环在 Runner 让出控制权以及轮次结束时排空队列。
 
-```python
-# libs/langgraph/langgraph/stream/_types.py
-class StreamTransformer:
-    _native: bool = False  # 是否直接暴露为 run stream 的属性
-    required_stream_modes: tuple[str, ...] = ()  # 需要 Pregel 开启哪些 stream_mode
+这解释了为什么 `updates` 可早于整轮提交：A 完成时就能显示 A 的结果，B 之后仍可能失败。前端若展示“当前已提交状态”，应使用相应的状态视图；若展示“任务进展”，则应保留开始、成功、失败和暂停等区别。
 
-    def __init__(self, scope: tuple[str, ...] = ()) -> None:
-        self.scope = scope  # 当前 transformer 所属的命名空间范围
+## 三、_output 决定片段形状
 
-    def on_event(self, event: ProtocolEvent) -> None:
-        """处理一个协议事件。"""
-        raise NotImplementedError
+内部总是携带命名空间和 mode，v1 输出会按请求裁掉外层信息：
 
-    def drain(self) -> Iterator[Any]:
-        """排空累积的输出。"""
-        raise NotImplementedError
-```
-
-`_native = True` 的 Transformer 会在 v3 的 `GraphRunStream` 上暴露为直接属性（如 `run.values`、`run.messages`）。
-
-### 转换链路
-
-Pregel 在运行时产生原始事件（task 完成、checkpoint 创建、消息 chunk），送入 `StreamMux`（多路复用器）。Mux 按事件类型分发给注册的 Transformer，每个 Transformer 独立处理自己关心的模式：
-
-```text
-Pregel 原始事件
-  → StreamMux 多路分发
-  → ValuesTransformer  (mode="values")
-  → UpdatesTransformer (mode="updates")
-  → MessagesTransformer (mode="messages")
-  → ...
-  → 各 Transformer 输出被收集
-  → 返回给调用方
-```
-
-## 三、事件流不会替代恢复
-
-`stream()` 输出的是执行过程中的观察数据。它不会改变节点调度、字段提交或 checkpoint 的保存顺序。
-
-```text
-节点执行
-  → task writes
-  → apply_writes()
-  → checkpoint
-  → stream 输出对应事件
-```
-
-客户端保留 stream chunk 只能用于展示或日志。中断恢复仍依赖[第 06 篇](./06-checkpoints-store-and-recovery.md)的 checkpointer、`thread_id` 和 checkpoint。
-
-## 四、`stream_events(version="v3")`：调用方驱动的实验性协议
-
-当前源码将 `stream_events()` 分成两类：
-
-- `version="v1"` / `"v2"`：返回 `StreamEvent` 字典迭代器；
-- `version="v3"`：返回调用方驱动的 `GraphRunStream`。
-
-源码明确将 v3 标为 experimental（实验性）：
+源码：`libs/langgraph/langgraph/pregel/main.py` → `_output`（第 4236–4243 行节选；未展示部分省略）。
 
 ```python
-# libs/langgraph/langgraph/pregel/main.py:3638-3659
-def stream_events(
-    self,
-    input: InputT | Command | None,
-    config: RunnableConfig | None = None,
-    *,
-    version: Literal["v1", "v2", "v3"] = "v2",
-    ...
-) -> Any:
-    """Stream events from this graph.
-
-    For `version="v1"` / `"v2"`, yields `StreamEvent` dicts.
-    For `version="v3"`, returns a `GraphRunStream` whose typed
-    projections the caller drives by iterating — no background thread.
-
-    !!! warning
-        The `version="v3"` API is experimental and may change.
-    """
+elif stream_subgraphs and isinstance(stream_mode, list):
+    yield (ns, mode, payload)
+elif isinstance(stream_mode, list):
+    yield (mode, payload)
+elif stream_subgraphs:
+    yield (ns, payload)
+else:
+    yield payload
 ```
 
-对应的 `GraphRunStream` 说明了驱动方式：
-
-```python
-# libs/langgraph/langgraph/stream/run_stream.py:36-45
-@beta(message="The v3 streaming protocol on Pregel is experimental.")
-class GraphRunStream:
-    """Sync run stream with caller-driven pumping.
-
-    The caller's iteration on any projection drives the graph forward.
-    Projections are single-consumer.
-    """
-```
-
-v3 的几个关键点：
-
-- 调用方迭代 projection（投影）时，图才继续推进——不需要后台线程；
-- projection 默认单消费者，迭代两次会抛异常；
-- 需要多个消费者时使用 `projection.tee(n)`；
-- v3 自己管理 `stream_mode` 和子图 namespace，调用方不能再覆盖这两个参数。
-
-### v3 的使用示例
-
-```python
-run = graph.stream_events(input, config, version="v3")
-
-# 迭代 values 投影，每次迭代驱动图向前一步
-for snapshot in run.values:
-    print(snapshot)
-
-# 最终输出
-result = run.output
-```
-
-生产代码需要稳定协议时，优先使用常规 `stream()` 或 v1/v2 `stream_events()`，将 v3 作为实验性能力单独评估。
-
-## 五、选择表
-
-| 需求 | 优先选择 |
+| v1 参数 | 返回形状 |
 | --- | --- |
-| UI 展示完整 State 变化 | `stream_mode="values"` |
-| UI 展示节点增量 | `stream_mode="updates"` |
-| UI 展示模型 token | `stream_mode="messages"` |
-| 展示业务处理进度 | `stream_mode="custom"` |
-| 观测持久化时机 | `stream_mode="checkpoints"` |
-| 排查任务生命周期 | `stream_mode="tasks"` 或 `"debug"` |
-| 需要调用方驱动图推进 | `stream_events(version="v3")` |
+| 单一 mode，默认子图选项 | `data` |
+| mode 列表，默认子图选项 | `(mode, data)` |
+| 单一 mode，`subgraphs=True` | `(namespace, data)` |
+| mode 列表，`subgraphs=True` | `(namespace, mode, data)` |
 
-## 工程判断
+根图 namespace 是空元组，子图包含调用路径与任务身份。updates 的 data 通常按节点名包裹局部更新；不能把路径元组、mode 和业务字段混成一个结构。
 
-- **照搬**：根据观察目的选择对应的 `stream_mode`；生产环境用 v1/v2 的稳定协议。
-- **换实现**：长时间运行的任务用 `stream_mode="custom"` 暴露阶段性进度；需要多个消费者时使用 v3 的 `tee(n)`。
-- **别碰**：不要把 stream 数据当作恢复状态；不要在 Transformer 里修改 State。
-- **不适用时**：只拿最终结果用 `invoke()`；只需要最终 State 不需要过程观察时不要开 stream。
+v2 统一使用 `{"type": mode, "ns": ns, "data": payload}`。values 还把中断放到独立字段：
 
-## 读完后应该能判断什么
+源码：`libs/langgraph/langgraph/pregel/main.py` → `_output`（第 4220–4228 行节选；未展示部分省略）。
 
-- 七种 `stream_mode` 分别观察什么维度的运行数据；
-- Stream Transformer 的转换链路：Pregel 事件 → Mux 分发 → Transformer → 输出；
-- v3 `GraphRunStream` 如何让调用方迭代驱动图推进；
-- `subgraphs=True` 时 namespace 如何沿调用路径嵌套；
-- stream 数据为什么不能替代 checkpoint 恢复。
+```python
+if version == "v2":
+    if mode == "values":
+        # 将中断移到独立字段，并按输出结构转换状态。
+        ints: tuple[Interrupt, ...] = ()
+        if isinstance(payload, dict):
+            ints = payload.pop(INTERRUPT, ())
+            if output_mapper:
+                payload = output_mapper(payload)
+        yield {"type": mode, "ns": ns, "data": payload, "interrupts": ints}
+```
+
+只切换版本、不调整解包代码，可能让原本的 `for mode, data in ...` 读取错误。前端协议应固定版本和所选模式，再处理异常与结束事件。
+
+## 四、custom 进度来自节点主动写入
+
+节点可通过 `get_stream_writer()` 获取当前运行的 writer。下面是应用片段，`load_documents` 是业务函数：
+
+```python
+from langgraph.config import get_stream_writer
+
+def retrieve(state):
+    writer = get_stream_writer()
+    writer({"stage": "retrieving", "query": state["query"]})
+    documents = load_documents(state["query"])
+    writer({"stage": "retrieved", "count": len(documents)})
+    return {"documents": documents}
+```
+
+调用方选择 `stream_mode="custom"` 或把 custom 加入 mode 列表。writer 的调用只产生观察事件，真正状态更新仍来自返回值。节点重试或恢复重跑可能再次输出同一进度，所以消费端不能用“一条进度消息只出现一次”作为业务正确性条件。
+
+`messages` 依赖模型适配器及回调上下文，任意第三方 SDK 自己吐出的字节不会自动进入这个模式。流式事件也可能包含上下文或工具结果，业务展示应选择所需字段，不要把 debug 状态直接当作用户界面协议。
+
+## 五、v3 在普通流之上建立类型化投影
+
+`_pregel_stream_v3()` 创建 `StreamMux`（事件分发器），注册 values、messages、生命周期和子图转换器，再合并编译时与调用时提供的扩展转换器。每个转换器声明 `required_stream_modes`，运行时取并集决定底层需要开启哪些 mode。
+
+源码：`libs/langgraph/langgraph/pregel/main.py` → `Pregel._pregel_stream_v3`（第 3545–3558 行节选；未展示部分省略）。
+
+```python
+graph_iter = iter(
+    self.stream(
+        input,
+        patch_configurable(config, {CONFIG_KEY_STREAM_MESSAGES_V2: True}),
+        stream_mode=_collect_stream_modes(mux),
+        subgraphs=True,
+        version="v2",
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+        control=control,
+        **kwargs,
+    )
+)
+return GraphRunStream(graph_iter, mux)
+```
+
+这里明确使用普通 `stream(version="v2", subgraphs=True)`。v3 接管 mode 和子图选项，调用方再传 `stream_mode` 或 `subgraphs` 会被拒绝。updates、custom、tasks 等额外投影需要相应转换器注册，不能假设默认对象已经提供全部投影。
+
+消费者迭代某个投影、而投影没有可读项时，会请求运行流继续拉取底层事件：
+
+源码：`libs/langgraph/langgraph/stream/run_stream.py` → `GraphRunStream._pump_next`（第 131–146 行节选；未展示部分省略）。
+
+```python
+if self._exhausted or self._graph_iter is None:
+    return False
+try:
+    part = next(self._graph_iter)
+    event = convert_to_protocol_event(part)
+    self._observe_event(event)
+    self._mux.push(event)
+    return True
+except StopIteration:
+    self._mux.close()
+    self._exhausted = True
+    return False
+except Exception as e:
+    self._mux.fail(e)
+    self._exhausted = True
+    return False
+```
+
+`convert_to_protocol_event()` 将普通 v2 片段转换为协议事件，`_observe_event()` 更新最终状态与中断记录，`StreamMux.push()` 依注册顺序调用转换器的 `process()`，再按处理结果写入主事件日志。转换器提供的 `StreamChannel` 保存各投影可消费的项目。
+
+迭代一次投影可能需要拉取多个底层事件，不能理解为“一次 next 恰好执行一个节点或一轮”。同步运行流无需额外后台线程来驱动这条拉取链，但节点执行和检查点保存仍可能使用执行器。
+
+## 六、消费、异常与停止也是接口语义
+
+### 1. 获取最终值会继续驱动运行
+
+投影默认是单消费者，重复迭代同一个投影会报错；需要多路消费时使用 `tee(n)`，并考虑慢消费者带来的缓冲成本。v3 的 `run.output` 不是只读现有缓存，它会驱动底层流到结束后返回结果：
+
+源码：`libs/langgraph/langgraph/stream/run_stream.py` → `GraphRunStream.output`（第 184–190 行节选；未展示部分省略）。
+
+```python
+@property
+def output(self) -> dict[str, Any] | None:
+    """驱动运行直到结束，再返回最终状态。"""
+    _drive_until_done(self._pump_next)
+    if (err := self._mux._events._error) is not None:
+        raise err
+    return self._latest
+```
+
+若底层失败，Mux 记录错误，消费端或读取 output 时会重新抛出。若调用方已经决定停止，不能再通过读取 output 来“顺便取个结果”，因为它可能继续驱动图运行。
+
+### 2. 同步 abort 关闭底层图迭代器
+
+仅从投影的 for 循环中 break，不等于执行了运行对象的完整退出流程。`GraphRunStream.abort()` 会将流标记为耗尽、断开底层迭代器引用，再关闭迭代器与事件分发器：
+
+源码：`libs/langgraph/langgraph/stream/run_stream.py` → `GraphRunStream.abort`（第 155–171 行节选；未展示部分省略）。
+
+```python
+if self._exhausted:
+    return
+self._exhausted = True
+graph_iter = self._graph_iter
+self._graph_iter = None
+if (
+    graph_iter is not None
+    and (close := getattr(graph_iter, "close", None)) is not None
+):
+    try:
+        close()
+    except Exception:
+        pass
+try:
+    self._mux.close()
+except Exception:
+    pass
+```
+
+底层图生成器收到关闭信号后退出 Loop 和执行器上下文，执行取消、等待与清理。同步流对象的 `__exit__()` 也调用 abort，因此在拥有运行流的上下文中退出 with 可以走同一路径。
+
+该方法吞掉关闭过程中的普通异常，并提供重复调用时的空操作；不能把“abort 返回”解释成所有外部工具都已成功撤销。尤其同步线程任务已经开始后，执行器可能仍需等待其结束。跨线程请求在轮次边界停止，可使用第 07 篇的 `RunControl`，不能把同步迭代器的 close 当成通用线程终止接口。
+
+### 3. 异步 abort 先取消正在进行的事件拉取
+
+`AsyncGraphRunStream` 是 v3 的异步运行流。另一个协程请求停止时，事件拉取可能正阻塞在节点执行中；仅对仍在运行的异步生成器调用 aclose 不足以完成这一协调。
+
+`abort()` 先在条件锁内标记耗尽、记录正在执行的拉取任务并唤醒等待者，随后取消并等待这次拉取，再关闭底层生成器：
+
+源码：`libs/langgraph/langgraph/stream/run_stream.py` → `AsyncGraphRunStream.abort`（第 507–520 行节选；未展示部分省略）。
+
+```python
+if anext_task is not None and not anext_task.done():
+    anext_task.cancel()
+    try:
+        await anext_task
+    except (asyncio.CancelledError, Exception):
+        pass
+if (
+    graph_aiter is not None
+    and (aclose := getattr(graph_aiter, "aclose", None)) is not None
+):
+    try:
+        await aclose()
+    except Exception:
+        pass
+```
+
+取消拉取会将信号传入正在执行的图；等待它收尾后再 aclose，可以避免一边推进、一边关闭同一个异步生成器。后续还会关闭 Mux，释放受流缓冲限制而等待的写入方；`async with` 的退出同样会等待 abort。整个过程仍要求节点和工具正确响应取消，不能替代远端服务的取消协议。
+
+如果界面希望保留当前轮次结果，应请求 drain 并继续消费到运行受控退出，而不是立刻 abort。drain 与 abort 的保存、恢复和退出信号区别见[第 07 篇](./07-interrupts-and-command.md)。
+
+### 4. 事件连接与后台运行需要分别管理
+
+浏览器停止渲染 token 或断开事件连接，只改变消费或传输层。图运行是否随之取消，取决于服务端是否把断线事件传给真实运行任务、运行流或 control。若服务端选择继续后台执行，应保留运行身份供稍后查询；若选择取消，应等待执行清理后再报告终态。这是应用需要制定的策略，普通 stream 接口不会替 HTTP 服务决定。
+
+流事件可以用于界面和日志，但不能代替检查点中的通道版本、任务写入和恢复值。断线后继续显示事件与从保存现场恢复图，是两个需要分别设计的流程。v3 在此源码基线中标为实验性；采用它时应固定版本并验证消费与终止行为，而不只验证 token 能否显示。

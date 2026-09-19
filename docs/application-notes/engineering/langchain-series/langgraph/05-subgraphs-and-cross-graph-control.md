@@ -1,162 +1,121 @@
 ---
 sidebar_position: 7
-sidebar_label: 05 子图：流程复用与状态边界
-description: 追踪编译后的子图如何作为 Runnable 接入父图、父子状态边界如何划分、checkpointer 三种语义的区别，以及子图事件如何被观测。
+sidebar_label: 05 子图与状态边界
+description: 沿父任务调用子图的过程解释输入输出映射、检查点继承、命名空间、恢复重放和事件归属。
 ---
 
-# LangGraph 源码 05：子图、流程复用与状态边界
+# LangGraph 源码 05：父任务如何调用和恢复一张子图
 
 ## 源码定位
 
-> **适用版本**：`langgraph` 1.2.10。
+> **源码基线**：langgraph 1.2.10，本文使用的源码快照不含 Git 元数据，commit 未知。版本范围与文件指纹见[导读](./index.md#源码基线)。
 >
-> **核心路径**：
->
-> - 子图作为节点接入：`libs/langgraph/langgraph/graph/state.py`（`CompiledStateGraph` 继承 `Pregel`）
-> - 子图持久化：`libs/langgraph/tests/test_subgraph_persistence.py`
-> - 子图事件命名空间：`libs/langgraph/langgraph/pregel/main.py`、`libs/langgraph/langgraph/stream/`
+> - 节点接入：`libs/langgraph/langgraph/graph/state.py` → `StateGraph.add_node()`、`CompiledStateGraph.attach_node()`。
+> - 保存器选择：`libs/langgraph/langgraph/pregel/main.py` → `Pregel._defaults()`、`Pregel.stream()`。
+> - 命名空间：`libs/langgraph/langgraph/_internal/_config.py` → `recast_checkpoint_ns()`；`libs/langgraph/langgraph/pregel/_loop.py` → `PregelLoop.__init__()`。
+> - 行为用例：`libs/langgraph/tests/test_subgraph_persistence.py` → `test_stateless_interrupt_resume()`。
 
-## 这一篇的主题
+子图是一个可被父图节点调用的编译图。父图调度的是“调用子图”这个任务，子图内部再运行自己的任务与轮次。父子各有状态通道，输入和结果通过节点调用传递；它们不会因为字段同名就共享一份实时可变 State。
 
-[第 04 篇](./04-dynamic-routing-and-send.md)已经把 `Send`、`Command` 和 `Command.PARENT` 放回同一条控制流；需要复用一段包含多个节点、边和状态规则的流程时，再使用子图。
+`CompiledStateGraph` 继承 `Pregel`，而 Pregel 提供 Runnable 的统一调用接口。`add_node("run_child", child)` 可以直接接受编译后的子图，父节点的执行对象就是 child。若父子字段不同，则用包装函数映射输入与输出。
 
-子图关注的是流程封装：把一段内部结构编译为可调用单元，作为父图的节点接入。本篇追踪三个问题：
+## 一、一次父子调用经过两个状态提交边界
 
-1. 子图怎样以 Runnable 身份接入父图；
-2. 父子图的状态边界如何划分；
-3. checkpointer 三种语义和 streaming namespace 如何选择。
+假设父图持有 `article`，子图处理 `text` 并生成 `summary`，数据流是：
 
-## 一、子图是"编译后的 Runnable"作为节点接入
-
-子图先独立构建和编译，再作为父图的一个节点接入：
-
-```python
-child = (
-    StateGraph(ChildState)
-    .add_node("summarize", summarize)
-    .add_edge(START, "summarize")
-    .add_edge("summarize", END)
-    .compile()
-)
-
-parent.add_node("run_child", child)
+```text
+父图已提交的 article
+  → 父任务 run_child 的输入
+  → 包装函数构造 {text: article}
+  → 子图自己的输入、任务轮次与字段更新
+  → 子图输出 summary
+  → 包装函数返回 {summary: ...}
+  → 父任务 writers 暂存更新
+  → 父图轮次结束后合并
 ```
 
-源码中的 `CompiledStateGraph` 继承 `Pregel`：
-
-```python
-# libs/langgraph/langgraph/graph/state.py:1391-1407
-class CompiledStateGraph(
-    Pregel[StateT, ContextT, InputT, OutputT],
-    Generic[StateT, ContextT, InputT, OutputT],
-):
-    def __init__(
-        self,
-        *,
-        builder: StateGraph[StateT, ContextT, InputT, OutputT],
-        schema_to_mapper: dict[type[Any], Callable[[Any], Any] | None],
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.builder = builder
-        self.schema_to_mapper = schema_to_mapper
-```
-
-`Pregel` 提供 Runnable 的调用接口（`invoke()`、`stream()` 等），所以编译后的子图可以作为节点执行。父图接入子图时仍有一个输入边界：
-
-- 子图的输入 Schema 决定它需要哪些输入字段；
-- 子图返回的更新要符合父图字段的写入规则；
-- 父子字段名或结构不匹配时，需要显式 adapter（适配层）。
-
-### 父子状态边界：通过包装节点映射字段
-
-如果父图只有 `article`，子图接收 `text`，就把映射写在父节点中：
+以下是字段映射的应用片段；child、ParentState 由应用定义：
 
 ```python
 def run_child(state: ParentState):
     result = child.invoke({"text": state["article"]})
     return {"summary": result["summary"]}
-
-
-parent.add_node("run_child", run_child)
 ```
 
-这个适配层把数据边界写清楚：父图的 `article` 进入子图的 `text`，子图的 `summary` 回到父图的 `summary`。子图复用的是执行结构和状态视图，不提供进程或权限隔离。
+直接把 child 注册为节点时，也有同样的边界：子图输入由它的输入结构处理，返回值由父图 writer 提取父图已知字段。包装函数的价值是明确转换、裁剪结果，而不只是改一个字段名。
 
-直接以编译后的子图作为节点时，`add_node()` 看到的是一个 `Runnable`。`coerce_to_runnable()`（统一 Runnable 包装函数，见[第 02 篇](./02-stategraph-builder-and-compilation.md)）的第一条分支 `isinstance(thing, Runnable)` 直接命中，不需要额外包装。
+这在列表 reducer 上尤其重要。假设父图已有 `["A"]`，子图接收它后返回完整列表 `["A", "B"]`，父图若再次用列表拼接归并，会得到 `["A", "A", "B"]`。应明确返回增量、覆盖值，或使用按稳定 ID 合并的规则，不能认为“父子用了同一个 Schema”就自动避免重复。
 
-## 二、子图 checkpointer 决定状态保留范围
+## 二、子图如何获得保存器
 
-`checkpointer` 是 checkpoint saver（检查点保存器）的配置。子图支持三种实际语义：
+父任务的运行配置携带内部保存器和命名空间；嵌套子图读取这一配置。`Pregel._defaults()` 的选择顺序如下：
 
-| 配置 | 当前调用中的 interrupt/resume | 多次父图调用之间 |
-| --- | --- | --- |
-| `False` | 不使用持久化 | 不保留子图状态，即使父图配置了 checkpointer |
-| `None` | 可继承父图的 checkpointer 支持当前调用恢复 | 默认不积累子图自身 State，下次调用从干净状态开始 |
-| `True` | 使用子图自己的持久化边界 | 同一个 `thread_id` 下保留并积累子图 State |
-
-本地测试文件直接给出了这三种语义：
+源码：`libs/langgraph/langgraph/pregel/main.py` → `Pregel._defaults`（第 2579–2586 行节选；未展示部分省略）。
 
 ```python
-# libs/langgraph/tests/test_subgraph_persistence.py:1-8
-# checkpointer=False: no persistence, even when parent has a checkpointer
-# checkpointer=None (default): "stateless" — inherits parent checkpointer for
-# interrupt support, but state resets each invocation.
-# checkpointer=True: "stateful" — state accumulates across invocations on the
-# same thread id
+if self.checkpointer is False:
+    checkpointer: BaseCheckpointSaver | None = None
+elif CONFIG_KEY_CHECKPOINTER in config.get(CONF, {}):
+    checkpointer = config[CONF][CONFIG_KEY_CHECKPOINTER]
+elif self.checkpointer is True:
+    raise RuntimeError("checkpointer=True cannot be used for root graphs.")
+else:
+    checkpointer = self.checkpointer
 ```
 
-`stateless` 指无跨调用状态积累；`stateful` 指同一线程标识下保留子图状态。它们描述子图的持久化范围，不描述子图是否能执行。
+`checkpointer=False` 明确禁用子图保存；否则优先使用父运行配置注入的保存器。`checkpointer=True` 不是创建新保存器，根图直接使用它会报错；根图应提供真正的保存器实例，例如 `InMemorySaver` 或数据库后端。
 
-### 什么时候选哪种
+| 子图 compile 配置 | 保存器来源 | 历史范围 |
+| --- | --- | --- |
+| `None`（默认） | 可继承父图保存器 | 为本次子图调用保存恢复现场，不默认累计到下次独立调用 |
+| `True` | 继承父图保存器 | 用稳定的子图命名空间累计同一执行线内的状态 |
+| `False` | 不使用保存器 | 无子图自己的持久恢复现场 |
 
-- 子图只是一次性的内部流程 → `None`（默认），依赖父图的 checkpointer 处理中断恢复即可；
-- 子图需要独立记住历史 → `True`，调用使用稳定的 `thread_id`；
-- 子图要隔离父图的持久化 → `False`；
-- 需要 interrupt/resume 时，父图本身仍必须配置 checkpointer。
+根图也未提供保存器时，默认子图没有可继承的持久化能力。`InMemorySaver` 只在当前进程内保存；把配置写成 `True` 也不会使内存状态跨进程存活。
 
-跨图控制不在子图层重新定义一套调用方式：子图节点返回 `Command(graph=Command.PARENT, ...)` 时，由父图边界接收并校验。`Command.PARENT` 的字段处理和 `ParentCommand` 路径见[第 04 篇](./04-dynamic-routing-and-send.md)。
+## 三、命名空间决定是哪一次子图调用
 
-## 三、子图 streaming 的 namespace 嵌套
+任务准备时生成 `节点名:task_id` 形式的检查点路径，嵌套层次用 `|` 连接。例如父节点 `run_child` 的某次调用拥有自己的路径，子图在该路径下保存历史。相同节点的下一次任务通常拥有新的任务 ID，默认子图不会因此读到上一次独立调用的累计状态。
 
-当父图配置 `subgraphs=True` 进行流式输出时，子图事件会携带 namespace（命名空间路径）：
+当 child 配置 `checkpointer=True` 时，`stream()` 会重写路径：
+
+源码：`libs/langgraph/langgraph/pregel/main.py` → `Pregel.stream`（第 2806–2809 行节选；未展示部分省略）。
 
 ```python
-for chunk in graph.stream(
-    input_data, config,
-    stream_mode="updates",
-    subgraphs=True,
-):
-    print(chunk)
-    # ((parent_node,), "updates", {"child_key": "child_value"})
-    # ((parent_node, child_node), "updates", {"key": "value"})
+# 有状态子图将调用级路径转换为稳定路径。
+if self.checkpointer is True:
+    ns = cast(str, config[CONF][CONFIG_KEY_CHECKPOINT_NS])
+    config[CONF][CONFIG_KEY_CHECKPOINT_NS] = recast_checkpoint_ns(ns)
 ```
 
-第一个元组是 namespace，沿父图→子图的调用路径逐层拼接。这允许调用方定位事件来自哪张图、哪个节点。
+源码：`libs/langgraph/langgraph/_internal/_config.py` → `recast_checkpoint_ns`（第 47–49 行节选；未展示部分省略）。
 
-## 四、选择：子图还是普通节点
+```python
+return NS_SEP.join(
+    part.split(NS_END)[0] for part in ns.split(NS_SEP) if not part.isdigit()
+)
+```
 
-| 判据 | 子图 | 普通节点 |
-| --- | --- | --- |
-| 流程复杂度 | 内部有多节点、多边和独立状态视图 | 单一函数足够 |
-| 状态边界 | 需要独立 State Schema | 使用父图 State 即可 |
-| 复用范围 | 同一仓库多处或跨项目使用 | 单图内使用 |
-| 可观测性 | 子图内部事件可独立追踪 | 只有节点事件 |
-| 持久化 | 可独立选择 checkpointer 策略 | 依赖父图 |
+`recast_checkpoint_ns()` 去除每一段的任务 ID 和纯数字调用序号，留下节点路径。持久状态的身份因此取决于 **thread_id 加子图路径**，不是仅凭 thread_id。改变节点路径可能改变历史归属；并行复用同一个有状态子图路径，也需要避免多个调用竞争同一份累计状态。
 
-父子 Schema 已经复杂到需要频繁双向转换时，先评估是否应拆成普通节点和显式数据边界，避免子图层级掩盖状态流向。
+默认子图在一个父任务内被多次调用时，Loop 用 `subgraph_counter()` 为后续调用追加序号。恢复时应保持调用顺序稳定，不能在旧调用前任意插入一次新调用后期待原检查点自然匹配。
 
-## 工程判断
+## 四、子图暂停时父包装函数也会重跑
 
-- **照搬**：把子图编译为 `CompiledStateGraph`，通过包装节点或直接接入父图；用 adapter 显式处理父子字段映射。
-- **换实现**：需要子图独立恢复历史时使用 `checkpointer=True`；子图内部节点多、状态规则复杂但只需要父图统一管理持久化时使用默认 `None`。
-- **别碰**：不要在子图节点函数里手动调用父图节点；不要把子图当作进程或权限隔离边界。
-- **不适用时**：父子 Schema 映射层已经比子图内部逻辑更复杂时，评估是否用普通节点 + 显式数据函数替代子图。
+子图的 `interrupt()` 抛出可恢复控制信号，沿嵌套调用传出。父图保存当前任务及子图恢复所需配置，调用方再以同一执行线提交 `Command(resume=...)`。
 
-## 读完后应该能判断什么
+恢复时 Python 调用栈不会回来。父图会重新进入 `run_child`，再次执行 `child.invoke(...)`；子图凭命名空间找到本次暂停的现场，继续其中尚未完成的任务。默认 `checkpointer=None` 的“不跨调用累计”不妨碍恢复这一次尚未完成的调用。
 
-- 编译后的子图为什么能作为 Runnable 接入父图；
-- `checkpointer=False`、`None`、`True` 分别保留哪一层状态；
-- 跨图控制为什么必须由父图边界接收和校验，具体机制见[第 04 篇](./04-dynamic-routing-and-send.md)；
-- 子图 streaming 事件的 namespace 如何沿调用路径嵌套；
-- 什么时候用子图，什么时候用普通节点。
+因此包装函数在 `child.invoke()` 前面的请求或写操作也可能重复执行。把不可重复操作放到有明确任务结果记录的步骤，或让外部服务接受幂等键；子图提供恢复边界，但不提供进程、权限或数据库事务隔离。
+
+若 child 使用 `checkpointer=False`，不能依赖父图保存器恢复它内部的完整进度。父图自身有检查点，不等于所有嵌套执行都自动可恢复。
+
+## 五、子图事件与最终输出是两个视图
+
+父图流式调用开启 `subgraphs=True` 后，运行配置将父流出口传给子图。内部事件携带 namespace（命名空间路径），调用方可区分事件来自根图还是某次子图调用。
+
+在普通 `stream(version="v1")` 中，单一 mode 返回 `(namespace, data)`，多个 mode 返回 `(namespace, mode, data)`。根图 namespace 为 `()`，子图路径元素通常含 `run_child:<task_id>`，不能只用节点名假定每次调用都相同。子图的 updates 内容仍按子节点名组织，不是将字段直接摊在事件顶层。
+
+采用 `version="v2"` 时形状统一为含 `type`、`ns`、`data` 的对象。子图可在父任务结束前不断输出事件，但父任务的业务结果仍要等子图返回、父图提交后才成为父图已提交状态。
+
+内部确有独立多步流程、状态规则或恢复需求时，子图能形成清晰边界；若内部只是一个函数，额外的 Schema、命名空间和恢复顺序反而增加维护成本。跨图跳转还需经过 `Command.PARENT` 的传播路径，见[第 04 篇](./04-dynamic-routing-and-send.md)。

@@ -1,101 +1,45 @@
 ---
 sidebar_position: 8
-sidebar_label: 06 执行历史：保存、恢复与分叉
-description: 追踪 LangGraph 如何保存执行快照、继续未完成任务、重放旧节点、创建分支，并区分 Checkpoint 与 Store。
+sidebar_label: 06 检查点、恢复与分叉
+description: 追踪任务写入和轮次检查点的保存、加载、重放与状态修改，区分持久化模式、查询视图和业务 Store。
 ---
 
-# LangGraph 源码 06：执行历史如何保存、恢复与分叉
+# LangGraph 源码 06：执行现场怎样保存、恢复和分叉
 
 ## 源码定位
 
-> **适用版本**：`langgraph` 1.2.10、`langgraph-checkpoint` 4.1.1。
+> **源码基线**：langgraph 1.2.10、langgraph-checkpoint 4.1.1，本文使用的源码快照不含 Git 元数据，commit 未知。版本范围与文件指纹见[导读](./index.md#源码基线)。
 >
-> **核心路径**：
->
-> - 执行快照和保存协议：`libs/checkpoint/langgraph/checkpoint/base/__init__.py`
-> - 内存保存器：`libs/checkpoint/langgraph/checkpoint/memory/__init__.py`
-> - Runtime 恢复与轮次快照：`libs/langgraph/langgraph/pregel/_loop.py`
-> - 查询状态、历史和手动分叉：`libs/langgraph/langgraph/pregel/main.py`
-> - 业务 Store：`libs/checkpoint/langgraph/store/base/__init__.py`
+> - 保存协议：`libs/checkpoint/langgraph/checkpoint/base/__init__.py` → `Checkpoint`、`CheckpointTuple`、`BaseCheckpointSaver`。
+> - 保存器实例：`libs/checkpoint/langgraph/checkpoint/memory/__init__.py` → `InMemorySaver.get_tuple()`、`put()`、`put_writes()`。
+> - 运行时保存与加载：`libs/langgraph/langgraph/pregel/_loop.py` → `put_writes()`、`_put_checkpoint()`、`_suppress_interrupt()`、`SyncPregelLoop.__enter__()`、`_first()`。
+> - 查询与修改：`libs/langgraph/langgraph/pregel/main.py` → `get_state()`、`get_state_history()`、`update_state()`、`bulk_update_state()`。
+> - 业务数据：`libs/checkpoint/langgraph/store/base/__init__.py` → `BaseStore`。
 
-## 这一篇的主题
+可恢复执行需要同时知道“状态已经提交到哪里”和“本轮哪些任务已经完成”。LangGraph 用 checkpoint（检查点）保存轮次现场，用 pending writes（待合并写入）记录任务结果。恢复时根据两者重新准备任务，而不是从序列化的 Python 调用栈接着运行。
 
-[第 03 篇](./03-pregel-supersteps-and-scheduling.md)讲过任务怎样执行和写回，[第 04 篇](./04-dynamic-routing-and-send.md)讲过动态路由怎样产生任务。本篇继续追踪任务结果如何留下可恢复的执行历史：
+`BaseCheckpointSaver` 定义保存协议；`InMemorySaver` 是进程内实现，适合演示和测试。SQLite、PostgreSQL 等后端负责持久保存。保存器更换不改变图的任务协议，但可靠性、事务、并发和保留策略取决于后端。
 
-```text
-graph.invoke(input, {thread_id})
-  → 读取该执行线的最新 checkpoint
-  → 写入输入或恢复信号
-  → 执行任务并提交 State
-  → 保存新的 checkpoint
-  → 后续调用继续、重放或从旧点分叉
-```
+## 一、执行身份如何定位检查点
 
-Checkpoint（检查点）保存一条图执行线的现场；Store（业务存储）保存跨执行共享的数据。两者的查询身份、写入时机和用途都不同。
+调用配置中的 `configurable` 携带三个关键字段：
 
-## 一、先固定一次执行的身份
-
-Checkpoint Saver（检查点保存器）通过三个配置字段定位历史：
-
-| 字段 | 中文理解 | 作用 |
+| 字段 | 定位对象 | 影响 |
 | --- | --- | --- |
-| `thread_id` | 执行线 ID | 区分会话、订单或工作流实例 |
-| `checkpoint_ns` | 检查点命名空间 | 区分父图、子图和子图调用路径 |
-| `checkpoint_id` | 某个历史快照 ID | 选择最新点或指定旧点 |
+| `thread_id` | 一条工作流执行线 | 改成新值会访问另一条历史 |
+| `checkpoint_ns` | 根图或子图命名空间 | 同一执行线内划分嵌套图历史 |
+| `checkpoint_id` | 指定历史检查点 | 省略时通常读取该命名空间下最新记录 |
 
-最常见的调用只需要 `thread_id`：
+例如 `{"configurable": {"thread_id": "order-42"}}` 表示订单执行线，不是操作系统线程。相同 ID 加新输入会继续使用已有状态，而不是自动创建空白会话；要清空或新建必须显式设计入口。
 
-```python
-checkpointer = InMemorySaver()
-graph = builder.compile(checkpointer=checkpointer)
+`InMemorySaver.get_tuple()` 在指定 checkpoint ID 时精确查找，否则取该命名空间最大 ID 的记录。返回的 `CheckpointTuple` 同时携带本体、父配置和待合并写入：
 
-config = {"configurable": {"thread_id": "order-42"}}
-graph.invoke({"status": "draft"}, config)
-```
-
-相同 `thread_id` 表示同一条执行线。换一个 `thread_id`，Saver 会读取另一条历史。
-
-`InMemorySaver.get_tuple()` 展示了查找顺序：
+源码：`libs/checkpoint/langgraph/checkpoint/base/__init__.py` → `CheckpointTuple`（第 139–146 行节选；未展示部分省略）。
 
 ```python
-# libs/checkpoint/langgraph/checkpoint/memory/__init__.py:250-255, 281-285
-thread_id: str = config["configurable"]["thread_id"]
-checkpoint_ns: str = config["configurable"].get("checkpoint_ns", "")
-
-if checkpoint_id := get_checkpoint_id(config):
-    if saved := self.storage[thread_id][checkpoint_ns].get(checkpoint_id):
-        checkpoint, metadata, parent_checkpoint_id = saved
-        writes = self.writes[(thread_id, checkpoint_ns, checkpoint_id)].values()
-else:
-    if checkpoints := self.storage[thread_id][checkpoint_ns]:
-        checkpoint_id = max(checkpoints.keys())
-        checkpoint, metadata, parent_checkpoint_id = checkpoints[checkpoint_id]
-        writes = self.writes[(thread_id, checkpoint_ns, checkpoint_id)].values()
-```
-
-源码先看配置中是否指定 `checkpoint_id`。没有指定时，读取当前命名空间下的最新快照；指定后，读取那个历史点。`parent_config` 把当前快照和上一快照连接起来。
-
-`checkpoint_ns` 在子图场景尤其重要。[第 05 篇](./05-subgraphs-and-cross-graph-control.md)中的子图会沿父图执行路径生成命名空间，查询子图状态时需要带上对应的 namespace。
-
-## 二、Checkpoint 保存什么
-
-`Checkpoint` 是某个时间点的状态快照；`CheckpointTuple` 把快照和查询、恢复所需的附加信息放在一起：
-
-```python
-# libs/checkpoint/langgraph/checkpoint/base/__init__.py:92-146
-class Checkpoint(TypedDict):
-    """State snapshot at a given point in time."""
-
-    v: int
-    id: str
-    ts: str
-    channel_values: dict[str, Any]
-    channel_versions: ChannelVersions
-    versions_seen: dict[str, ChannelVersions]
-    updated_channels: list[str] | None
-
-
 class CheckpointTuple(NamedTuple):
+    """包含检查点及其关联恢复数据的元组。"""
+
     config: RunnableConfig
     checkpoint: Checkpoint
     metadata: CheckpointMetadata
@@ -103,81 +47,113 @@ class CheckpointTuple(NamedTuple):
     pending_writes: list[PendingWrite] | None = None
 ```
 
-各字段解决的问题不同：
+检查点本体中，`channel_values` 保存通道的持久表示，`channel_versions` 保存版本，`versions_seen` 保存节点已经处理的触发版本，`updated_channels` 标记最近变化的通道。仅保存业务 State 不足以恢复调度，因为它不说明旧触发信号是否已消费。
 
-| 字段 | 恢复用途 |
-| --- | --- |
-| `channel_values` | 恢复各 Channel 当前保存的值 |
-| `channel_versions` | 记录各 Channel 的版本 |
-| `versions_seen` | 判断节点已经读过哪些版本，决定下一步触发 |
-| `updated_channels` | 标记本次快照更新过的 Channel |
-| `metadata` | 记录 `input`、`loop`、`update`、`fork` 等快照来源和执行轮次 |
-| `parent_config` | 沿历史链回到父快照 |
-| `pending_writes` | 保存已写入 Saver、尚未并入当前快照的任务结果 |
+`pending_writes` 位于元组的关联数据中，不在检查点本体字段里。任务完成后能独立追加结果，不必每完成一个任务就重写整份图状态。
 
-`pending_writes` 属于 `CheckpointTuple` 的附加恢复信息，字段表中的 `Checkpoint` 本身不包含它。这个区别决定了"快照里的 State"和"任务已经产生但还没完成统一提交的写入"可以分开处理。
+## 二、两条保存路径分别对应任务和轮次
 
-## 三、Saver 协议
+正常执行中，Runner 完成任务后调用 Loop 的 `put_writes(task_id, writes)`。Loop 将结果加入当前检查点的待合并记录，并在相应持久化模式下调用保存器的 `put_writes()`。
 
-`BaseCheckpointSaver` 定义了五个核心操作，不同存储后端（InMemory、SQLite、Postgres）实现同一组接口：
+轮次结束后，`after_tick()` 将写入应用到通道；`_put_checkpoint()` 生成新检查点并调用保存器的 `put(config, checkpoint, metadata, new_versions)`。`new_versions` 告诉保存器本次哪些通道版本变化，可用于减少重复保存。输入到达、手工更新状态和分叉也有各自的检查点来源。
 
-| 方法 | 作用 |
-| --- | --- |
-| `get_tuple(config)` | 读取一个快照及其 pending writes |
-| `list(config, filter, limit)` | 按 thread、命名空间、时间查询历史 |
-| `put(config, checkpoint, metadata)` | 保存完整 checkpoint |
-| `put_writes(config, writes, task_id)` | 把任务中间写入挂到某个 checkpoint |
-| `delete_thread(thread_id)` | 清理一条执行线的全部历史 |
+| 时间点 | 保存对象 | 已有数据能解决什么 |
+| --- | --- | --- |
+| 本轮开始 | 检查点 C | 恢复本轮输入和触发关系 |
+| A 成功、B 尚未完成 | C 关联的 A 写入 | 恢复时保留 A 结果 |
+| 整轮提交 | 新检查点 C' | 从合并后的状态准备下一轮 |
 
-## 四、什么时候保存 checkpoint
+保存请求通常经后台执行器提交，并按先后关系等待前一个检查点保存，以防写入乱序。**生成检查点、输出事件、持久保存完成不能视为同一时刻。**
 
-一次调用在两个时刻保存快照：
+### 1. durability 决定保存与执行如何重叠
 
-- **输入快照**（`source="input"`）：用户输入写入 `START` Channel 后，在 `_first()` 中保存
-- **轮次快照**（`source="loop"`）：每轮 `after_tick()` 统一提交 writes 后保存
+| 模式 | 等待策略 | 故障边界与代价 |
+| --- | --- | --- |
+| `sync` | 下一轮推进前等待检查点保存 | 增加写入等待，收窄轮次间丢失窗口 |
+| `async`（默认） | 保存可与后续执行重叠 | 减少等待，进程突发退出时可能失去尚未完成的保存 |
+| `exit` | 在退出、中断等保存边界集中落下现场 | 写入少，但执行中崩溃不能指望每轮都有落盘记录 |
 
-两个快照的保存都调用 `_put_checkpoint()`，内部走 Saver 的 `put()` 和 `put_writes()`。
+同步路径的等待发生在主循环中：
 
-## 五、两种恢复入口
+源码：`libs/langgraph/langgraph/pregel/main.py` → `Pregel.stream`（第 2984–2988 行节选；未展示部分省略）。
 
 ```python
-graph.invoke(Command(resume="approved"), config)  # 提供 interrupt 恢复值
-graph.invoke(None, config)                         # 继续待处理任务
+loop.after_tick()
+emit_graph_lifecycle_events(loop)
+# 同步模式等待本轮检查点保存完成。
+if durability_ == "sync":
+    loop._put_checkpoint_fut.result()
 ```
 
-Runtime 通过 `PregelLoop._first()` 判断是否为恢复调用（`Command`、`input=None` 或相同 `run_id`），决定是新建执行线还是继续已有快照。`Command(resume=...)` 需要 checkpointer 将恢复值与 interrupt ID 绑定。
+Loop 在 `exit` 模式下也跳过常规任务写入的即时保存。因此“成功兄弟任务恢复后一定不重跑”的前提，是相关结果已经可靠保存；不能脱离持久化模式和进程故障时机作保证。没有保存器时，配置 durability 不会凭空产生持久化能力。
 
-## 六、pending writes：恢复已完成任务的写入
+### 2. 受控停止也经过退出保存路径
 
-一轮里可能出现这种结果：
+`RunControl.request_drain()` 请求运行时在轮次边界停止继续执行。该路径结束 Loop 的主循环后，仍会正常退出上下文管理器；`_suppress_interrupt()` 虽然名字包含 interrupt，也承担 `exit` 模式下的保存工作。
 
-```text
-node_a 成功，产生 State 更新
-node_b 失败或 interrupt
-```
-
-Saver 会把任务写入单独记录为 pending writes。这样恢复时可以保留 `node_a` 的成功结果，让 `node_b` 重新执行。
+源码：`libs/langgraph/langgraph/pregel/_loop.py` → `PregelLoop._suppress_interrupt`（第 1323–1334 行节选；未展示部分省略）。
 
 ```python
-# libs/langgraph/langgraph/pregel/_loop.py:736-749
-def _reapply_writes_to_succeeded_nodes(
-    self, tasks: Mapping[str, PregelExecutableTask]
-) -> None:
-    for tid, k, v in self.checkpoint_pending_writes:
-        if k in (ERROR, ERROR_SOURCE_NODE, INTERRUPT, RESUME):
-            continue
-        if task := tasks.get(tid):
-            task.writes.append((k, v))
+# 退出时保存当前检查点及相关写入。
+if self.durability == "exit" and (
+    # 根图退出。
+    not self.is_nested
+    # 或嵌套图因错误、中断等异常退出。
+    or exc_value is not None
+    # 或使用 checkpointer=True 的有状态子图退出。
+    or all(NS_END not in part for part in self.checkpoint_ns)
+):
+    self._put_exit_delta_writes()
+    self._put_checkpoint(self.checkpoint_metadata)
+    self._put_pending_writes()
 ```
 
-控制信号会被跳过，成功任务的普通 State 写入会重新挂回对应 task。第 03 篇的 `apply_writes()` 随后把这些写入和本次恢复产生的新写入一起提交。
+根图停止时，前一轮已经合并的通道值以及继续运行需要的写入可以在这里保存；退出还需等待相关后台保存完成，之后外层入口才报告 `GraphDrained`。因此 exit 模式能够支持一次正常完成清理的协作式停止，不需要等整个业务流程完成才留下现场。
 
-本地测试验证了这个边界：并行节点中一个节点成功、另一个节点重试失败时，恢复后成功节点只调用一次，失败节点继续尝试；`get_state()` 看到的最新状态会包含成功节点的写入。
+这条保证依赖上下文清理实际运行且保存成功。强制杀进程、存储不可用或使用仅存于进程内的保存器，仍可能使进度无法恢复。任务取消也不等于当前轮次完整提交：恢复应依据已保存记录，不能依据界面最后显示的事件判断完成位置。
 
-注意两个查询视图：
+## 三、加载时恢复通道与待合并结果
+
+`SyncPregelLoop.__enter__()` 根据配置调用 `get_tuple()`。第一次执行没有历史时创建空检查点；有历史时读取元组，再调用 `channels_from_checkpoint()` 恢复通道实例。
+
+源码：`libs/langgraph/langgraph/pregel/_loop.py` → `SyncPregelLoop.__enter__`（第 1675–1684 行节选；未展示部分省略）。
 
 ```python
-# libs/langgraph/langgraph/pregel/main.py:1428-1434
+self._initial_checkpoint_config = self.checkpoint_config
+self.prev_checkpoint_config = saved.parent_config
+self.checkpoint_id_saved = saved.checkpoint["id"]
+self.checkpoint = saved.checkpoint
+self.checkpoint_metadata = saved.metadata
+self.checkpoint_pending_writes = (
+    [(str(tid), k, v) for tid, k, v in saved.pending_writes]
+    if saved.pending_writes is not None
+    else []
+)
+```
+
+`_first()` 根据已有版本和本次输入区分新输入与继续执行。`None` 表示继续当前未完成现场，`Command(resume=...)` 额外提供动态中断的恢复值；在空历史上给 `None` 并不能恢复出一次从未开始的执行。
+
+准备任务后，Loop 按任务 ID 找回已成功结果：
+
+源码：`libs/langgraph/langgraph/pregel/_loop.py` → `PregelLoop._reapply_writes_to_succeeded_nodes`（第 745–749 行节选；未展示部分省略）。
+
+```python
+for tid, k, v in self.checkpoint_pending_writes:
+    if k in (ERROR, ERROR_SOURCE_NODE, INTERRUPT, RESUME):
+        continue
+    if task := tasks.get(tid):
+        task.writes.append((k, v))
+```
+
+`ERROR`、`INTERRUPT`、`RESUME` 等控制记录不算任务成功输出。成功写入挂回后，主循环只把仍没有成功写入的任务交给 Runner。A 成功、B 失败的例子中，A 不必再次调用，B 从任务入口重跑；后续提交使用 A 的保存结果和 B 的新结果。
+
+## 四、查询当前状态与查询历史快照不同
+
+`get_state()` 返回 `StateSnapshot`，即面向调用方的状态视图，含 `values`、`next`、`tasks` 和配置。它由保存记录及任务准备逻辑计算，不等于底层检查点字典原样返回。
+
+源码：`libs/langgraph/langgraph/pregel/main.py` → `Pregel.get_state`（第 1428–1434 行节选；未展示部分省略）。
+
+```python
 saved = checkpointer.get_tuple(config)
 return self._prepare_state_snapshot(
     config,
@@ -187,81 +163,28 @@ return self._prepare_state_snapshot(
 )
 ```
 
-查询当前最新状态时，Runtime 会应用 pending writes；明确指定历史 `checkpoint_id` 时，返回该快照本身，不自动叠加后续 pending writes。
+未显式指定历史 ID 时，当前视图会应用成功任务的 pending writes；指定历史 ID 时不自动叠加这些后续写入。因此失败后 `get_state(config).values` 已包含 A 的结果，并不说明失败轮次曾完整提交或 B 已完成。`tasks` 中的错误和中断信息仍需一起读取。
 
-pending writes 只处理图内已记录的写入。HTTP 请求、扣费、发货、发邮件等外部副作用仍需要幂等键、业务事务或 outbox（待发送操作表）。
+## 五、继续、重放与修改历史各做什么
 
-## 七、重放和分叉：从旧快照重新开始
-
-`get_state_history()` 返回一条执行线的历史快照。先找到某个旧点，再决定是原样重放还是先修改状态：
-
-```python
-history = list(graph.get_state_history(config))
-before_b = next(state for state in history if state.next == ("node_b",))
-
-# replay：从旧点重新执行 node_b
-graph.invoke(None, before_b.config)
-
-# fork：先修改旧点的 State，再从新分支继续
-fork_config = graph.update_state(before_b.config, {"value": ["x"]})
-graph.invoke(None, fork_config)
-```
-
-两种操作的区别：
-
-| 操作 | 入口 | 后续行为 |
+| 入口 | 运行含义 | 任务结果复用 |
 | --- | --- | --- |
-| 继续 | 当前执行线的最新配置 | 处理当前未完成任务或提供 resume 值 |
-| 重放（replay，重执行旧点之后的任务） | 旧 checkpoint 配置 | 按旧状态重新执行后续节点 |
-| 分叉（fork，从旧点创建新执行分支） | `update_state()` 返回的新配置 | 先写入修改，再执行后续节点 |
+| 最新配置加 `invoke(None, config)` | 继续未完成现场 | 可复用已保存成功写入 |
+| drain 后的执行线加 `invoke(None, config)`，不复用已停止的 control | 继续尚未执行的后续轮次 | 从停止时实际保存的现场重新准备任务 |
+| 最新配置加 `Command(resume=...)` | 继续并给中断提供值 | 恢复对应暂停任务 |
+| 历史配置加 `invoke(None, historical_config)` | 从选定历史点重新执行后续流程 | 有意重放后续任务，不等同于失败恢复 |
+| `update_state(historical_config, values, as_node=...)` | 以某节点身份应用一次更新，返回新配置 | 由更新结果计算下一步 |
 
-本地 time-travel（时间旅行）测试验证了三个结果：
+`update_state()` 转交给 `bulk_update_state()`，执行指定节点的 writers，经过字段 reducer、控制写入和检查点保存；它不运行该节点的业务函数。已有 `items=["A"]` 且 reducer 为拼接时，手工写 `["B"]` 得到 `["A", "B"]`，并非替换成 `["B"]`。
 
-- `before_b` 的 `next` 是 `("node_b",)` 时，重放只执行 `node_b`；
-- 完成态快照的 `next == ()`，重放不会调用节点；
-- 从同一个旧点创建两次 fork，两个分支互不影响。
+`as_node` 决定模拟哪个节点产生更新，因而影响触发的后继；运行时推断不唯一时要求调用方明确指定。返回的新配置应作为继续入口，不能丢掉后仍假定旧配置会指向同一分支。
 
-`update_state()` 的公开入口很薄，实际工作交给批量状态更新：
+历史记录通过父配置形成分支关系，而不只是不断覆盖一条 State。重放会再次调用外部服务，动态中断也可以重新触发。并行操作同一个 thread 不自动获得业务串行化；API 调用方应对同一工作流实例的更新和恢复安排一致的并发策略。
 
-```python
-# libs/langgraph/langgraph/pregel/main.py:2515-2526
-def update_state(
-    self,
-    config: RunnableConfig,
-    values: dict[str, Any] | Any | None,
-    as_node: str | None = None,
-    task_id: str | None = None,
-) -> RunnableConfig:
-    return self.bulk_update_state(
-        config,
-        [[StateUpdate(values, as_node, task_id)]],
-    )
-```
+## 六、Store 保存业务数据，不参与执行回滚
 
-`as_node` 用来指定这次手动更新模拟哪个节点产生；省略时，Runtime 会从最近更新状态的节点推断，存在歧义时会报错。这样分叉后的下一跳仍能沿原图结构计算。
+`BaseStore` 按 `namespace + key` 提供 `get/put/search/delete` 等接口，适合用户偏好、资料或跨会话信息。检查点保存的是 thread 的执行现场；Store 数据由节点主动读取和写入，不会自动进入 State。
 
-## 八、Store：跨执行的业务数据
+从旧检查点重放时，节点可能读到 Store 的当前值，而不是历史当时的值。若业务要求可复现，应把必要的版本或数据快照记录到状态中。Store、支付服务、邮件服务等都不因图回退而撤销修改，任务级恢复也不保证这些系统“恰好执行一次”。
 
-Store 按 `namespace + key` 组织业务数据（用户偏好、资料、索引），与 checkpoint 不同：
-
-```text
-Checkpoint  → thread_id + checkpoint_ns + checkpoint_id  → 图执行线的恢复历史
-Store       → namespace + key                              → 跨执行共享，不参与图恢复
-```
-
-核心操作：`get(namespace, key)` / `put(namespace, key, value, index, ttl)` / `search(namespace, query)` / `delete(namespace, key)`。Store 中的数据不会自动进入 Graph State，是否读入 State 或 prompt 由节点逻辑决定。
-
-## 工程判断
-
-- **照搬**：为可恢复执行配置稳定的 `thread_id`，把 checkpoint 查询、状态历史和恢复入口保留在 Runtime 提供的协议内。
-- **换实现**：生产环境根据事务、并发、备份和保留策略选择 Saver/Store 后端；业务数据需要查询、TTL 或向量检索时使用 Store。
-- **别碰**：不要把 Store 当作任务完成记录，也不要把 checkpoint 当作长期业务数据库。
-- **不适用时**：一次性、无恢复要求的短任务可以不配置 checkpointer；需要中断、重放或分叉时必须先建立可持久化的执行身份。
-
-## 读完后应该能判断什么
-
-- `thread_id`、`checkpoint_ns` 和 `checkpoint_id` 分别定位哪一层历史；
-- `Checkpoint` 和 `CheckpointTuple` 各自保存什么；
-- pending writes 如何让恢复跳过已经成功的任务；
-- 继续、重放、分叉分别从哪个配置开始；
-- `Store` 为什么适合跨执行业务数据，不能替代 checkpoint。
+`DeltaChannel` 还可能通过历史写入重建字段，清理检查点时不能只看当前 `channel_values` 是否完整。生产保存策略需要同时考虑任务结果、祖先依赖与业务保留要求。

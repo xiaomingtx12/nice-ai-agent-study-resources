@@ -1,401 +1,221 @@
 ---
 sidebar_position: 3
 sidebar_label: 01 State、Channel 与 Reducer
-description: 从并行节点写同一字段的报错开始，完整追踪八种 Channel 类型的更新协议、Reducer 的解析链路、消息合并，以及 State/Input/Output 的 Schema 边界。
+description: 沿 Schema 解析、写入分组和通道更新解释并行冲突、消息合并、增量持久化与状态边界。
 ---
 
-# LangGraph 源码 01：同一字段如何接收节点更新
+# LangGraph 源码 01：字段更新怎样合并成下一版状态
 
 ## 源码定位
 
-> **适用版本**：`langgraph` 1.2.10。
+> **源码基线**：langgraph 1.2.10，本文使用的源码快照不含 Git 元数据，commit 未知。版本范围与文件指纹见[导读](./index.md#源码基线)。
 >
-> **核心实现**：
->
-> - State Schema 解析：`libs/langgraph/langgraph/graph/state.py`，`_get_channels()`、`_get_channel()`、`_is_field_channel()`、`_is_field_binop()`
-> - Channel 抽象：`libs/langgraph/langgraph/channels/base.py`，`BaseChannel`
-> - 单写字段：`libs/langgraph/langgraph/channels/last_value.py`，`LastValue`
-> - Reducer 字段：`libs/langgraph/langgraph/channels/binop.py`，`BinaryOperatorAggregate`
-> - 一轮写入提交：`libs/langgraph/langgraph/pregel/_algo.py`，`apply_writes()`
-> - 消息合并：`libs/langgraph/langgraph/graph/message.py`，`add_messages()`
+> - Schema 解析：`libs/langgraph/langgraph/graph/state.py` → `_get_channels()`、`_get_channel()`、`_is_field_binop()`。
+> - 提交入口：`libs/langgraph/langgraph/pregel/_algo.py` → `apply_writes()`。
+> - 字段合并：`libs/langgraph/langgraph/channels/last_value.py` → `LastValue.update()`；`libs/langgraph/langgraph/channels/binop.py` → `BinaryOperatorAggregate.update()`。
+> - 消息与持久化：`libs/langgraph/langgraph/graph/message.py` → `add_messages()`；`libs/langgraph/langgraph/channels/delta.py` → `DeltaChannel`；`libs/langgraph/langgraph/channels/untracked_value.py` → `UntrackedValue`。
 
-## 先抓住三个词
+节点返回 `{"items": ["left"]}` 时，运行时不会立刻把这份字典覆盖到全局状态。返回值先转换为字段写入，本轮结束后按字段分组，再交给对应 Channel（通道）的 `update()`。**同一字段能否接收多份更新，由它的通道规则决定。**
 
-**State Schema** 是你在 `TypedDict` 里声明的字段集合。LangGraph 把每个字段转成一个 **Channel**——运行时负责存储该字段、定义写入规则、处理持久化的对象。**Reducer** 是一小段逻辑，告诉 Channel "收到多份更新时怎么合并"。
+State Schema（状态结构声明）定义字段及类型；Channel 保存字段值和更新规则；reducer（归并函数）定义当前值与更新怎样合成新值。`BinaryOperatorAggregate` 是调用二元 reducer 的通道，例如以 `operator.add` 将列表更新逐份拼接。
 
-当你在 Schema 里写 `Annotated[list[str], add]` 时，LangGraph 会为这个字段创建一个 **`BinaryOperatorAggregate`**——它的内部实现是：存一个当前值和一个二元函数（你的 Reducer，比如 `add`），`update()` 被调用时把每份新值依次与当前值做 `add(current, update)`，最终得到一个合并后的结果。
+## 一、Schema 在构建阶段决定字段规则
 
-默认情况下，普通字段（不加 `Annotated`）选 `LastValue`：一轮只接受一份更新，多了报错。
+`StateGraph` 初始化时通过 `_add_schema()` 登记结构；`_get_channels()` 保留 `Annotated` 元数据，为每个字段调用 `_get_channel()`。`Annotated[T, metadata]` 是 Python 的类型标注形式，LangGraph 从 metadata 中读取通道或 reducer 配置。
 
----
-
-**本文分两条线。** 一到六节讲你在 `TypedDict` 里声明的字段对应的 Channel——LastValue、Reducer、消息合并、可见性、Schema 边界。第七节讲 Runtime 自己在幕后创建的六种内部 Channel——你写代码时看不到它们，但理解后面 Pregel 调度、等待边和 `Send` 时需要知道。
-
-先从第一条线入手：报错 → 为什么报错 → 怎么修。
-
-## 一、默认规则：`LastValue` 只接受单写
-
-让两个节点从 `START` 同时运行，都写 `items`：
+源码：`libs/langgraph/langgraph/graph/state.py` → `_get_channel`（第 1845–1859 行节选；未展示部分省略）。
 
 ```python
-from typing_extensions import TypedDict
-from langgraph.graph import END, START, StateGraph
+if manager := _is_field_managed_value(name, annotation):
+    if allow_managed:
+        return manager
+    else:
+        raise ValueError(f"This {annotation} not allowed in this position")
+elif channel := _is_field_channel(annotation):
+    channel.key = name
+    return channel
+elif channel := _is_field_binop(annotation):
+    channel.key = name
+    return channel
 
-
-class SingleWriteState(TypedDict):
-    items: list[str]
-
-
-def left(_: SingleWriteState):
-    return {"items": ["left"]}
-
-
-def right(_: SingleWriteState):
-    return {"items": ["right"]}
-
-
-def build_graph(schema: type[dict]):
-    builder = StateGraph(schema)
-    builder.add_node("left", left)
-    builder.add_node("right", right)
-    builder.add_edge(START, "left")
-    builder.add_edge(START, "right")
-    builder.add_edge("left", END)
-    builder.add_edge("right", END)
-    return builder.compile()
-
-
-graph = build_graph(SingleWriteState)
-graph.invoke({"items": []})
-# InvalidUpdateError: At key 'items': Can receive only one value per step.
+fallback: LastValue = LastValue(annotation)
+fallback.key = name
+return fallback
 ```
 
-出错的原因是默认 Channel——`LastValue`：
+选择顺序是托管值、显式通道、二元 reducer，均不匹配时采用 `LastValue`。托管值由运行时计算，例如剩余轮数，不属于普通节点写回的业务字段。
+
+显式通道可以在元数据中给出实例或通道类；二元 reducer 则要求元数据最后一项可调用。`_is_field_binop()` 检查它是否恰有两个位置参数，形如 `(current, update) -> new_value`。这个检查只验证签名，不证明 reducer 满足结合律，也不验证每份更新都符合类型标注。
+
+例如 `items: list[str]` 使用 `LastValue`；`items: Annotated[list[str], operator.add]` 使用 `BinaryOperatorAggregate`。更改声明后需要重新构建、编译图，不能期待已有运行图自动更换通道规则。
+
+## 二、一轮写入如何到达字段通道
+
+假设 `left` 与 `right` 在同一轮运行，分别返回 `{"items": ["left"]}` 和 `{"items": ["right"]}`。`apply_writes()` 按任务路径确定应用顺序，再将两份更新归到 `items`。
+
+源码：`libs/langgraph/langgraph/pregel/_algo.py` → `apply_writes`（第 315–323 行节选；未展示部分省略）。
 
 ```python
-# libs/langgraph/langgraph/channels/last_value.py
+# 每个字段一次接收本轮归到它的全部更新。
+updated_channels: set[str] = set()
+for chan, vals in pending_writes_by_channel.items():
+    if chan in channels:
+        if channels[chan].update(vals) and next_version is not None:
+            checkpoint["channel_versions"][chan] = next_version
+            # 不可读的通道不能触发任务，不加入可触发更新集合。
+            if channels[chan].is_available():
+                updated_channels.add(chan)
+```
+
+这里实际调用的是 `items_channel.update([["left"], ["right"]])`：外层列表代表两份写入，内层列表才是每个节点提供的字段值。`update()` 的布尔返回值表示通道是否报告了变化；通道值和通道版本是两件事，值相同也可能因一次写入而推进版本。
+
+### 1. 默认通道为什么拒绝并行覆盖
+
+源码：`libs/langgraph/langgraph/channels/last_value.py` → `LastValue.update`（第 56–67 行节选；未展示部分省略）。
+
+```python
 def update(self, values: Sequence[Value]) -> bool:
     if len(values) == 0:
         return False
     if len(values) != 1:
-        raise InvalidUpdateError(...)
+        msg = create_error_message(
+            message=f"At key '{self.key}': Can receive only one value per step. Use an Annotated key to handle multiple values.",
+            error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+        )
+        raise InvalidUpdateError(msg)
+
     self.value = values[-1]
     return True
 ```
 
-`values[-1]` 只在 `len(values) == 1` 时才会执行。
+`values[-1]` 只在恰有一份更新时执行。因此 `LastValue` 不是“谁最后完成谁覆盖”：零份写入保持旧值，两份写入抛出 `InvalidUpdateError`（无效更新错误）。错误发生在合并阶段，不能靠重试某个已经正常返回的节点解决。
 
-要保留两份结果，把合并规则写进 Schema：
+如果两份结果都应保留，配置 reducer；如果右节点必须读取左节点的结果，应改变依赖关系，让它们分轮执行。还要移除使右节点提前运行的其他入口边，只补一条 `left → right` 不会取消原来的触发路径。
 
-```python
-from operator import add
-from typing import Annotated
+### 2. 聚合通道怎样调用 reducer
 
+`BinaryOperatorAggregate` 初始化时尝试调用字段类型的空构造器，例如 `list()` 得到 `[]`；类型无法空构造时才使用 `MISSING`（尚无值的内部标记）。因此“第一次更新必然直接赋值”并不成立。
 
-class MergedState(TypedDict):
-    items: Annotated[list[str], add]
-
-
-merged_graph = build_graph(MergedState)
-merged_graph.invoke({"items": []})
-# {"items": ["left", "right"]}
-```
-
-注意必须**重新 `build_graph()`**——Channel 在 `StateGraph` 初始化时解析，已编译的图不会自动换 Channel。
-
-## 二、`Annotated` 里的 Reducer 是怎么被识别的
-
-每个字段的类型标注经过三层判断，优先级从高到低：
-
-| 优先级 | 判断条件 | 选择的 Channel | 示例 |
-| --- | --- | --- | --- |
-| 1 | 是 Managed Value（如 `RemainingSteps`） | 托管值，运行时注入 | 本篇不展开 |
-| 2 | `Annotated[T, SomeChannel]`，metadata 中有 `BaseChannel` 子类 | 显式 Channel | `Annotated[int, EphemeralValue]` |
-| 3 | `Annotated[T, reducer]`，metadata 最后一项是二元 callable | `BinaryOperatorAggregate(T, reducer)` | `Annotated[list[str], add]` |
-| — | 以上都不匹配 | `LastValue`（默认） | `items: list[str]` |
-
-值得展开的是第三步——`_is_field_binop()` 怎样判断 `Annotated` 里有没有合法的 Reducer：
+源码：`libs/langgraph/langgraph/channels/binop.py` → `BinaryOperatorAggregate.update`（第 123–144 行节选；未展示部分省略）。
 
 ```python
-# libs/langgraph/langgraph/graph/state.py:1890-1908（节选）
-if hasattr(typ, "__metadata__"):
-    meta = typ.__metadata__
-    if len(meta) >= 1 and callable(meta[-1]):
-        sig = signature(meta[-1])
-        params = list(sig.parameters.values())
-        if (
-            sum(
-                p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
-                for p in params
-            )
-            == 2
-        ):
-            return BinaryOperatorAggregate(typ, meta[-1])
-        else:
-            raise ValueError(
-                f"Invalid reducer signature. Expected (a, b) -> c. Got {sig}"
-            )
-return None
-```
-
-Reducer 必须表达为 `(current, update) -> new_value`：
-
-```python
-items: Annotated[list[str], add]          # 合法
-items: Annotated[list[str], "tag"]        # 无 reducer，回退 LastValue
-items: Annotated[list[str], lambda x: x]  # 非法：参数数量不对
-```
-
-## 三、Reducer 的合并逻辑：逐份应用二元函数
-
-Reducer 的核心更新逻辑：
-
-```python
-# libs/langgraph/langgraph/channels/binop.py
 def update(self, values: Sequence[Value]) -> bool:
     if not values:
         return False
     if self.value is MISSING:
         self.value = values[0]
         values = values[1:]
-
+    seen_overwrite: bool = False
     for value in values:
-        self.value = self.operator(self.value, value)
+        is_overwrite, overwrite_value = _get_overwrite(value)
+        if is_overwrite:
+            if seen_overwrite:
+                msg = create_error_message(
+                    message="Can receive only one Overwrite value per super-step.",
+                    error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+                )
+                raise InvalidUpdateError(msg)
+            self.value = overwrite_value
+            seen_overwrite = True
+            continue
+        if not seen_overwrite:
+            self.value = self.operator(self.value, value)
     return True
 ```
 
-首次写入直接设置当前值，后续逐个应用 `operator(current, update)`。
+普通写入逐份执行 `operator(current, update)`。上述列表例子得到 `[] + ["left"] + ["right"]`。排序保证同一任务结构下的应用顺序可复现，但不代表业务上的先后；要按抓取时间或原始索引排序，应把这些字段放入结果，再显式排序。
 
-Reducer 不限于 `operator.add`——任何接收 `(current, update)` 两个参数并返回新值的函数都可以：
+`Overwrite` 是跳过 reducer 的覆盖指令。对已初始化的聚合值（例如上述列表字段），代码接收到它后直接替换值，并忽略该轮其余普通更新；同轮出现第二份覆盖指令会报错。无法空构造的类型则先走 `MISSING` 初始化分支，首份写入不经过下面的归并循环。清空累计列表应使用明确的覆盖语义，普通更新 `[]` 对列表拼接 reducer 没有效果。
 
-```python
-def keep_latest(current: list[str], update: list[str]) -> list[str]:
-    """只保留最新一份更新，忽略旧值"""
-    return update
+reducer 宜保持确定性且不产生外部副作用，因为正常执行、局部状态读取和历史恢复都可能应用更新。它不应依赖请求返回时间，也不应承担写数据库等业务操作。
 
+## 三、消息按 ID 更新，不按文本去重
 
-def merge_scores(current: dict[str, int], update: dict[str, int]) -> dict[str, int]:
-    """合并两个字典，同 key 取大值"""
-    return {k: max(current.get(k, 0), update.get(k, 0)) for k in current | update}
+`add_messages()` 是消息列表专用 reducer：先把输入转换为消息对象并为缺少 ID 的消息分配 ID，再按 ID 替换或追加。`RemoveMessage` 是携带删除目标 ID 的特殊消息。
 
-
-class State(TypedDict):
-    last_query: Annotated[str, keep_latest]
-    scores: Annotated[dict[str, int], merge_scores]
-    events: Annotated[list[str], add]
-```
-
-Reducer 必须满足三个工程条件：
-
-1. **结果可解释**：多份更新为什么这样合并，读者能理解；
-2. **无外部副作用**：不要在 reducer 里写数据库、发请求或改全局变量；
-3. **可恢复**：checkpoint 恢复时不依赖任务完成时间和外部状态。
-
-## 四、消息的特殊处理：按 ID 合并而非简单追加
-
-消息列表不能用 `operator.add`——消息带唯一 ID，`add`（等同 `list + list`）会出三类问题：模型重试时同 ID 消息重复出现、人工编辑时新旧版本并列、checkpoint 恢复后同一批消息追加两遍。根因是 `add` 只看顺序不看 ID。
-
-`add_messages` 按 ID 合并：同 ID 替换，新 ID 追加。用法：
+源码：`libs/langgraph/langgraph/graph/message.py` → `add_messages`（第 216–234 行节选；未展示部分省略）。
 
 ```python
-from langgraph.graph import add_messages
-
-
-class State(TypedDict):
-    messages: Annotated[list, add_messages]
-```
-
-核心实现（`libs/langgraph/langgraph/graph/message.py`，省略了类型转换和 ID 补全）：
-
-```python
-# 先把 left（已有消息）的 ID 编成索引
 merged = left.copy()
 merged_by_id = {m.id: i for i, m in enumerate(merged)}
 ids_to_remove = set()
-
-for m in right:                           # 遍历本轮新消息
-    if m.id in merged_by_id:
+for m in right:
+    if (existing_idx := merged_by_id.get(m.id)) is not None:
         if isinstance(m, RemoveMessage):
-            ids_to_remove.add(m.id)       # → 标记待删除
+            ids_to_remove.add(m.id)
         else:
-            merged[merged_by_id[m.id]] = m  # → 替换旧消息
+            ids_to_remove.discard(m.id)
+            merged[existing_idx] = m
     else:
         if isinstance(m, RemoveMessage):
-            raise ValueError(...)         # 要删的消息不存在，报错
-        merged.append(m)                  # → 新 ID，追加
-
-merged = [m for m in merged if m.id not in ids_to_remove]  # 最后统一删除
-```
-
-`RemoveMessage` 是 LangChain 内置的一种特殊消息类型，只带一个消息 ID，表示"删掉这条消息"。节点返回它的典型场景：清除过期的系统提示。它不是和 `add_messages` 对等的独立概念——它是 `add_messages` 能识别和处理的一种**输入**。上面代码里可以看到：遍历 `right` 时遇到 `RemoveMessage`，不追加也不替换，而是把对应的 ID 放进 `ids_to_remove`，最后统一过滤掉。
-
-Channel 的写入规则讲完了。但在实际使用中还有一个容易被误解的点：同一轮内，并行节点互相看不到对方刚写入的值。这不是 Channel 的问题，是 Pregel 一轮提交的约束。
-
-## 五、并行节点读的是同一版快照，互相不可见
-
-Channel 只管"多份更新怎么处理"，不管更新何时对其他节点可见——这由 Pregel 一轮提交控制：
-
-```text
-第 N 轮：所有节点读同一版 State
-  left  返回 {"items": ["left"]}
-  right 返回 {"items": ["right"]}
-              ↓
-       apply_writes() 分组
-              ↓
-       items Channel.update(["left"], ["right"])
-              ↓
-第 N+1 轮：下游读合并后的 State
-```
-
-所以 `right` 要读 `left` 的结果时，用边建立依赖：
-
-```python
-builder.add_edge("left", "right")   # right 在 left 完成后执行
-```
-
-Reducer 只负责同一轮结果的合并，不能替代图边表达的顺序依赖。
-
-讲清楚单字段的规则后，最后一个用户侧的问题：一张图可以同时有三个 Schema，分别控制输入、内部和输出边界。它们共用同一份运行时状态。
-
-## 六、一张图可以有三套 Schema：Input / State / Output
-
-`StateGraph` 可以分别接收三个 Schema：
-
-```python
-class InputState(TypedDict):
-    question: str
-
-
-class State(InputState):
-    documents: list[str]
-    answer: str
-
-
-class OutputState(TypedDict):
-    answer: str
-
-
-builder = StateGraph(State, input_schema=InputState, output_schema=OutputState)
-```
-
-- `InputState` 限定调用方可以提交什么；
-- `State` 描述图内部完整的可读可写字段；
-- `OutputState` 限定调用方最终拿到什么。
-
-三者共用一份运行时状态，不会产生三份副本。注意：如果用父类继承定义 State（`class State(InputState)`），子类同名字段不能偷偷改 reducer——`_add_schema()` 只允许新的 `LastValue` 不覆盖已有 Channel，其他类型冲突直接报错。要改规则就在最终的 State 里直接声明。
-
----
-
-下面六种 Channel 由编译器或 Pregel Runtime 在幕后创建——你写 `StateGraph` 时看不到它们，但理解后面的调度和触发机制时需要知道每种承担什么角色。
-
-## 七、Runtime 自己在内部创建的六种 Channel
-
-| Channel | 写入规则 | 触发行为 | Runtime 中的用途 |
-| --- | --- | --- | --- |
-| `Topic` | 多生产者写入；`accumulate=False` 每轮自动清空 | 有值时触发订阅者 | `TASKS` Channel，存放 `Send` 产生的 PUSH task |
-| `NamedBarrierValue` | 只接受预注册的名字，拒绝未知值 | 全部到齐后触发 | 等待边（`add_edge(["a","b"], "c")`） |
-| `EphemeralValue` | 单写；收到空写入自动清除为 `MISSING` | 有值时触发，下一轮无新写自动失效 | `START` Channel（接收用户输入，入口节点跑完自动清空） |
-| `AnyValue` | 多写不报错，只取最后一份 | 有值触发 | 多上游可能写同一字段、不要求互斥 |
-| `DeltaChannel` | 浅合并字典，每份更新逐个 key 并入当前值 | 有更新触发 | 多节点各改 State 子字段，自动合并 |
-| `UntrackedValue` | 单写 | 不触发依赖节点 | 只读配置或缓存，更新不应引起新任务 |
-
-### `Topic`（发布订阅）
-
-```python
-# libs/langgraph/langgraph/channels/topic.py（节选核心方法）
-class Topic(Generic[Value], BaseChannel[Sequence[Value], Value | list[Value], list[Value]]):
-    def __init__(self, typ: type[Value], accumulate: bool = False) -> None:
-        self.accumulate = accumulate
-        self.values = list[Value]()
-
-    def update(self, values: Sequence[Value | list[Value]]) -> bool:
-        if not self.accumulate:
-            self.values = list()            # 先清空旧值
-        self.values.extend(_flatten(values))  # 再追加新值
-        return True
-```
-
-`accumulate=False`（默认）时每轮自动清空，契合 `TASKS` Channel 的语义——上一轮的 `Send` 已经在 `prepare_next_tasks()` 中被取走，下一轮不需要保留。
-
-### `NamedBarrierValue`（命名屏障）
-
-```python
-# libs/langgraph/langgraph/channels/named_barrier_value.py（节选核心方法）
-class NamedBarrierValue(Generic[Value], BaseChannel[Value, Value, set[Value]]):
-    def __init__(self, typ: type[Value], names: set[Value]) -> None:
-        self.names = names           # 期待的值集合
-        self.seen: set[str] = set()  # 已收到的值
-
-    def update(self, values: Sequence[Value]) -> bool:
-        for v in values:
-            if v not in self.names:
-                raise InvalidUpdateError(
-                    f"At key '{self.key}': Value {v} not in {self.names}"
-                )
-            self.seen.add(v)
-        return True
-
-    def is_available(self) -> bool:
-        return self.seen == self.names  # 全部到齐
-```
-
-`builder.add_edge(["search", "profile"], "answer")` 创建 `NamedBarrierValue(str, {"search", "profile"})`。两个节点各报到一次，全部到齐后 `answer` 获得触发资格。屏障只管到齐条件，不管合并结果——结果合并由字段 Channel 的 reducer 处理。
-
-### `EphemeralValue`（临时值）
-
-```python
-# libs/langgraph/langgraph/channels/ephemeral_value.py（节选核心方法）
-class EphemeralValue(Generic[Value], BaseChannel[Value, Value, Value]):
-    def update(self, values: Sequence[Value]) -> bool:
-        if len(values) == 0:
-            if self.value is not MISSING:
-                self.value = MISSING   # 无新写就清除
-                return True
-            return False
-        if len(values) != 1 and self.guard:
-            raise InvalidUpdateError(
-                f"At key '{self.key}': EphemeralValue(guard=True) can "
-                f"receive only one value per step."
+            raise ValueError(
+                f"Attempting to delete a message with an ID that doesn't exist ('{m.id}')"
             )
-        self.value = values[-1]         # 有新写就替换
-        return True
+
+        merged_by_id[m.id] = len(merged)
+        merged.append(m)
+merged = [m for m in merged if m.id not in ids_to_remove]
 ```
 
-存活一轮：有写入时下游可读，到下一轮无新写入自动变为 `MISSING`。`START` Channel 就靠它——`invoke(input)` 写入 `START` 触发入口节点，入口跑完 `START` 自动清空，不会在后续轮次残留初始输入。
+这里有两个容易漏掉的动作：追加时更新 `merged_by_id`，使同一批后续相同 ID 的消息能替换刚追加的消息；已有消息被重新写入时，`ids_to_remove.discard()` 撤销之前的删除标记。删除不存在的 ID 会抛错，而不是静默忽略。
 
-### `AnyValue` / `DeltaChannel` / `UntrackedValue`
+例如旧列表含 `id="a"` 的消息，更新中再出现 `id="a"` 就覆盖原位置；出现 `id="b"` 则追加。两条内容相同但 ID 不同的消息仍会共存。每次重试都生成新 ID 时，`add_messages` 也不会自动实现业务去重。
 
-`AnyValue` 与 `LastValue` 的共同父类是 `BaseChannel[Value, Value, Value]`，区别仅在于 `update()` 对多写不抛错，只取最后一份。适合多上游可写同一字段但无需严格互斥。
+纯追加场景可以用列表拼接，但编辑、删除、重放同 ID 消息需要 `add_messages` 的语义。恢复机制本身不等于重复追加消息；重复与否还取决于任务是否重跑、返回的 ID 是否稳定以及 reducer 如何处理更新。
 
-`DeltaChannel` 的更新语义是浅合并而不是替换——`update()` 把每份 dict 中的键值对逐一并入当前值。适合多节点各改 State 不同子字段。
+## 四、字段值与调度信号使用不同通道
 
-`UntrackedValue` 的 `update()` 与普通 Channel 相同，但不会更新 `channel_versions`。因此 Runtime 不会因为它变化而触发依赖节点，适合只读配置或缓存。
+字段通道决定“数据怎样存”，编译器生成的触发通道决定“谁可以运行”。常见实现如下，不能将这张表理解为全部通道类型：
 
-## 八、速查与选择
+| 通道 | 更新与生命周期 | 典型用途 |
+| --- | --- | --- |
+| `LastValue` | 每轮最多一份更新；无更新保留旧值 | 默认状态字段 |
+| `BinaryOperatorAggregate` | 按二元 reducer 合并，支持覆盖指令 | 累加值、消息历史 |
+| `EphemeralValue` | 空更新会清除值；`guard=False` 允许多写取末值 | `START` 和普通节点触发信号 |
+| `Topic` | 收集一批值；`accumulate=False` 每轮替换批次 | `TASKS` 中的动态派发 |
+| `NamedBarrierValue` | 记录已到达的上游名字；全部到齐才可读，消费后复位 | 等待边 |
+| `AnyValue` | 多写取末值；无更新清空 | 接受任一临时值的底层通道 |
+| `UntrackedValue` | 默认单写、无更新保留；不保存值到检查点 | 不要求恢复的临时对象 |
+| `DeltaChannel` | 批量 reducer 加历史写入重建 | 减少大状态的重复持久化 |
 
-| 场景 | 选什么 |
-| --- | --- |
-| 单生产者、覆盖写入 | 普通字段 → `LastValue` |
-| 多生产者、可定义二元合并 | `Annotated[T, reducer]` → `BinaryOperatorAggregate` |
-| 消息历史（替换/删除/去重） | `Annotated[list, add_messages]` |
-| 多生产者写入、消费者独立取用 | `Topic`（通常 Runtime 内部用） |
-| 多上游到齐后才触发 | `NamedBarrierValue`（编译等待边时内部用） |
-| 只存活一轮的临时值 | `EphemeralValue`（`START` 通道） |
-| 多写不报错、取最后值 | `AnyValue` |
-| 自动浅合并字典更新 | `DeltaChannel` |
-| 更新不触发新任务 | `UntrackedValue` |
+`NamedBarrierValue` 记录的是名字集合。例如等待 `search` 和 `profile` 时，`search` 报到两次不能代替 `profile`；未知名字会抛出更新错误。它只表达就绪条件，不合并两个节点返回的业务数据。
 
-## 工程判断
+### 1. UntrackedValue 不保存值，但仍可触发
 
-- **照搬**：把字段更新规则放进 Schema，让 `LastValue` 在并行写时暴露结构错误；reducer 保持纯函数。
-- **换实现**：日志、事件、候选答案用 reducer，但给元素带 ID 或序号，不要默认 `list + list` = 业务顺序。
-- **别碰**：不要所有字段都标 `operator.add`；不要用 reducer 替代本应由图边表达的依赖；不要用父类继承偷改 reducer。
-- **不适用时**：单生产者、覆盖即业务语义时 `LastValue` 比 reducer 更清楚；消息历史不要用普通 reducer 替代 `add_messages`。
+源码：`libs/langgraph/langgraph/channels/untracked_value.py` → `UntrackedValue.checkpoint / from_checkpoint`（第 48–54 行节选；未展示部分省略）。
 
-## 读完后应该能判断什么
+```python
+def checkpoint(self) -> Value | Any:
+    return MISSING
 
-- 并行写入报错是字段规则（LastValue）不匹配，还是图结构缺依赖边；
-- `Annotated[T, reducer]` 如何被解析成 `BinaryOperatorAggregate`，Reducer 必须满足什么签名；
-- `add_messages` 与 `operator.add` 的区别——为什么消息历史必须用前者；
-- 六种内部 Channel 各自在 Runtime 中充当什么角色（`TASKS` / 等待边 / `START` / 缓存等）；
-- `InputState`、`State`、`OutputState` 如何共享同一份运行时状态而不产生副本。
+def from_checkpoint(self, checkpoint: Value) -> Self:
+    empty = self.__class__(self.typ, self.guard)
+    empty.key = self.key
+    return empty
+```
+
+“Untracked”在这里指字段值不进入检查点。它的 `update()` 仍返回变化，`apply_writes()` 没有将它排除在通道版本更新之外。底层 Pregel 节点若订阅它作为触发通道，仍可以被它触发；恢复时它的旧值则不存在。普通 StateGraph 业务字段是否触发节点，还取决于编译后的边。
+
+### 2. DeltaChannel 用重建成本换保存体积
+
+`DeltaChannel` 的 reducer 接收 `(state, [write1, write2, ...])`，一次处理整批更新。它不是预设的字典浅合并器。
+
+源码：`libs/langgraph/langgraph/channels/delta.py` → `DeltaChannel.update`（第 181–183 行节选；未展示部分省略）。
+
+```python
+base = self.typ() if self.value is MISSING else self.value
+self.value = self.reducer(base, list(values))
+return True
+```
+
+常规轮次主要保存写入，恢复时从祖先检查点收集历史写入，经 reducer 重建状态；运行时按快照策略间隔保存完整值，以限制重建深度。该实现处于 beta，且需要保存器支持增量历史读取。
+
+批次可能在恢复时被重新组合，因此 reducer 必须满足 `reduce(reduce(state, xs), ys) == reduce(state, xs + ys)`。减少大消息列表的重复保存可能有收益，但代价是更复杂的恢复、迁移和历史保留要求，不能将普通二元 reducer 原样换进去。
+
+## 五、输入、内部状态与输出是不同视图
+
+`StateGraph(state_schema, input_schema=..., output_schema=...)` 通过不同字段集合限制入口写入和结果输出。节点还可声明自己的 `input_schema`：例如 `search` 只读取 `question`，但仍可返回图已登记的 `documents` 字段。
+
+运行时维护的是通道集合，并按需要构造输入对象，不是同时维护三份独立状态。`TypedDict` 主要提供结构元数据，不会因此获得完整的运行时类型校验；未知输出键可能被过滤。Pydantic 模型会在转换节点输入时提供相应校验，但也不等于所有字段写入都经过业务验证。
+
+普通并行节点读取的是轮次开始时的已提交值。条件路由有一条特殊路径：它可以在通道副本上应用**当前源节点自己的写入**，读取更新后的局部视图，以便根据刚生成的结果选择分支；它仍看不到其他并行节点尚未提交的结果。这个局部读取机制在[编译章节](./02-stategraph-builder-and-compilation.md)展开。

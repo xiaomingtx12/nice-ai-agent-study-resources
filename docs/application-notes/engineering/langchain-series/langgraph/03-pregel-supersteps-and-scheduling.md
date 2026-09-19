@@ -1,181 +1,230 @@
 ---
 sidebar_position: 5
-sidebar_label: 03 Pregel 调度与执行
-description: 追踪 PregelLoop 的任务准备、PregelRunner 的并发执行、apply_writes 的统一提交，以及同一轮内节点互不可见的约束。
+sidebar_label: 03 Pregel 调度与提交
+description: 沿任务准备、Runner、重试与超时、写入记录和轮次提交解释状态可见性、失败清理与恢复粒度。
 ---
 
-# LangGraph 源码 03：一轮任务如何运行和提交
+# LangGraph 源码 03：一轮任务如何运行、失败和提交
 
 ## 源码定位
 
-> **适用版本**：`langgraph` 1.2.10。
+> **源码基线**：langgraph 1.2.10，本文使用的源码快照不含 Git 元数据，commit 未知。版本范围与文件指纹见[导读](./index.md#源码基线)。
 >
-> **核心路径**：
->
-> - 运行入口：`libs/langgraph/langgraph/pregel/main.py`
-> - 轮次控制：`libs/langgraph/langgraph/pregel/_loop.py`（`PregelLoop.tick()`、`after_tick()`）
-> - 任务准备与提交：`libs/langgraph/langgraph/pregel/_algo.py`（`prepare_next_tasks()`、`apply_writes()`）
-> - 并发执行：`libs/langgraph/langgraph/pregel/_runner.py`（`PregelRunner`）
+> - 主循环：`libs/langgraph/langgraph/pregel/main.py` → `Pregel.stream()`。
+> - 轮次管理：`libs/langgraph/langgraph/pregel/_loop.py` → `PregelLoop.tick()`、`after_tick()`。
+> - 任务与状态：`libs/langgraph/langgraph/pregel/_algo.py` → `prepare_next_tasks()`、`_triggers()`、`apply_writes()`。
+> - 执行与重试：`libs/langgraph/langgraph/pregel/_runner.py` → `PregelRunner.tick()`、`commit()`、`_panic_or_proceed()`；`libs/langgraph/langgraph/pregel/_retry.py` → `run_with_retry()`、`_arun_with_timeout()`、`_TimedAttemptScope._guard_send()`。
 
-## 先抓住一轮执行
+Pregel 使用 superstep（超级步）组织图执行：先从已提交状态准备任务，再执行这些任务，收集写入，在轮次边界合并。任务完成与状态提交是两个时刻，检查点真正保存完成又是另一个时刻。
 
-[第 02 篇](./02-stategraph-builder-and-compilation.md)编译出的 `CompiledStateGraph(Pregel)` 在 `invoke()` 后进入 Runtime。Runtime 每轮做四件事：
+`PregelLoop` 管理轮数、通道和检查点，`PregelRunner` 负责执行任务并处理完成、重试和异常。`PregelExecutableTask` 是某次节点调用的运行记录，包含输入、调用对象、任务 ID、触发来源和写入队列；同一个节点可以有多个任务实例。
 
-```text
-1. prepare_next_tasks()  准备本轮可运行的任务
-2. PregelRunner          并发执行任务
-3. 收集 task.writes      每个任务产生的局部写入
-4. apply_writes()        统一提交到 State Channel
-```
+## 一、从一次汇合看状态何时变化
 
-核心约束只有一句：**同一轮任务读同一版 State，写入在统一提交后才对下一轮可见。**
+设 `left` 与 `right` 同轮运行，`items` 的 reducer 为列表拼接；`merge` 通过等待边依赖二者。忽略接收输入的隐藏 `START` 轮次后，变化如下：
 
-## 一、两轮执行的直观感受
+| 时刻 | 任务行为 | 已提交 items | 待合并写入 |
+| --- | --- | --- | --- |
+| 第 N 轮准备 | 为 left、right 构造输入 | `[]` | 空 |
+| left 完成 | 返回 `["left"]` | `[]` | left 的结果 |
+| right 完成 | 返回 `["right"]` | `[]` | 两个任务的结果 |
+| 第 N 轮提交 | reducer 合并，屏障收齐名字 | `["left", "right"]` | 已用于合并 |
+| 第 N+1 轮准备 | 构造 merge 的输入 | 合并后的列表 | 新一轮队列 |
 
-用一张带 reducer + 等待边的图看完整流程：
+表中的局部值只是输入和结果推演，不是框架伪代码。列表的应用顺序由任务路径排序确定，不能将它理解为请求完成顺序。
 
-```python
-class State(TypedDict):
-    items: Annotated[list[str], add]
+## 二、tick 准备哪些任务
 
-builder = StateGraph(State)
-builder.add_node("left", lambda _: {"items": ["left"]})
-builder.add_node("right", lambda _: {"items": ["right"]})
-builder.add_node("merge", lambda s: {"items": [f"{s['items']} merged"]})
-builder.add_edge(START, "left")
-builder.add_edge(START, "right")
-builder.add_edge(["left", "right"], "merge")
-builder.add_edge("merge", END)
-graph = builder.compile()
-```
+`stream()` 调用 `loop.tick()`，后者先检查轮次上限，再调用 `prepare_next_tasks()`。任务主要有两个来源：
 
-```text
-第 1 轮准备  START 触发 left、right
-第 1 轮执行  left、right 读同一版 items
-第 1 轮提交  items 收到两份更新，交 reducer 合并 → ["left", "right"]
-第 2 轮准备  left、right 都完成，barrier 满足 → merge 获得触发资格
-第 2 轮执行  merge 读合并后的 items → ["['left', 'right'] merged"]
-```
-
-## 二、`PregelLoop.tick()`：准备本轮任务
-
-`tick()` 是每轮的入口，调用 `prepare_next_tasks()` 决定哪些节点现在能运行：
-
-```python
-# libs/langgraph/langgraph/pregel/_loop.py（节选）
-def tick(self) -> bool:
-    if self.step > self.stop:       # 超过 recursion_limit
-        return False
-
-    self.tasks = prepare_next_tasks(
-        self.checkpoint, self.checkpoint_pending_writes,
-        self.nodes, self.channels, self.managed,
-        self.config, self.step, self.stop, for_execution=True,
-        ...
-    )
-    if not self.tasks:
-        self.status = "done"
-        return False
-    return True
-```
-
-任务有两种来源：
-
-| 类型 | 来源 | 输入 |
+| 来源 | 任务种类 | 输入来源 |
 | --- | --- | --- |
-| **PULL task** | Channel 更新触发的节点（普通边、等待边、条件边写入的触发 Channel 就绪） | 图 State（按节点 input_schema 过滤） |
-| **PUSH task** | `TASKS` Channel 中的 `Send`（条件路由返回） | `Send.arg` |
+| 普通边、条件边或屏障通道变为可触发 | PULL（按触发关系准备的任务） | 从字段通道按节点输入结构读取 |
+| `TASKS` 通道中的 `Send` | PUSH（主动派发的任务） | `Send.arg` 中的独立输入 |
 
-`prepare_next_tasks()` 先处理 `TASKS` Channel 中的 `Send` → 创建 PUSH task；再根据 `trigger_to_nodes` 映射找出本轮被触发的节点 → 创建 PULL task。两种 task 都交给同一个 `PregelRunner` 执行。
+`prepare_next_tasks()` 用上一轮更新的通道及 `trigger_to_nodes` 反向索引缩小候选节点范围。候选不等于必定执行，还需检查通道是否可读、版本是否比该节点上次读过的更新：
 
-## 三、`PregelRunner`：并发执行任务
-
-任务提交后批量运行：
+源码：`libs/langgraph/langgraph/pregel/_algo.py` → `_triggers`（第 1267–1277 行节选；未展示部分省略）。
 
 ```python
-# libs/langgraph/langgraph/pregel/_runner.py（节选）
-for t in tasks:
-    fut = self.submit()(run_with_retry, t, retry_policy, ...)
-    futures[fut] = t
-
-# 使用 FIRST_COMPLETED 逐个处理完成事件
-while futures:
-    done, _ = concurrent.futures.wait(futures, return_when=FIRST_COMPLETED)
-    for fut in done:
-        task = futures.pop(fut)
-        # 成功 → 保留 task.writes；可重试错误 → 在当前 task 边界重跑
-        # 致命错误 → 停止其他任务
+if seen is None:
+    for chan in proc.triggers:
+        if channels[chan].is_available():
+            return True
+else:
+    for chan in proc.triggers:
+        if channels[chan].is_available() and versions.get(  # type: ignore[operator]
+            chan, null_version
+        ) > seen.get(chan, null_version):
+            return True
+return False
 ```
 
-每个任务独立拥有：输入、task path、writes、retry 策略、错误处理。retry 作用于节点任务不会重跑整张图；timeout 只对异步节点支持取消。`left` 和 `right` 无依赖关系可并发；`merge` 等 barrier 满足后才能准备，不与它们同轮。
+`channel_versions` 记录通道当前版本，`versions_seen` 记录节点上次处理过的触发版本。只检查“通道里有值”会导致旧信号被反复消费；版本比较避免无新输入时再次运行。
 
-## 四、`apply_writes()`：统一提交
+无任务时本轮循环结束。轮数超出限制时，`tick()` 将状态置为 `out_of_steps`，外层 `stream()` 抛出 `GraphRecursionError`。这里限制的是执行轮次，不是 Python 调用栈深度，也不是单个模型调用的 token 数。
 
-Runner 完成后，`PregelLoop.after_tick()` 调用 `apply_writes()`：
+准备出任务后，Loop 还会检查运行控制对象的 drain 请求和静态断点，再决定是否交给 Runner。协作式停止拦截的是下一轮执行，不会撤销刚刚完成轮次的提交；正常完成与停止请求同时出现时，无任务的完成判断优先。停止信号如何进入 Loop，见[第 07 篇](./07-interrupts-and-command.md)。
+
+## 三、Runner 执行尚无结果的任务
+
+主循环在交给 Runner 前过滤已恢复结果或命中缓存的任务：
+
+源码：`libs/langgraph/langgraph/pregel/main.py` → `Pregel.stream`（第 2964–2972 行节选；未展示部分省略）。
 
 ```python
-# libs/langgraph/langgraph/pregel/_loop.py（节选）
-def after_tick(self) -> None:
-    self.updated_channels = apply_writes(
-        self.checkpoint, self.channels, self.tasks.values(),
-        self.checkpointer_get_next_version, self.trigger_to_nodes,
-    )
-    self._put_checkpoint({"source": "loop"})
+while loop.tick():
+    for task in loop.match_cached_writes():
+        loop.output_writes(task.id, task.writes, cached=True)
+    for _ in runner.tick(
+        [t for t in loop.tasks.values() if not t.writes],
+        timeout=self.step_timeout,
+        get_waiter=get_waiter,
+        schedule_task=loop.accept_push,
+    ):
 ```
 
-`apply_writes()` 的三步操作：
+普通多任务路径将任务交给执行器，使用 `FIRST_COMPLETED` 等待完成事件；单任务、无轮次超时且无流式等待器时有直接执行的快速路径。异步路径对应 `atick()`。同轮任务有并发资格，并不保证同时占用线程或连接，实际并发还受执行器和资源限制。
 
-```text
-1. 按 task path 排序 tasks → 确定提交顺序稳定
-2. 遍历 tasks.writes → 按 Channel 分组（跳过控制信号如 INTERRUPT/RESUME/ERROR）
-3. channel.update(grouped_values) → 交给每个 Channel 自己的 update()
-```
+Runner 可以在一个任务完成时记录它的结果并输出事件，但不会因此提前把该任务的业务字段合并给同轮兄弟任务。`@task` 这类函数式子任务还可在父任务未结束时动态调度，不能将所有 PUSH 都笼统描述为“必须等下一超级步”；`Send` 经 `TASKS` 派发和函数式调用的具体路径不同。
 
-Channel 语义在这一步真正生效：`LastValue` 拒绝多写、`BinaryOperatorAggregate` 逐份调 reducer、`NamedBarrierValue` 检查到齐。第 01 篇的规则在第 03 篇被执行。
+## 四、重试清理暂存写入，不回滚外部副作用
 
-### 同一轮互不可见
+### 1. 异常策略决定当前任务是否再试
 
-任务启动时 Runtime 已从 Channel 读取了当前 State 快照作为输入。任务执行期间 `task.writes` 只是挂在本地的暂存，`apply_writes()` 统一提交后才更新 Channel。所以并行节点读不到彼此本轮刚产生的值。要建立顺序依赖，用图边而不是 reducer。
+`run_with_retry()` 在每次尝试前清除该 task 上次留下的写入，再调用完整的节点执行对象：
 
-## 五、中断恢复：pending writes 的角色
-
-一轮中可能出现 `node_a` 成功、`node_b` 中断的局面。Saver 把 `node_a` 的写入记录为 pending writes，恢复时重新挂回：
+源码：`libs/langgraph/langgraph/pregel/_retry.py` → `run_with_retry`（第 613–617、641–661 行节选；未展示部分省略）。
 
 ```python
-# libs/langgraph/langgraph/pregel/_loop.py（节选）
-def _reapply_writes_to_succeeded_nodes(self, tasks):
-    for tid, key, value in self.checkpoint_pending_writes:
-        if key in (ERROR, ERROR_SOURCE_NODE, INTERRUPT, RESUME):
-            continue
-        if task := tasks.get(tid):
-            task.writes.append((key, value))
+try:
+    # 丢弃上一次尝试的暂存写入。
+    task.writes.clear()
+    # 从入口重新执行当前任务。
+    return task.proc.invoke(task.input, config)
+
+# ……省略中间实现……
+
+except Exception as exc:
+    if SUPPORTS_EXC_NOTES:
+        exc.add_note(f"During task with name '{task.name}' and id '{task.id}'")
+    if not retry_policy:
+        raise
+
+    # 选择第一条匹配该异常的重试策略。
+    matching_policy = None
+    for policy in retry_policy:
+        if _should_retry_on(policy, exc):
+            matching_policy = policy
+            break
+
+    if not matching_policy:
+        raise
+
+    # attempts 记录失败次数，每次失败后增加。
+    attempts += 1
+    # 达到尝试上限时继续向外抛出异常。
+    if attempts >= matching_policy.max_attempts:
+        raise
 ```
 
-控制信号被跳过，成功任务的 State 写入重新参与提交。checkpoint、replay、fork 的完整机制见[第 06 篇](./06-checkpoints-store-and-recovery.md)。
+没有匹配策略或耗尽次数时异常向外传播；符合策略时按退避间隔重跑当前任务。`GraphInterrupt` 和跨图控制信号有专门分支，不作为普通服务错误重试。
 
-## 六、PregelRunner 的并发 vs 其他层的并发
+配置节点错误处理器时，Runner 可将失败转交处理器任务；没有处理器或处理仍失败时，运行会退出并尝试取消其余任务。取消不代表已经发出的 HTTP 请求撤销，也不能强制停止任意同步线程。
 
-PregelRunner 处理的是**图级 task 并发**——同一轮中无依赖的节点可以并行。除此之外，"工具并行"在另外两层也有含义（ToolNode 内部并发、工具函数资源并发），它们的分工和边界见[第 09 篇](./09-prebuilt-tool-layer.md)的并发分层讨论。本篇只需记住：PregelRunner 给每个 task 独立的 retry、checkpoint 和 interrupt 边界；节点内部的并行（executor/asyncio.gather）没有图级恢复能力。
+### 2. 超时先封住旧尝试的写入，再发出取消
 
-## 排查速查
+`TimeoutPolicy` 是节点每次尝试的时间限制，`run_timeout` 限制总运行时间，`idle_timeout` 限制无进展时间。默认进展检测可以由模型回调、任务写入等活动刷新；选择 `refresh_on="heartbeat"` 时，需要节点显式调用 `runtime.heartbeat()`。节点没有输出 token，不一定就代表空闲。
 
-| 现象 | 优先检查 |
-| --- | --- |
-| 并行节点没同时运行 | 图边、任务是否同轮、并发限制 |
-| 并行写同字段报错 | State 字段 Channel 和 reducer（[第 01 篇](./01-state-schema-channels-and-reducers.md)） |
-| 下游读不到上游值 | 是否缺图边，或误把同轮当实时共享 |
-| 恢复后成功节点重复执行 | checkpoint、pending writes 和 task 划分 |
-| 工具打满 CPU | 工具自身 executor、连接池配置 |
+异步重试层的 `_arun_with_timeout()` 同时等待节点任务和超时监控任务。监控先触发时，它会关闭本次尝试、清理暂存写入、取消节点，并抛出 `NodeTimeoutError`：
 
-## 工程判断
+源码：`libs/langgraph/langgraph/pregel/_retry.py` → `_arun_with_timeout`（第 490–502 行节选；未展示部分省略）。
 
-- **照搬**：State 更新集中到 `apply_writes()`，并行节点读取稳定快照。
-- **换实现**：外部副作用加幂等键；工具调需独立恢复时提升到 `Send` 级别。
-- **别碰**：不要依赖任务完成先后定业务顺序；不要用 reducer 替代图边。
+```python
+except asyncio.TimeoutError as exc:
+    elapsed = time.monotonic() - start
+    scope.close()  # 关闭本次尝试的受控写入和子任务调度入口。
+    task.writes.clear()  # 本次失败尝试的更新不用于正常提交。
+    bg.cancel()  # 请求节点协程取消，不保证外部服务撤销操作。
+    bg.add_done_callback(_drain_cancelled)
+    raise NodeTimeoutError(
+        task.name,
+        elapsed,
+        kind=kind,
+        idle_timeout=idle_timeout_s,
+        run_timeout=run_timeout_s,
+    ) from exc
+```
 
-## 读完后应该能判断什么
+`_TimedAttemptScope` 是控制一次超时尝试是否仍可写入的内部对象。取消可能需要时间，甚至有用户代码吞掉取消信号；只调用 `cancel()`，旧尝试就可能在重试开始后继续返回写入。`scope.close()` 在锁内将 `_active` 设为 False，配合注入到配置里的写入包装器拒收这些迟到结果：
 
-- `prepare_next_tasks()` 如何从 Channel 更新和 `TASKS` 中准备 PULL/PUSH task；
-- `PregelRunner` 的并发模型：FIRST_COMPLETED、retry 边界、timeout 限制；
-- `apply_writes()` 为什么在轮次结束后统一调 Channel.update()；
-- pending writes 如何让成功的任务在恢复时不重复执行。
+源码：`libs/langgraph/langgraph/pregel/_retry.py` → `_TimedAttemptScope._guard_send`（第 228–235 行节选；未展示部分省略）。
+
+```python
+def guarded_send(writes: Sequence[tuple[str, Any]]) -> None:
+    with self._lock:
+        if self._active:
+            if writes and self._refresh_on == "auto":
+                self._last_progress = time.monotonic()
+            send(writes)
+
+return guarded_send
+```
+
+同一尝试的函数式子任务调度入口也有活动检查，关闭后不再允许继续派发。这个约束保护的是运行时注入的写入和调用接口，不会拦住业务代码直接写数据库或修改共享对象。
+
+`NodeTimeoutError` 进入普通错误策略后可能重试；每次重试重新开始一次受限尝试，因此节点超时上限不等于整次 Agent 调用的总耗时上限。调用方主动取消异步执行时，`CancelledError` 则继续传播到资源清理路径，不能当成普通可重试超时处理。
+
+节点的 TimeoutPolicy 在此基线下要求异步执行，同步路径显式拒绝该配置。Runner 的 `step_timeout` 限制的是整轮等待，超时后 `_panic_or_proceed()` 请求取消尚未完成的任务并抛出超时错误。两者都不能强制终止已经运行的同步线程；执行器退出与工具取消的边界见[第 07 篇](./07-interrupts-and-command.md)。
+
+## 五、commit 先记录任务结果，after_tick 再合并
+
+`PregelRunner.commit()` 在成功时将任务写入交给 Loop；没有字段写入也会补 `NO_WRITES` 标记，避免恢复时把“成功但无输出”误判为没运行：
+
+源码：`libs/langgraph/langgraph/pregel/_runner.py` → `PregelRunner.commit`（第 609–613 行节选；未展示部分省略）。
+
+```python
+if not task.writes:
+    # 标记任务成功完成，即使它没有字段更新。
+    task.writes.append((NO_WRITES, None))
+# 按 task ID 记录写入，供恢复时匹配。
+self.put_writes()(task.id, task.writes)  # type: ignore[misc]
+```
+
+错误分支保存 `ERROR`，动态中断分支保存 `INTERRUPT` 和已有恢复值。这些都是控制记录，不由普通字段 reducer 合并。配置保存器时，Loop 可通过 `put_writes()` 保存任务结果；实际落盘时机还受持久化模式影响。
+
+本轮任务正常收束后，`after_tick()` 调用统一提交：
+
+源码：`libs/langgraph/langgraph/pregel/_loop.py` → `PregelLoop.after_tick`（第 691–698、713–718 行节选；未展示部分省略）。
+
+```python
+# 本轮任务完成后统一应用写入。
+self.updated_channels = apply_writes(
+    self.checkpoint,
+    self.channels,
+    self.tasks.values(),
+    self.checkpointer_get_next_version,
+    self.trigger_to_nodes,
+)
+
+# ……省略中间实现……
+
+# 本轮写入已合并，清除待合并记录。
+self.checkpoint_pending_writes.clear()
+# 历史重放只在第一次 tick 强制重跑已有结果的任务。
+self.is_replaying = False
+# 为提交后的状态创建检查点。
+self._put_checkpoint({"source": "loop"})
+```
+
+`apply_writes()` 按任务路径排序，更新节点已读版本，消费触发通道，再把业务写入按通道分组。通道的 `update()` 决定覆盖、合并或拒绝；没有新写入的临时通道也会收到空更新，以清除过期信号。暂时没有下一步任务时，还会通知支持 `finish()` 的通道，让延迟节点获得执行机会。
+
+“统一提交”表示正常调度的状态可见性边界，不是跨数据库的原子事务。reducer 抛错会中止本次推进，应用不应依赖失败调用留下的内存对象继续业务，而应依据保存器中可恢复的记录重新进入。
+
+## 六、恢复粒度取决于任务边界
+
+同轮 `left` 成功、`right` 失败时，保存器可保留 `left` 的 pending writes（待合并写入）。恢复后，Loop 按 task ID 挂回成功结果，过滤 `ERROR`、`INTERRUPT` 等控制记录，Runner 只执行仍无成功写入的任务。
+
+完整检查点属于图的轮次，**不是每个任务各存一份完整检查点**。任务级恢复依赖独立身份及 `put_writes()`。这也解释了两种工具并行的差异：一个 `ToolNode` 内部并行十个工具时，图只看到一个任务；用十个 `Send` 派发时，图才能分别记录十个任务的结果。
+
+需要独立恢复的操作适合拆成独立任务，但拆分增加调度和保存开销。无论怎样拆分，外部请求成功与成功写入保存之间仍有故障窗口，扣费、发信等操作需要稳定的业务幂等键。持久化模式和历史重放的区别见[第 06 篇](./06-checkpoints-store-and-recovery.md)。

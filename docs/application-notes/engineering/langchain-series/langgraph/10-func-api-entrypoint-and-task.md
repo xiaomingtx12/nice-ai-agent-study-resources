@@ -1,126 +1,30 @@
 ---
 sidebar_position: 12
-sidebar_label: 10 Func API：函数式工作流
-description: 拆解 @entrypoint 与 @task 装饰器如何替代 StateGraph 声明式写法，内部如何组装 Pregel 图，以及 entrypoint.final 的解耦机制。
+sidebar_label: 10 函数式工作流
+description: 追踪 entrypoint 直接构造 Pregel、task 动态调度及结果复用，解释 previous、final、恢复顺序与缓存边界。
 ---
 
-# LangGraph 源码 10：Func API —— 函数式工作流定义
+# LangGraph 源码 10：函数调用如何接入可恢复任务
 
 ## 源码定位
 
-> **适用版本**：`langgraph` 1.2.10。
+> **源码基线**：langgraph 1.2.10，本文使用的源码快照不含 Git 元数据，commit 未知。版本范围与文件指纹见[导读](./index.md#源码基线)。
 >
-> **核心路径**：
->
-> - `@entrypoint` 和 `@task` 装饰器：`libs/langgraph/langgraph/func/__init__.py`
-> - 内部 Runnable 包装：`libs/langgraph/langgraph/pregel/_call.py`（`get_runnable_for_entrypoint()`）
-> - 通道与节点创建：直接依赖 `Pregel`、`PregelNode`、`ChannelWrite`、`EphemeralValue`、`LastValue`
+> - 入口构造：`libs/langgraph/langgraph/func/__init__.py` → `entrypoint.__call__()`、`_TaskFunction.__call__()`、`entrypoint.final`。
+> - 调用桥接：`libs/langgraph/langgraph/pregel/_call.py` → `_call_with_options()`、`get_runnable_for_task()`。
+> - 任务调度：`libs/langgraph/langgraph/pregel/_runner.py` → `_call()`；`libs/langgraph/langgraph/pregel/_loop.py` → `accept_push()`。
 
-## 这一篇的主题
+函数式 API 允许用普通 Python 控制流组织可恢复工作流。`@entrypoint` 将函数变成可执行的 Pregel 入口；`@task` 将函数调用转换为运行时任务，并返回 Future（未来结果句柄）。它直接构造 Pregel，不先生成一张 StateGraph，也没有另造一套恢复引擎。
 
-前 09 篇文章建立了一条完整的知识链：从 State 字段声明（01）到图编译（02）到 Pregel 调度（03）到路由（04）、子图（05）、持久化（06）、中断（07）、流式（08）和工具层（09）。这条路最终走到了 "Func API"——一种**用函数定义替代显式 `StateGraph` 构建**的写法：
+区别在控制流的存放位置：StateGraph 用节点和边表达依赖，函数式工作流通过函数中的调用、条件和等待表达依赖。两者都可以有重试、检查点、流式事件和人工中断。
 
-> **`@entrypoint` 和 `@task` 不是新的运行时，而是把前面讲的 StateGraph + Pregel + Channel 全部封装进了装饰器语法。**
+## 一、entrypoint 创建入口节点和三个通道
 
-## 一、传统写法 vs Func API
+装饰器先把用户函数包装成 Runnable，再检查输入和返回类型。入口函数必须有输入参数；生成器和异步生成器在此基线中被拒绝。实际构造的 Pregel 含一个入口节点，其输入通道和触发通道都是 `START`。
 
-传统写法需要显式构建 StateGraph：
+源码：`libs/langgraph/langgraph/func/__init__.py` → `entrypoint.__call__`（第 576–609 行节选；未展示部分省略）。
 
 ```python
-from typing_extensions import TypedDict
-from langgraph.graph import END, START, StateGraph
-
-
-class State(TypedDict):
-    count: int
-
-
-def increment(state: State):
-    return {"count": state["count"] + 1}
-
-
-builder = StateGraph(State)
-builder.add_node("increment", increment)
-builder.add_edge(START, "increment")
-builder.add_edge("increment", END)
-graph = builder.compile()
-result = graph.invoke({"count": 0})  # {"count": 1}
-```
-
-Func API 的等价写法：
-
-```python
-from langgraph.func import entrypoint, task
-
-
-@task
-def increment_task(count: int) -> int:
-    return count + 1
-
-
-@entrypoint()
-def my_workflow(count: int) -> int:
-    future = increment_task(count)
-    return future.result()
-
-
-result = my_workflow.invoke(0)  # 1
-```
-
-表面上看只是语法糖。但 `@task` 返回的是 Future，这意味着**可以在函数体内创建多个并行任务**。
-
-## 二、`@task`：函数调用返回 Future
-
-`@task` 装饰器的核心逻辑在 `_TaskFunction.__call__()`：
-
-```python
-# libs/langgraph/langgraph/func/__init__.py:86-94
-def __call__(self, *args: P.args, **kwargs: P.kwargs) -> SyncAsyncFuture[T]:
-    return _call_with_options(
-        self.func,
-        args,
-        kwargs,
-        retry_policy=self.retry_policy,
-        cache_policy=self.cache_policy,
-        timeout=self.timeout,
-    )
-```
-
-调用被 `@task` 装饰的函数不会立即执行，而是返回 `SyncAsyncFuture`。这个 Future 在 `entrypoint` 的运行上下文中被解析——Runtime 会为每个 task 创建独立的 Pregel task，支持并行执行和独立重试。
-
-```python
-@entrypoint()
-def parallel_workflow(numbers: list[int]) -> list[int]:
-    # 所有的 increment_task 调用会并行执行
-    futures = [increment_task(n) for n in numbers]
-    results = [f.result() for f in futures]
-    return results
-```
-
-异步版本：
-
-```python
-@entrypoint()
-async def async_workflow(numbers: list[int]) -> list[int]:
-    futures = [increment_task(n) for n in numbers]
-    return await asyncio.gather(*futures)
-```
-
-`@task` 配置与 `add_node()` 对应：
-
-| `@task` 参数 | 对应 `add_node()` | 作用 |
-| --- | --- | --- |
-| `retry_policy` | `retry_policy` | 任务失败重试策略 |
-| `cache_policy` | `cache_policy` | 根据输入缓存任务结果 |
-| `timeout` | `timeout` | 任务超时控制（仅异步） |
-| `name` | 节点名 | 显式指定任务名 |
-
-## 三、`@entrypoint`：一行创建 Pregel 图
-
-`@entrypoint.__call__()` 是整个 Func API 的核心。它接收一个函数，内部直接构造 `Pregel` 图：
-
-```python
-# libs/langgraph/langgraph/func/__init__.py:576-609（节选）
 graph: Pregel[Any, ContextT, Any, Any] = Pregel(
     nodes={
         func.__name__: PregelNode(
@@ -146,113 +50,160 @@ graph: Pregel[Any, ContextT, Any, Any] = Pregel(
     input_channels=START,
     output_channels=END,
     stream_channels=END,
-    stream_mode="updates",
+    stream_mode=stream_mode,
     stream_eager=True,
     checkpointer=self.checkpointer,
     store=self.store,
-    ...
+    cache=self.cache,
+    cache_policy=self.cache_policy,
+    retry_policy=self.retry_policy or (),
+    context_schema=self.context_schema,
 )
 ```
 
-这段代码直接把前 02 篇的 Builder 模式和 03 篇的 Pregel 拼在了一起：
+`PregelNode` 是运行节点描述；`ChannelWriteEntry` 指定写哪个通道、如何从返回值取出数据。入口结束时，两项 writer 分别写 `END` 和 `PREVIOUS`。
 
-1. **节点**：一个 `PregelNode`，`bound` 是包装后的用户函数，触发源是 `START`
-2. **Channel**：`EphemeralValue` 接收输入（临时值通道，详见[第 01 篇](./01-state-schema-channels-and-reducers.md)），`LastValue` 保存输出和持久化值
-3. **Writer**：`ChannelWrite` 把函数返回值写入 `END`，把持久化值写入 `PREVIOUS`
-4. **基础设施**：checkpointer、store、cache 直接传给 Pregel
+`START` 用临时通道接收本次输入，`END` 用末值通道保存对外输出，`PREVIOUS` 保存供后续调用读取的值。检查点、Store、缓存和重试策略都直接交给 Pregel。默认流模式变量在前面设为 updates，不代表函数式工作流只能使用这一种观察模式。
 
-所以 `@entrypoint` 不是新运行时——它就是前面的知识链的一层薄封装。
+## 二、task 调用通过运行配置进入 Runner
 
-### 注入参数
+`@task` 装饰器保留原函数及重试、缓存、超时等策略。调用装饰后的对象时，`_TaskFunction.__call__()` 把参数交给 `_call_with_options()`，后者取得当前运行配置中的调度回调：
 
-装饰的函数可以请求注入 `config`、`previous` 和 `runtime`：
+源码：`libs/langgraph/langgraph/pregel/_call.py` → `_call_with_options`（第 288–298 行节选；未展示部分省略）。
 
-| 参数 | 注入来源 | 作用 |
+```python
+config = get_config()
+impl = config[CONF][CONFIG_KEY_CALL]
+fut = impl(
+    func,
+    (args, kwargs),
+    retry_policy=retry_policy,
+    cache_policy=cache_policy,
+    callbacks=config["callbacks"],
+    timeout=timeout,
+)
+return fut
+```
+
+这里没有直接调用业务函数。`CONFIG_KEY_CALL` 是 Runner 注入的回调；它把函数和 `(args, kwargs)` 交给任务调度，返回可等待的结果句柄。因此 task 必须在提供该上下文的图运行内调用，不能把它当成任意位置都能启动任务的全局线程池。
+
+同步路径 `_call()` 从任务暂存区获取调用序号，再经 `schedule_task` 进入 Loop 的 `accept_push()`：
+
+源码：`libs/langgraph/langgraph/pregel/_runner.py` → `_call`（第 720–733 行节选；未展示部分省略）。
+
+```python
+scratchpad: PregelScratchpad = task().config[CONF][CONFIG_KEY_SCRATCHPAD]  # type: ignore[union-attr]
+# 使用父任务和调用序号，准备这一次函数调用对应的子任务。
+if next_task := schedule_task(
+    task(),  # type: ignore[arg-type]
+    scratchpad.call_counter(),
+    Call(
+        func,
+        input,
+        retry_policy=retry_policy,
+        cache_policy=cache_policy,
+        callbacks=callbacks,
+        timeout=timeout,
+    ),
+):
+```
+
+`Call` 是内部函数调用描述，保存函数、参数和执行策略；它与路由用的 `Send` 不同。Loop 为它建立带独立 ID 的子任务，`get_runnable_for_task()` 将业务返回值写入 `RETURN` 控制通道，Future 再取得这份返回值。
+
+这些动态子任务可在入口函数尚未返回时运行，否则入口等待 Future 就无法完成。它们不要求等待整个入口节点提交后才执行下一轮。
+
+## 三、并行来自先提交多个调用，再等待结果
+
+下面是完整应用示例，用于区分提交和等待：
+
+```python
+from langgraph.func import entrypoint, task
+
+@task
+def increment(number: int) -> int:
+    return number + 1
+
+@entrypoint()
+def workflow(numbers: list[int]) -> list[int]:
+    futures = [increment(number) for number in numbers]
+    return [future.result() for future in futures]
+
+result = workflow.invoke([1, 2])  # [2, 3]
+```
+
+第一行列表推导先提交全部调用，第二行才取结果，运行时因此可以并发执行。`.result()` 负责等待，不负责创造并行；如果在每次循环里立刻提交并等待，调用顺序就基本串行。
+
+返回列表按 Future 的收集顺序排列，不按任务完成先后排列。异步入口可用 `await asyncio.gather(...)` 等待多个任务；同步上下文调用异步 task 在该路径中会报错。节点/任务超时策略同样要求异步执行，不能用它强制杀死普通同步函数。
+
+## 四、恢复会重跑入口，但可复用已完成 task 的结果
+
+入口函数在 `interrupt()` 暂停或执行失败后，恢复时从函数入口重跑。再次走到同一 task 调用位置时，Loop 可以按父任务与调用序号找到已保存的写入，Runner 用它完成 Future：
+
+源码：`libs/langgraph/langgraph/pregel/_runner.py` → `_call`（第 745–756 行节选；未展示部分省略）。
+
+```python
+elif next_task.writes:
+    # 已有任务结果时直接完成 Future，不再调用业务函数。
+    fut = concurrent.futures.Future()
+    ret = next((v for c, v in next_task.writes if c == RETURN), MISSING)
+    if ret is not MISSING:
+        fut.set_result(ret)
+    elif exc := next((v for c, v in next_task.writes if c == ERROR), None):
+        fut.set_exception(
+            exc if isinstance(exc, BaseException) else Exception(exc)
+        )
+    else:
+        fut.set_result(None)
+```
+
+例如入口依次执行“生成草稿 task → interrupt 审批 → 发送 task”。审批恢复时，入口重新开始；草稿 task 的成功结果若已保存，就直接返回原草稿；随后中断取得审批值，发送任务才被创建。入口中没有包进 task 的普通代码仍会再次执行。
+
+| 代码或数据 | 恢复时的处理 |
+| --- | --- |
+| 入口函数局部变量 | 从头执行重新构造 |
+| 已保存的成功 task 返回值 | 按任务身份复用 |
+| 未完成或失败的 task | 根据恢复和重试规则执行 |
+| 已匹配的 interrupt 值 | 按任务内中断顺序再次返回 |
+| 外部请求的副作用 | 不由图自动回滚或去重 |
+
+这要求恢复前后调用顺序和控制路径稳定。若每次运行随机改变任务数量，或在已有 task 前插入新 task，调用位置可能与历史不再一致。输入、返回值还需能被保存器序列化。
+
+这种复用是**当前执行的任务结果恢复**，不同于 `CachePolicy` 按输入键缓存结果。缓存可以在另一次调用中复用相同输入，任务恢复则依赖保存现场和任务身份；只有装饰器、没有保存器时，不能期待跨进程恢复已完成任务。
+
+## 五、previous 和 final 分开保存值与展示值
+
+入口的 `previous` 参数来自上次保存的 `PREVIOUS` 通道。普通返回值默认同时写入 `END` 和 `PREVIOUS`；`entrypoint.final(value=..., save=...)` 则允许分别指定：
+
+源码：`libs/langgraph/langgraph/func/__init__.py` → `entrypoint.__call__._pluck_return_value / _pluck_save_value`（第 546–552 行节选；未展示部分省略）。
+
+```python
+def _pluck_return_value(value: Any) -> Any:
+    """从 final 中取对外返回值，普通返回值则直接透传。"""
+    return value.value if isinstance(value, entrypoint.final) else value
+
+def _pluck_save_value(value: Any) -> Any:
+    """从 final 中取保存值，普通返回值则直接透传。"""
+    return value.save if isinstance(value, entrypoint.final) else value
+```
+
+假设入口维护累计数，对外返回“本次处理完成”的文本，但下次需要继续累计。它可以把文本放在 value，将累计整数放在 save。下一次使用同一 thread 调用时，previous 是累计整数，而不是文本。
+
+| 本次输入 | 进入时 previous | 返回对象 | 调用方得到 | 下次 previous |
+| --- | --- | --- | --- | --- |
+| 3 | `None` | `final(value="已处理 3", save=3)` | `"已处理 3"` | 3 |
+| 2 | 3 | `final(value="已处理 2", save=5)` | `"已处理 2"` | 5 |
+
+这需要配置保存器并复用执行身份。`previous` 是已保存的值，不是上次函数的局部变量或完整调用栈，也不意味着入口每次重跑都已经完成一次新的累计。
+
+## 六、两种 API 的选择取决于控制结构
+
+| 设计问题 | 函数式 API | StateGraph |
 | --- | --- | --- |
-| `config` | `RunnableConfig` | 运行配置（thread_id 等） |
-| `previous` | checkpoint 中的上次返回值 | 同一 thread_id 的跨调用状态 |
-| `runtime` | `Runtime` | 运行期上下文（context、store、stream_writer） |
+| 依赖写在哪里 | Python 调用和 Future 等待 | 节点、边和路由 |
+| 状态如何组织 | 参数、任务结果及 previous | 字段通道及 reducer |
+| 恢复要保持什么稳定 | 入口控制路径与任务调用顺序 | 节点身份、状态结构和路由兼容性 |
+| 适合怎样阅读 | 从函数入口顺着业务过程看 | 从拓扑及各节点边界看 |
 
-## 四、`entrypoint.final`：解耦返回值与保存值
+已有过程式代码、分支主要是普通 Python 控制流时，函数式入口能减少图装配代码；多人维护的工作流若需要明确展示节点依赖、状态更新和子流程边界，StateGraph 通常更直观。没有“四个分支以上必须改用图”的实现限制，函数式 API 也不缺少中断和子图能力。
 
-传统 StateGraph 中，节点返回什么就更新什么到 State。`entrypoint.final` 允许分开：
-
-```python
-# libs/langgraph/langgraph/func/__init__.py:475-514
-@dataclass
-class final(Generic[R, S]):
-    value: R  # 返回给调用方
-    save: S   # 保存到 checkpoint，下次作为 previous
-```
-
-使用：
-
-```python
-@entrypoint(checkpointer=InMemorySaver())
-def my_workflow(number: int, *, previous: Any = None) -> entrypoint.final[int, int]:
-    previous = previous or 0
-    return entrypoint.final(value=previous, save=2 * number)
-
-
-config = {"configurable": {"thread_id": "some_thread"}}
-my_workflow.invoke(3, config)  # 0 (previous 为 None)
-my_workflow.invoke(1, config)  # 6 (previous = 3*2)
-```
-
-这个机制解决了"调用方需要旧值、但下次执行需要新值"的需求。内部实现是两个 `ChannelWriteEntry`：一个 mapper 取 `value` 写入 `END`（返回值），一个 mapper 取 `save` 写入 `PREVIOUS`（持久化）。
-
-## 五、与传统 StateGraph 的取舍
-
-| 判据 | Func API | StateGraph |
-| --- | --- | --- |
-| 图结构 | 单节点 + 隐式子任务 | 多节点 + 显式边 |
-| 控制流 | 函数体内的 if/for | 条件边、Send、等待边 |
-| 并行 | `f.result()` 隐式并行 | 显式 `Send` 或并行边 |
-| 可观测性 | stream_mode="updates" | 每种 stream mode 可用 |
-| 复杂度上限 | 函数体内的逻辑复杂度 | 图的结构复杂度 |
-| 适用场景 | 线性或简单并行的流程 | 复杂路由、多分支、子图 |
-
-一个有明确分支、多轮工具调用、人工审批的 Agent 流程，用 StateGraph 更清晰。一个数据处理 pipeline（读入→转换→输出），Func API 更简洁。
-
-## 六、checkpointer 与中断支持
-
-`@entrypoint(checkpointer=...)` 启用持久化后，`interrupt()` 和 `Command(resume=...)` 同样可用：
-
-```python
-from langgraph.types import interrupt, Command
-
-
-@entrypoint(checkpointer=InMemorySaver())
-def review_workflow(topic: str) -> dict:
-    essay_future = compose_essay(topic)
-    essay = essay_future.result()
-    human_review = interrupt({
-        "question": "Please provide a review",
-        "essay": essay,
-    })
-    return {"essay": essay, "review": human_review}
-
-
-config = {"configurable": {"thread_id": "1"}}
-for result in review_workflow.stream(topic, config):
-    print(result)
-# 中断后恢复
-for result in review_workflow.stream(Command(resume="Great!"), config):
-    print(result)
-```
-
-`compose_essay` task 的结果会被 checkpointer 缓存，恢复后不会重新执行。这和[第 07 篇](./07-interrupts-and-command.md)的机制完全一致。
-
-## 工程判断
-
-- **照搬**：线性或简单并行流程用 Func API；复杂路由、多轮 Agent 循环用 StateGraph。
-- **换实现**：需要独立恢复和重试的任务用 `@task` 封装；需要跨调用状态用 `checkpointer` + `entrypoint.final`。
-- **别碰**：不要把 Func API 当作"更简单的 StateGraph"——当流程出现四个以上的分支时，显式 StateGraph 更容易追踪和调试。
-- **不适用时**：需要多节点、多条件边、Subgraph 嵌套时，StateGraph 提供了更完整的控制和可观测性。
-
-## 读完后应该能判断什么
-
-- `@entrypoint` 如何在内部组装 Pregel 图（节点、Channel、Writer）；
-- `@task` 如何让函数调用返回 Future 并支持并行；
-- `entrypoint.final` 如何解耦返回值与 checkpoint 保存值；
-- Func API 与 StateGraph 的取舍边界。
+两者的共同约束仍是持久化与副作用：把需要独立记录结果的工作放进任务，确保恢复路径可重放，并用外部幂等解决“操作已经完成、结果尚未保存”的故障窗口。
