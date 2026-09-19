@@ -43,6 +43,7 @@ pnpm-debug.log*
 
 # WorkBuddy 工作区数据
 .workbuddy/
+.codemap/
 
 # 旧构建产物
 build_old_*/
