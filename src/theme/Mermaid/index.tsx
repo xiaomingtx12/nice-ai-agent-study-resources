@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import type {ReactNode} from 'react';
 import ErrorBoundary from '@docusaurus/ErrorBoundary';
 import {ErrorBoundaryErrorMessageFallback} from '@docusaurus/theme-common';
@@ -9,7 +9,7 @@ import type {MermaidConfig, RenderResult} from 'mermaid';
 import type {Props} from '@theme/Mermaid';
 import DiagramViewer from '../../components/DiagramViewer';
 import {applyDiagramPalette, diagramPalette, preserveAuthoredLabelContrast} from './palette';
-import {subscribeToRouteTransition, isRouteTransitionPending, serverRouteTransitionSnapshot} from '../../lib/routeTransition';
+import {subscribeToRouteTransition, isRouteTransitionPending} from '../../lib/routeTransition';
 
 const ROOT_MARGIN = '100px 0px';
 
@@ -199,7 +199,6 @@ function writeCachedRender(key: string, result: CachedSvg): void {
 }
 
 function useQueuedMermaidRenderResult(text: string, enabled: boolean): RenderResult | null {
-  const navigating = useSyncExternalStore(subscribeToRouteTransition, isRouteTransitionPending, serverRouteTransitionSnapshot);
   const {options} = useMermaidThemeConfig();
   const config = useMemo<MermaidConfig>(() => ({startOnLoad: false, ...options, theme: 'base'}), [options]);
   const configKey = useMemo(() => JSON.stringify(config), [config]);
@@ -207,41 +206,48 @@ function useQueuedMermaidRenderResult(text: string, enabled: boolean): RenderRes
   const idRef = useRef<string>(`mermaid-svg-${Math.round(Math.random() * 1e7)}`);
 
   useEffect(() => {
-    if (!enabled || navigating) return;
+    if (!enabled) return;
     let cancelled = false;
+    let revision = 0;
+    let completed = false;
     const key = cacheKey(configKey, text);
-    const cached = readCachedRender(key);
-    if (cached) {
-      setResult(reidentifyRender(cached, idRef.current));
-      return () => {
-        cancelled = true;
-      };
-    }
-
     const startRuntimeRender = () => {
+      const request = ++revision;
+      if (isRouteTransitionPending() || completed) return;
+      const cached = readCachedRender(key);
+      if (cached) {
+        completed = true;
+        setResult(reidentifyRender(cached, idRef.current));
+        return;
+      }
       const task = () => renderMermaid({id: idRef.current, text, config});
-      enqueueRender(task, () => cancelled || isRouteTransitionPending())
+      enqueueRender(task, () => cancelled || request !== revision || isRouteTransitionPending())
         .then((rendered) => {
-          if (rendered && !cancelled) {
+          if (rendered && !cancelled && request === revision) {
+            completed = true;
             writeCachedRender(key, {svg: rendered.svg, rid: idRef.current});
             setResult(rendered);
           }
         })
         .catch((error: unknown) => {
-          if (!cancelled) {
+          if (!cancelled && request === revision) {
             setResult(() => {
               throw error;
             });
           }
         });
     };
-
+    // 导航只撤销/恢复尚未完成的任务，不让每个图表订阅 React 同步外部状态，
+    // 避免路由 transition 被整页图表的同步更新打断。
+    const unsubscribe = subscribeToRouteTransition(startRuntimeRender);
     startRuntimeRender();
 
     return () => {
       cancelled = true;
+      revision += 1;
+      unsubscribe();
     };
-  }, [text, config, configKey, navigating, enabled]);
+  }, [text, config, configKey, enabled]);
 
   return result;
 }

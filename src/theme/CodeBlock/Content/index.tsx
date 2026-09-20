@@ -1,81 +1,28 @@
-import {forwardRef} from 'react';
-import type {CSSProperties, ReactNode, RefObject} from 'react';
+import {useMemo, type ReactNode} from 'react';
 import clsx from 'clsx';
 import {useCodeBlockContext} from '@docusaurus/theme-common/internal';
-import {Highlight} from 'prism-react-renderer';
-import Line from '@theme/CodeBlock/Line';
+import {Prism, useTokenize} from 'prism-react-renderer';
+import {renderTokenMarkup} from './tokenMarkup';
 import styles from './styles.module.css';
 
-// 高亮样式由 CSS token 提供，换配色不再让每个已读代码块重建 token 树。
-const syntaxTheme = {plain: {}, styles: []};
-
-const Pre = forwardRef<HTMLPreElement, React.HTMLAttributes<HTMLPreElement>>(
-  (props, ref) => (
-    <pre
-      ref={ref}
-      /* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */
-      tabIndex={0}
-      {...props}
-      className={clsx(props.className, styles.codeBlock, 'thin-scrollbar')}
-    />
-  ),
-);
-
-function Code(
-  props: React.HTMLAttributes<HTMLElement> & {children?: ReactNode},
-): ReactNode {
-  const {metadata} = useCodeBlockContext();
-  return (
-    <code
-      {...props}
-      className={clsx(
-        props.className,
-        styles.codeBlockLines,
-        metadata.lineNumbersStart !== undefined &&
-          styles.codeBlockLinesWithNumbering,
-      )}
-      style={{
-        ...(props.style as CSSProperties),
-        counterReset:
-          metadata.lineNumbersStart === undefined
-            ? undefined
-            : `line-count ${metadata.lineNumbersStart - 1}`,
-      }}
-    />
-  );
-}
-
-export default function CodeBlockContent({
-  className: classNameProp,
-}: {
-  className?: string;
-}): ReactNode {
+export default function CodeBlockContent({className}: {className?: string}): ReactNode {
   const {metadata, wordWrap} = useCodeBlockContext();
-  const {code, language, lineNumbersStart, lineClassNames} = metadata;
-  const codeBlockRef = wordWrap.codeBlockRef as RefObject<HTMLPreElement>;
+  const {code, lineNumbersStart, lineClassNames} = metadata;
+  const language = metadata.language.toLowerCase();
+  const lines = useTokenize({prism: Prism, code, language, grammar: Prism.languages[language]});
+  // Word-wrap state recreates metadata; compare its content instead of its identity.
+  const lineClassesKey = JSON.stringify(lineClassNames);
+  const numbered = lineNumbersStart !== undefined;
+  const markup = useMemo(() => ({__html: renderTokenMarkup(lines, JSON.parse(lineClassesKey), numbered)}), [lines, lineClassesKey, numbered]);
 
-  // 服务端与浏览器首次渲染都输出完整 token，只有 CSS 决定当前配色。
+  // Both SSR and the first browser render include all syntax highlighting.
   return (
-    <Highlight theme={syntaxTheme} code={code} language={language}>
-      {({className, style, tokens: lines, getLineProps, getTokenProps}) => (
-        <Pre
-          ref={codeBlockRef}
-          className={clsx(classNameProp, className)}
-          style={style}>
-          <Code>
-            {lines.map((line, i) => (
-              <Line
-                key={i}
-                line={line}
-                getLineProps={getLineProps}
-                getTokenProps={getTokenProps}
-                classNames={lineClassNames[i]}
-                showLineNumbers={lineNumbersStart !== undefined}
-              />
-            ))}
-          </Code>
-        </Pre>
-      )}
-    </Highlight>
+    <pre ref={wordWrap.codeBlockRef} tabIndex={0} className={clsx(className, 'prism-code', 'language-' + language, styles.codeBlock, 'thin-scrollbar')}>
+      <code
+        className={clsx(styles.codeBlockLines, numbered && styles.codeBlockLinesWithNumbering)}
+        style={numbered ? {counterReset: 'line-count ' + (lineNumbersStart - 1)} : undefined}
+        dangerouslySetInnerHTML={markup}
+      />
+    </pre>
   );
 }

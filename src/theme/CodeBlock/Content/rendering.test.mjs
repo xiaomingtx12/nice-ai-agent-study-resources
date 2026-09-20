@@ -16,6 +16,7 @@ function render(code, language = 'javascript') {
   vm.runInNewContext(output,{module,exports:module.exports,require(name){
     if(name==='@docusaurus/useIsBrowser')return {__esModule:true,default:()=>false};
     if(name==='@docusaurus/theme-common/internal')return {useCodeBlockContext:()=>({metadata,wordWrap:{codeBlockRef:{current:null}}})};
+    if(name==='./tokenMarkup')return require('./tokenMarkup.ts');
     if(name.endsWith('.css'))return {codeBlock:'code-block',codeBlockLines:'code-lines'};
     if(name==='@theme/CodeBlock/Line')return {__esModule:true,default:({line,getLineProps,getTokenProps,classNames,showLineNumbers})=>React.createElement('div',{...getLineProps({line,className:classNames}),'data-numbered':showLineNumbers},line.map((token,i)=>React.createElement('span',{...getTokenProps({token}),key:i})))};
     return require(name);
@@ -28,7 +29,7 @@ test('the first server render already contains syntax tokens and line metadata',
   assert.match(html,/token keyword/);
   assert.match(html,/token string/);
   assert.match(html,/highlighted-line/);
-  assert.match(html,/data-numbered="true"/);
+  assert.match(html,/site-code-line-numbered/);
   assert.doesNotMatch(html,/#EFE5D0|#2B221D|background-color:/i);
 });
 

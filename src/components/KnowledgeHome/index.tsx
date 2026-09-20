@@ -1,4 +1,4 @@
-import type {ReactNode} from 'react';
+import {useId, type ReactNode} from 'react';
 import Link from '@docusaurus/Link';
 import SiteStats, {SiteCount, type SiteStatKey} from '../SiteStats';
 import './styles.css';
@@ -55,36 +55,74 @@ function Arrow(): ReactNode {
 }
 
 function LearningLayers(): ReactNode {
+  const id = useId().replace(/:/g, '');
+  const paint = (name: string) => `url(#${id}-${name})`;
+
   return (
     <figure className="kh-atlas">
       <div className="kh-atlas-caption"><span>学习的积累</span><span>从理解到复用</span></div>
-      <svg viewBox="0 0 480 380" role="img" aria-label="学习的三个层次：阅读形成理解，源码与实践加深认识，复盘沉淀出可复用的方法。">
-        <g className="kh-atlas-guides" fill="none" stroke="currentColor">
-          <path d="M42 252 250 330 448 214M42 173 250 251 448 135M42 94 250 172 448 56" />
-          <path d="M66 56v213M250 122v210M432 46v190" strokeDasharray="3 6" />
+      <svg viewBox="0 0 480 400" role="img" aria-label="学习的三个层次：阅读形成理解，源码与实践加深认识，复盘沉淀出可复用的方法。">
+        <defs>
+          <linearGradient id={id + '-paper'} x1="0" y1="0" x2="0.5" y2="1">
+            <stop className="kh-atlas-paper-light" />
+            <stop offset="1" className="kh-atlas-paper-shade" />
+          </linearGradient>
+          <linearGradient id={id + '-cover'} x1="0" y1="0" x2="0.8" y2="1">
+            <stop className="kh-atlas-cover-light" />
+            <stop offset="1" className="kh-atlas-cover-shade" />
+          </linearGradient>
+          <linearGradient id={id + '-edge'} x1="0" y1="0" x2="0" y2="1">
+            <stop className="kh-atlas-edge-light" />
+            <stop offset="1" className="kh-atlas-edge-shade" />
+          </linearGradient>
+          <filter id={id + '-shadow'} x="-20%" y="-30%" width="140%" height="180%" colorInterpolationFilters="sRGB">
+            <feDropShadow dx="0" dy="10" stdDeviation="6" floodColor="#17150f" floodOpacity="0.12" />
+          </filter>
+          <filter id={id + '-ground'} x="-20%" y="-60%" width="140%" height="220%">
+            <feGaussianBlur stdDeviation="8" />
+          </filter>
+          {/* 三层共用同一顶面和侧面，确保透视、厚度及接缝一致。 */}
+          <path id={id + '-plane'} d="M56 112 240 12 424 84 240 184Z" />
+          <path id={id + '-front'} d="M56 112 240 184v14L56 126Z" />
+          <path id={id + '-side'} d="M240 184 424 84v14L240 198Z" />
+        </defs>
+        <path className="kh-atlas-ground" d="m62 291 178 70 181-99v17L240 379 62 309Z" filter={paint('ground')} />
+        <g className="kh-atlas-guides">
+          <path d="M56 119v174M240 192v182M424 91v174" strokeDasharray="2 6" />
+          <path d="m34 292 206 81 207-113M34 212l206 81 207-113" />
         </g>
-        <path className="kh-atlas-shadow" d="m68 307 184 68 180-93-184-61Z" />
-        <g className="kh-atlas-foundation">
-          <path d="m64 276 184 68 184-96v16l-184 96-184-68Z" className="kh-atlas-edge" />
-          <path d="m64 276 184 68 184-96-184-68Z" className="kh-atlas-plane" />
-          <path d="m94 276 150 55M270 316l132-69" className="kh-atlas-line" />
-          <g transform="matrix(.91 .335 -.88 .458 121 274)"><text>复盘 / 方法</text><text y="27" className="kh-atlas-small">留下可复用的经验</text></g>
+        {[
+          {name: 'foundation', y: 160, title: '复盘 / 方法', detail: 'Reflect · Reuse'},
+          {name: 'practice', y: 80, title: '源码 / 实践', detail: 'Code · Practice'},
+          {name: 'reading', y: 0, title: '阅读 / 理解', detail: 'Read · Understand'},
+        ].map((layer) => (
+          <g key={layer.name} className={'kh-atlas-layer kh-atlas-' + layer.name} transform={'translate(0 ' + layer.y + ')'}>
+            <g filter={paint('shadow')}>
+              <use href={'#' + id + '-front'} fill={paint('edge')} className="kh-atlas-front" />
+              <use href={'#' + id + '-side'} fill={paint('edge')} className="kh-atlas-side" />
+              <use href={'#' + id + '-plane'} fill={paint(layer.name === 'reading' ? 'cover' : 'paper')} className="kh-atlas-plane" />
+            </g>
+            <path d="M57 112 240 184 423 84" className="kh-atlas-bevel" />
+            <path d="m60 123 180 71 180-98" className="kh-atlas-seam" />
+            <g transform="matrix(.94 .368 -.86 .467 109 103)" className="kh-atlas-plane-label">
+              <text>{layer.title}</text>
+              <text y="25" className="kh-atlas-small">{layer.detail}</text>
+            </g>
+            {layer.name === 'reading' ? (
+              <g className="kh-atlas-cover-detail">
+                <path d="m306 63 45 18m-58-10 45 18m-58-10 31 12" />
+                <path d="m73 110 19-10m291-9 19-10" className="kh-atlas-corner" />
+              </g>
+            ) : (
+              <path d="m85 120 151 59m26-3 135-74" className="kh-atlas-inset" />
+            )}
+          </g>
+        ))}
+        <g className="kh-atlas-annotations">
+          <path d="M429 186h21M429 266h21M450 191v70" />
+          <circle cx="450" cy="186" r="3" />
+          <circle cx="450" cy="266" r="3" />
         </g>
-        <g className="kh-atlas-execution">
-          <path d="m64 186 184 68 184-96v16l-184 96-184-68Z" className="kh-atlas-edge" />
-          <path d="m64 186 184 68 184-96-184-68Z" className="kh-atlas-plane" />
-          <path d="m94 186 150 55M270 226l132-69" className="kh-atlas-line" />
-          <g transform="matrix(.91 .335 -.88 .458 121 184)"><text>源码 / 实践</text><text y="27" className="kh-atlas-small">在真实问题中验证</text></g>
-          <path d="m291 158 45 16-33 17-45-16Z" className="kh-atlas-chip" />
-          <path d="m310 153 16 6m-42 26 16 6m34-18 12-6m-76 28 12-6" className="kh-atlas-line" />
-        </g>
-        <g className="kh-atlas-context">
-          <path d="m64 98 184 68L432 70v16l-184 96L64 114Z" className="kh-atlas-edge" />
-          <path d="m64 98 184 68L432 70 248 2Z" className="kh-atlas-plane" />
-          <g transform="matrix(.91 .335 -.88 .458 121 81)"><text>阅读 / 理解</text><text y="27" className="kh-atlas-small">从一份好资料开始</text></g>
-          <path d="m310 70 45 17m-58-10 45 17m-58-10 30 11" className="kh-atlas-line" />
-        </g>
-        <g className="kh-atlas-annotations"><path d="M434 187h22M434 277h22" /><circle cx="456" cy="187" r="3" /><circle cx="456" cy="277" r="3" /><path d="M456 193v78" strokeDasharray="2 4" /></g>
       </svg>
       <figcaption>读过、做过，再整理成自己的理解。</figcaption>
     </figure>
