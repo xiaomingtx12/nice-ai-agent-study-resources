@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Nice AI 学习沉淀">
-  <rect width="32" height="32" rx="3" fill="#f4eddd"/>
-  <text x="16" y="22.5" text-anchor="middle" font-family="Noto Serif SC, Songti SC, STSong, SimSun, serif" font-size="17" font-weight="600" fill="#2c1810">沉</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="32" height="32" role="img" aria-labelledby="title">
+  <title id="title">Nice AI 学习沉淀</title>
+  <!-- 与浅色版共用轮廓，仅调整字母和折角的明度。 -->
+  <path d="M5 36V4h7l16 22V4l7 7v25h-7L12 14v22Z" fill="#eeeee5"/>
+  <path d="M28 4v7h7Z" fill="#c6ac72"/>
 </svg>

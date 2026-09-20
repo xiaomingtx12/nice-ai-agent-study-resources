@@ -120,6 +120,7 @@ export function redecorateContentImage(
 }
 
 function decorateMermaidSvg(svg: SVGSVGElement, styles: DecorationStyles): void {
+  if (svg.closest('[data-diagram-viewer]')) return;
   svg.classList.add(styles.triggerMermaid);
   svg.setAttribute(LIGHTBOX_TRIGGER_ATTRIBUTE, 'true');
 }

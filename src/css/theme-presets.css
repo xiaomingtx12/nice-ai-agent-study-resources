@@ -1,0 +1,120 @@
+/* Shared site components and layout. No preset-specific layout selectors. */
+@import './theme-tokens.css';
+
+html[data-site-theme] {
+  --ifm-background-color: var(--site-bg);
+  --ifm-background-surface-color: var(--site-surface);
+  --ifm-font-color-base: var(--site-text);
+  --ifm-heading-color: var(--site-text);
+  --ifm-color-primary: var(--site-accent);
+  --ifm-color-emphasis-100: var(--site-surface-strong);
+  --ifm-color-emphasis-200: var(--site-border);
+  --ifm-color-emphasis-300: var(--site-border);
+  --ifm-color-emphasis-700: var(--site-text-muted);
+  --ifm-color-emphasis-800: var(--site-text);
+  --ifm-font-family-base: var(--site-body-font);
+  --ifm-heading-font-family: var(--site-display-font);
+  --ifm-link-color: var(--site-accent-strong);
+  --ifm-navbar-height: 4rem;
+  --ifm-navbar-background-color: var(--site-bg);
+  --ifm-color-emphasis-900: var(--site-text);
+  --ifm-pre-background: var(--site-code-bg);
+  --prism-background-color: var(--site-code-bg);
+  --search-local-hit-active-color: var(--site-on-accent);
+  --doc-sidebar-width: 248px;
+  overflow-x: clip;
+}
+
+body { overflow-x: clip; }
+
+/* 配色切换直接更新颜色；避免长文章的数百个链接同时启动颜色动画。 */
+html[data-site-theme] :is(a, .menu__link, .navbar__link, .table-of-contents__link) { transition: none; }
+
+:where(a, button, input, summary):focus-visible {
+  outline: 2px solid var(--site-accent);
+  outline-offset: 4px;
+}
+
+html[data-site-theme] .navbar__inner { max-width: var(--site-page-width); }
+html[data-site-theme] .navbar__title { font-family: var(--site-font-sans); font-size: 0.9375rem; }
+html[data-site-theme] .navbar__title::after { content: none; }
+html[data-site-theme] .navbar__items .navbar__link { margin-inline: 0.55rem; font-size: 0.875rem; white-space: nowrap; }
+html[data-site-theme] .navbar__search-input { border-radius: var(--site-control-radius); box-shadow: none; }
+html[data-site-theme] .navbar__search-input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23727b87' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='m16 16 4.5 4.5'/%3E%3C/svg%3E");
+  background-position: 0.7rem center;
+  background-size: 1.1rem;
+  background-repeat: no-repeat;
+}
+html[data-site-theme] .menu__link { font-size: 0.8125rem; line-height: 1.7; padding-block: 0.4rem; border-radius: var(--site-control-radius); border-left-color: transparent; }
+html[data-site-theme] .menu__link--active { background: var(--site-surface-strong); color: var(--site-accent-strong); }
+html[data-site-theme] .navbar { border-bottom: 1px solid var(--site-border); }
+html[data-site-theme] .menu__list-item-collapsible { border-radius: var(--site-control-radius); }
+/* 默认时长按目录高度增长；统一为短促的展开，保留 transitionend 清理。 */
+.theme-doc-sidebar-container .menu__list,
+.navbar-sidebar .menu__list {
+  transition-duration: 140ms !important;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1) !important;
+}
+.theme-doc-sidebar-container .menu { overscroll-behavior: contain; }
+html[data-site-theme] .theme-doc-sidebar-item-category-level-1 > .menu__list-item-collapsible > .menu__link { letter-spacing: 0; }
+html[data-site-theme] .theme-doc-markdown { font-size: var(--site-body-size); }
+html[data-site-theme] .theme-doc-markdown p,
+html[data-site-theme] .theme-doc-markdown li { line-height: var(--site-body-leading); }
+html[data-site-theme]:not(:has(.knowledge-home)) .theme-doc-markdown h1 { font-size: clamp(1.85rem, 2.6vw, 2.65rem); line-height: 1.4; text-wrap: pretty; }
+html[data-site-theme]:not(:has(.knowledge-home)) .theme-doc-markdown h2 { border-top: 0; padding-top: 0; margin-top: var(--site-heading-space); font-size: 1.4rem; }
+html[data-site-theme]:not(:has(.knowledge-home)) .theme-doc-markdown h3 { font-size: 1.2rem; }
+html[data-site-theme] :is(h1, h2, h3) { font-style: normal; overflow-wrap: anywhere; }
+html[data-site-theme]:not(:has(.knowledge-home)) .theme-doc-markdown a { text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
+html[data-site-theme]:not(:has(.knowledge-home)) .theme-doc-markdown a:hover { color: var(--site-accent-strong); text-decoration-color: currentColor; }
+html[data-site-theme] .table-of-contents { font-size: 0.8rem; line-height: 1.7; }
+html[data-site-theme] .theme-doc-breadcrumbs { margin-bottom: 1.75rem; }
+html[data-site-theme]:not(:has(.knowledge-home)) .theme-doc-markdown h1 { letter-spacing: -0.035em; margin-bottom: 1.75rem; }
+html[data-site-theme] .theme-doc-markdown > blockquote:first-of-type { padding: 1.1rem 1.25rem; border-left: 2px solid var(--site-accent); background: var(--site-surface); color: var(--site-text-muted); border-radius: 0 var(--site-control-radius) var(--site-control-radius) 0; }
+html[data-site-theme] .theme-doc-markdown > blockquote p:last-child { margin-bottom: 0; }
+html[data-site-theme] .theme-doc-markdown table { font-size: 0.9rem; border-radius: var(--site-control-radius); }
+html[data-site-theme] .theme-doc-markdown th { background: var(--site-surface-strong); }
+html[data-site-theme] .theme-doc-markdown td { border-color: var(--site-border); }
+html[data-site-theme] .table-of-contents__link { color: var(--site-text-muted); }
+html[data-site-theme] .table-of-contents__link--active { color: var(--site-accent-strong); }
+html[data-site-theme] :is(.theme-admonition, .theme-code-block, .pagination-nav__link, .theme-doc-toc-mobile) { border-radius: var(--site-panel-radius); }
+html[data-site-theme] .theme-code-block pre { background: var(--site-code-bg) !important; color: var(--site-text) !important; font-size: 0.85rem; }
+html[data-site-theme] .theme-code-block [class*='codeBlockTitle'] { font-size: 0.8rem; letter-spacing: 0; }
+html[data-site-theme] .theme-code-block .token { color: var(--site-text) !important; }
+html[data-site-theme] .theme-code-block :is(.token.comment, .token.prolog, .token.doctype) { color: var(--site-text-muted) !important; }
+html[data-site-theme] .theme-code-block :is(.token.keyword, .token.tag, .token.builtin) { color: var(--site-code-keyword) !important; }
+html[data-site-theme] .theme-code-block :is(.token.string, .token.char, .token.attr-value) { color: var(--site-code-string) !important; }
+html[data-site-theme] .theme-code-block :is(.token.function, .token.class-name) { color: var(--site-code-function) !important; }
+html[data-site-theme] .theme-code-block :is(.token.number, .token.boolean, .token.constant, .token.property) { color: var(--site-code-value) !important; }
+html[data-site-theme] .pagination-nav__link { border-color: var(--site-border); padding: 1.25rem; }
+html[data-site-theme] .pagination-nav__link:hover { border-color: var(--site-accent); }
+html[data-site-theme] .footer { border-top: 1px solid var(--site-border); background: var(--site-bg); font-family: var(--site-font-sans); font-size: 0.8rem; color: var(--site-text-muted); }
+
+/* 首页独立占满内容区，不再继承文档侧栏的空白偏移。 */
+html[data-site-theme]:has(.knowledge-home) main[class*='docMainContainer'] { width: 100%; max-width: 100%; margin-inline: 0; }
+html[data-site-theme]:has(.knowledge-home) main > .container { max-width: var(--site-page-width); padding: 0 1.5rem; }
+html[data-site-theme]:has(.knowledge-home) main > .container > .row > .col { max-width: 100%; flex-basis: 100%; }
+html[data-site-theme]:has(.knowledge-home) article { max-width: none; margin: 0; }
+html[data-site-theme]:has(.knowledge-home) :is(.theme-doc-breadcrumbs, .theme-doc-footer, .pagination-nav) { display: none; }
+
+@media (min-width: 997px) {
+  html[data-site-theme]:not(:has(.knowledge-home)) .theme-doc-markdown { max-width: var(--site-reading-width); margin-inline: auto; }
+}
+
+@media (min-width: 997px) and (max-width: 1200px) {
+  html[data-site-theme] .navbar__items .navbar__link { margin-inline: 0.3rem; font-size: 0.8rem; }
+  html[data-site-theme] .navbar__title { font-size: 0.875rem; }
+  html[data-site-theme] .navbar__search-input { width: 8rem; }
+}
+
+@media (max-width: 576px) {
+  html[data-site-theme] .navbar__search-input:not(:focus) { width: 2.75rem; min-height: 2.75rem; }
+  html[data-site-theme]:has(.knowledge-home) main > .container { padding-inline: 1rem; }
+  html[data-site-theme] .navbar__title { font-size: 0.9rem; }
+  html[data-site-theme] .theme-doc-markdown { font-size: 1rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-doc-sidebar-container .menu__list, .navbar-sidebar .menu__list { transition-duration: 1ms !important; }
+  html[data-site-theme] :is(a, button, input, .menu__link, .navbar__link) { transition: none; }
+}

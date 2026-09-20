@@ -184,6 +184,8 @@ export function ContentMediaLightbox() {
         return;
       }
 
+      if (event.target.closest('[data-diagram-viewer]')) return;
+
       const image = event.target.closest(ARTICLE_IMAGE_SELECTOR);
 
       if (image instanceof HTMLImageElement && image.classList.contains(styles.triggerImage)) {

@@ -7,34 +7,10 @@ import {
 } from './src/lib/siteTheme';
 import siteStatsPlugin from './src/plugins/siteStats';
 
-// 暖纸气质的语法高亮：关键词暗红、字符串墨绿、函数深金、注释暖灰，
-// 与 --site-* token 同族；暗色版对应 editorial 深色变量。
-const niceCodeLight: PrismTheme = {
-  plain: {color: '#2C1810', backgroundColor: '#EFE5D0'},
-  styles: [
-    {types: ['comment', 'prolog', 'doctype', 'cdata'], style: {color: '#8A7A66', fontStyle: 'italic'}},
-    {types: ['punctuation'], style: {color: '#5A4530'}},
-    {types: ['keyword', 'rule', 'important', 'tag', 'builtin'], style: {color: '#7B1F2A', fontWeight: 'bold'}},
-    {types: ['string', 'char', 'attr-value', 'regex'], style: {color: '#0E4D3C'}},
-    {types: ['function', 'class-name', 'maybe-class-name'], style: {color: '#8F6E32'}},
-    {types: ['number', 'boolean', 'constant', 'symbol'], style: {color: '#5A2E3A'}},
-    {types: ['attr-name', 'selector', 'property', 'variable'], style: {color: '#5A2E3A'}},
-    {types: ['operator', 'entity', 'url'], style: {color: '#5A4530'}},
-  ],
-};
-
-const niceCodeDark: PrismTheme = {
-  plain: {color: '#F1E6DA', backgroundColor: '#2B221D'},
-  styles: [
-    {types: ['comment', 'prolog', 'doctype', 'cdata'], style: {color: '#8A7A66', fontStyle: 'italic'}},
-    {types: ['punctuation'], style: {color: '#C4B2A2'}},
-    {types: ['keyword', 'rule', 'important', 'tag', 'builtin'], style: {color: '#D98A92', fontWeight: 'bold'}},
-    {types: ['string', 'char', 'attr-value', 'regex'], style: {color: '#AAC0A4'}},
-    {types: ['function', 'class-name', 'maybe-class-name'], style: {color: '#DDBC7E'}},
-    {types: ['number', 'boolean', 'constant', 'symbol'], style: {color: '#C492A3'}},
-    {types: ['attr-name', 'selector', 'property', 'variable'], style: {color: '#C492A3'}},
-    {types: ['operator', 'entity', 'url'], style: {color: '#C4B2A2'}},
-  ],
+// 首次 HTML、代码容器与 token 都使用同一套 CSS 变量，不注入旧配色。
+const niceCodeTheme: PrismTheme = {
+  plain: {color: 'var(--site-text)', backgroundColor: 'var(--site-code-bg)'},
+  styles: [],
 };
 
 const configuredBaseUrl = process.env.SITE_BASE_URL;
@@ -79,7 +55,7 @@ const config: Config = {
   ],
 
   // 字体走本地打包（见 src/lib/siteFonts.js），不再依赖 fonts.googleapis.com
-  clientModules: [require.resolve('./src/lib/siteFonts.js')],
+  clientModules: [require.resolve('./src/lib/siteFonts.js'), require.resolve('./src/lib/routeTransition.ts')],
 
   markdown: {
     mermaid: true,
@@ -119,13 +95,29 @@ const config: Config = {
         },
         blog: false,
         theme: {
-          customCss: require.resolve('./src/css/custom.css'),
+          customCss: [
+            require.resolve('./src/css/custom.css'),
+            require.resolve('./src/css/theme-presets.css'),
+          ],
         },
       },
     ],
   ],
 
   plugins: [
+    function latestNavigationWins() {
+      return {
+        name: 'latest-navigation-wins',
+        configureWebpack() {
+          const {NormalModuleReplacementPlugin} = require('webpack');
+          return {plugins: [new NormalModuleReplacementPlugin(/^\.\/PendingNavigation$/, (resource: {context: string; request: string}) => {
+            if (resource.context.replace(/\\/g, '/').endsWith('/@docusaurus/core/lib/client')) {
+              resource.request = require.resolve('./src/lib/PendingNavigation.tsx');
+            }
+          })]};
+        },
+      };
+    },
     [
       require.resolve('@easyops-cn/docusaurus-search-local'),
       {
@@ -273,8 +265,8 @@ const config: Config = {
       },
     },
     prism: {
-      theme: niceCodeLight,
-      darkTheme: niceCodeDark,
+      theme: niceCodeTheme,
+      darkTheme: niceCodeTheme,
     },
   },
 };

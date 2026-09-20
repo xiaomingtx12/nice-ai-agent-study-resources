@@ -6,11 +6,6 @@ import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import useIsBrowser from '@docusaurus/useIsBrowser';
 import {useHistory, useLocation} from '@docusaurus/router';
 import {translate} from '@docusaurus/Translate';
-import {
-  ReactContextError,
-  useDocsPreferredVersion,
-} from '@docusaurus/theme-common';
-import {useActivePlugin} from '@docusaurus/plugin-content-docs/client';
 import {fetchIndexesByWorker, searchByWorker} from '../../lib/search/searchByWorker';
 import {SuggestionTemplate} from '@easyops-cn/docusaurus-search-local/dist/client/client/theme/SearchBar/SuggestionTemplate';
 import {
@@ -21,8 +16,6 @@ import {
   searchBarShortcut,
   searchBarShortcutHint,
   searchBarPosition,
-  docsPluginIdForPreferredVersion,
-  indexDocs,
   searchContextByPaths,
   hideSearchBarWithNoSearchContext,
   useAllContextsWithNoSearchContext,
@@ -66,24 +59,9 @@ export default function SearchBar({handleSearchBarToggle}) {
     siteConfig: {baseUrl},
     i18n: {currentLocale},
   } = useDocusaurusContext();
-  const activePlugin = useActivePlugin();
-  let versionUrl = baseUrl;
-
-  try {
-    const {preferredVersion} = useDocsPreferredVersion(
-      activePlugin?.pluginId ?? docsPluginIdForPreferredVersion,
-    );
-
-    if (preferredVersion && !preferredVersion.isLast) {
-      versionUrl = `${preferredVersion.path}/`;
-    }
-  } catch (error) {
-    if (indexDocs) {
-      if (!(error instanceof ReactContextError)) {
-        throw error;
-      }
-    }
-  }
+  // 本站只有一套未分版本的文档，搜索索引固定在 baseUrl。
+  // 不再 try/catch 一个可能中途抛错的 hook，避免路由变化破坏 hook 顺序。
+  const versionUrl = baseUrl;
 
   const history = useHistory();
   const location = useLocation();

@@ -1,51 +1,31 @@
-import {useEffect, useLayoutEffect, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import type {ReactNode} from 'react';
 import ErrorBoundary from '@docusaurus/ErrorBoundary';
 import {ErrorBoundaryErrorMessageFallback} from '@docusaurus/theme-common';
 import {
-  MermaidContainerClassName,
-  useMermaidConfig,
+  useMermaidThemeConfig,
 } from '@docusaurus/theme-mermaid/client';
 import type {MermaidConfig, RenderResult} from 'mermaid';
 import type {Props} from '@theme/Mermaid';
-import styles from './styles.module.css';
+import DiagramViewer from '../../components/DiagramViewer';
+import {applyDiagramPalette, diagramPalette, preserveAuthoredLabelContrast} from './palette';
+import {subscribeToRouteTransition, isRouteTransitionPending, serverRouteTransitionSnapshot} from '../../lib/routeTransition';
 
 const ROOT_MARGIN = '100px 0px';
-const PLACEHOLDER_MIN_HEIGHT = 120;
 
 // 图内文字与站点字体对齐：关闭 htmlLabels（foreignObject 按 trebuchet 量宽，
 // 实际却回退到系统中文字体渲染，宽度对不上就会截字），改用 SVG <text> 由
 // mermaid 用同一套 fontFamily 量与画。配色跟随站点 token。
 const MERMAID_FONT_FAMILY = 'Noto Sans SC, PingFang SC, Microsoft YaHei, sans-serif';
 
-const LIGHT_THEME_VARIABLES = {
-  fontFamily: MERMAID_FONT_FAMILY,
-  primaryColor: '#FAF5E6',
-  primaryTextColor: '#2C1810',
-  primaryBorderColor: '#BFAF8E',
-  lineColor: '#BFAF8E',
-  secondaryColor: '#F4EDDD',
-  tertiaryColor: '#F4EDDD',
-};
-
-const DARK_THEME_VARIABLES = {
-  fontFamily: MERMAID_FONT_FAMILY,
-  primaryColor: '#2B221D',
-  primaryTextColor: '#F1E6DA',
-  primaryBorderColor: '#745A45',
-  lineColor: '#745A45',
-  secondaryColor: '#221B17',
-  tertiaryColor: '#221B17',
-};
-
 function withSiteMermaidConfig(config: MermaidConfig): MermaidConfig {
-  const isDark = config.theme === 'forest';
   return {
     ...config,
+    theme: 'base',
     fontFamily: MERMAID_FONT_FAMILY,
     htmlLabels: false,
-    flowchart: {htmlLabels: false, ...(config.flowchart ?? {})},
-    themeVariables: isDark ? DARK_THEME_VARIABLES : LIGHT_THEME_VARIABLES,
+    flowchart: {...config.flowchart, htmlLabels: false},
+    themeVariables: {...diagramPalette, fontFamily: MERMAID_FONT_FAMILY},
   };
 }
 
@@ -58,11 +38,8 @@ function loadMermaid() {
   return mermaidPromise;
 }
 
-// mermaid.initialize is expensive and resets siteConfig. theme-mermaid calls it
-// before every render, but for a batch of diagrams sharing the same theme we
-// only need to initialize once per theme switch. Tracking the last theme lets
-// us skip the repeated init across the 17-diagram re-render storm.
-let lastInitializedTheme: string | null = null;
+// 配置只与站点图表选项有关；明暗模式由 SVG 中的 CSS 变量处理。
+let lastInitializedConfig: MermaidConfig | null = null;
 async function renderMermaid({
   id,
   text,
@@ -73,16 +50,27 @@ async function renderMermaid({
   config: MermaidConfig;
 }): Promise<RenderResult> {
   const mermaid = await loadMermaid();
-  if (lastInitializedTheme !== config.theme) {
+  if (lastInitializedConfig !== config) {
     mermaid.initialize(withSiteMermaidConfig(config));
-    lastInitializedTheme = config.theme ?? null;
+    lastInitializedConfig = config;
   }
+  // Mermaid needs DOM measurement. Keep its temporary nodes outside page flow
+  // so even the intermediate, unscaled SVG cannot move the article or scrollbar.
+  const measuringHost = document.createElement('div');
+  measuringHost.setAttribute('aria-hidden', 'true');
+  measuringHost.style.cssText = 'position:fixed;inset:0 auto auto 0;visibility:hidden;pointer-events:none;contain:layout style;';
+  document.body.append(measuringHost);
   try {
-    return await mermaid.render(id, text);
+    const rendered = await mermaid.render(id, text, measuringHost);
+    const svgDocument = new DOMParser().parseFromString(rendered.svg, 'image/svg+xml');
+    preserveAuthoredLabelContrast(svgDocument);
+    return {...rendered, svg: applyDiagramPalette(new XMLSerializer().serializeToString(svgDocument.documentElement))};
   } catch (error) {
     // Mermaid leaves a stray error node in the DOM on failure.
     document.querySelector(`#d${id}`)?.remove();
     throw error;
+  } finally {
+    measuringHost.remove();
   }
 }
 
@@ -144,10 +132,8 @@ function enqueueRender(
   return settled;
 }
 
-// --- per-(theme, text) SVG cache ---
-// 缓存按「主题 + 图内容」键控，不含实例 id——实例 id 只决定 DOM 里的唯一性，
-// 命中缓存后把原始渲染 id 整体替换成当前实例 id（reidentifyRender），
-// 这样跨文章、跨挂载都能命中。主题在 key 里，暗色切换只重渲染一次。
+// --- per-(config, text) SVG cache ---
+// 缓存按图表选项和内容键控，换配色复用同一个 SVG。实例 id 仍保持唯一。
 type CachedSvg = {svg: string; rid: string};
 
 const svgCache = new Map<string, CachedSvg>();
@@ -162,7 +148,7 @@ function reidentifyRender(cached: CachedSvg, instanceId: string): RenderResult {
 
 // 持久化到 sessionStorage：mermaid.render 是同步 CPU 重活、无法分片，
 // 回访/前进后退命中缓存可完全跳过渲染，避免进长文时的主线程冻结。
-const SVG_CACHE_STORAGE_PREFIX = 'nice-ai-mermaid-svg-v1:';
+const SVG_CACHE_STORAGE_PREFIX = 'nice-ai-mermaid-svg-v4:';
 
 function hashCacheKey(key: string): string {
   let hash = 5381;
@@ -212,34 +198,37 @@ function writeCachedRender(key: string, result: CachedSvg): void {
   }
 }
 
-function useQueuedMermaidRenderResult(text: string): RenderResult | null {
-  const config = useMermaidConfig();
+function useQueuedMermaidRenderResult(text: string, enabled: boolean): RenderResult | null {
+  const navigating = useSyncExternalStore(subscribeToRouteTransition, isRouteTransitionPending, serverRouteTransitionSnapshot);
+  const {options} = useMermaidThemeConfig();
+  const config = useMemo<MermaidConfig>(() => ({startOnLoad: false, ...options, theme: 'base'}), [options]);
+  const configKey = useMemo(() => JSON.stringify(config), [config]);
   const [result, setResult] = useState<RenderResult | null>(null);
   const idRef = useRef<string>(`mermaid-svg-${Math.round(Math.random() * 1e7)}`);
-  const cancelledRef = useRef(false);
 
-  useLayoutEffect(() => {
-    cancelledRef.current = false;
-    const key = cacheKey(config.theme, text);
+  useEffect(() => {
+    if (!enabled || navigating) return;
+    let cancelled = false;
+    const key = cacheKey(configKey, text);
     const cached = readCachedRender(key);
     if (cached) {
       setResult(reidentifyRender(cached, idRef.current));
       return () => {
-        cancelledRef.current = true;
+        cancelled = true;
       };
     }
 
     const startRuntimeRender = () => {
       const task = () => renderMermaid({id: idRef.current, text, config});
-      enqueueRender(task, () => cancelledRef.current)
+      enqueueRender(task, () => cancelled || isRouteTransitionPending())
         .then((rendered) => {
-          if (rendered && !cancelledRef.current) {
+          if (rendered && !cancelled) {
             writeCachedRender(key, {svg: rendered.svg, rid: idRef.current});
             setResult(rendered);
           }
         })
         .catch((error: unknown) => {
-          if (!cancelledRef.current) {
+          if (!cancelled) {
             setResult(() => {
               throw error;
             });
@@ -250,37 +239,16 @@ function useQueuedMermaidRenderResult(text: string): RenderResult | null {
     startRuntimeRender();
 
     return () => {
-      cancelledRef.current = true;
+      cancelled = true;
     };
-  }, [text, config]);
+  }, [text, config, configKey, navigating, enabled]);
 
   return result;
 }
 
-function MermaidRenderResult({renderResult}: {renderResult: RenderResult}): ReactNode {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const div = ref.current;
-    if (div) {
-      renderResult.bindFunctions?.(div);
-    }
-  }, [renderResult]);
-  return (
-    <div
-      ref={ref}
-      className={`${MermaidContainerClassName} ${styles.container}`}
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={{__html: renderResult.svg}}
-    />
-  );
-}
-
-function MermaidRenderer({value}: Props): ReactNode {
-  const renderResult = useQueuedMermaidRenderResult(value);
-  if (renderResult === null) {
-    return null;
-  }
-  return <MermaidRenderResult renderResult={renderResult} />;
+function MermaidRenderer({value, enabled}: Props & {enabled: boolean}): ReactNode {
+  const renderResult = useQueuedMermaidRenderResult(value, enabled);
+  return <DiagramViewer result={renderResult} />;
 }
 
 export default function Mermaid(props: Props): ReactNode {
@@ -305,16 +273,11 @@ export default function Mermaid(props: Props): ReactNode {
     return () => observer.disconnect();
   }, [visible]);
 
-  if (visible) {
-    return (
-      <div className={styles.lazyWrapper}>
-        <ErrorBoundary
-          fallback={(params) => <ErrorBoundaryErrorMessageFallback {...params} />}>
-          <MermaidRenderer {...props} />
-        </ErrorBoundary>
-      </div>
-    );
-  }
-
-  return <div ref={containerRef} style={{minHeight: PLACEHOLDER_MIN_HEIGHT}} />;
+  return (
+    <div ref={containerRef}>
+      <ErrorBoundary fallback={(params) => <ErrorBoundaryErrorMessageFallback {...params} />}>
+        <MermaidRenderer key={props.value} {...props} enabled={visible} />
+      </ErrorBoundary>
+    </div>
+  );
 }

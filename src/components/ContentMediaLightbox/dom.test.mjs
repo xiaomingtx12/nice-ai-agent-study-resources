@@ -13,6 +13,14 @@ const styles = {
   triggerMermaid: 'trigger-mermaid',
 };
 
+test('a diagram with its own viewer does not acquire the legacy lightbox trigger', () => {
+  const dom = new JSDOM('<article><div data-diagram-viewer><div class="docusaurus-mermaid-container"><svg></svg></div></div></article>');
+  try {
+    decorateContentMediaSubtree(dom.window.document.querySelector('article'), styles);
+    assert.equal(dom.window.document.querySelector('svg').hasAttribute(LIGHTBOX_TRIGGER_ATTRIBUTE), false);
+  } finally {dom.window.close();}
+});
+
 function setImageDimensions(image, {naturalWidth = 240, naturalHeight = 160} = {}) {
   Object.defineProperties(image, {
     naturalWidth: {
