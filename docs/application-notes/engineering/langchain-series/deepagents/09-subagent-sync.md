@@ -800,7 +800,7 @@ _return_command_with_state_update()
 
 **下层：LangChain / LangGraph**
 
-- [LangGraph 05：子图与跨图控制](../langgraph/05-subgraphs-and-cross-graph-control.md)——子图的状态隔离与结果回写
+- [LangGraph 08：子图与跨图控制](../langgraph/08-subgraphs-and-cross-graph-control.md)——子图的状态隔离与结果回写
 
 **本系列**
 

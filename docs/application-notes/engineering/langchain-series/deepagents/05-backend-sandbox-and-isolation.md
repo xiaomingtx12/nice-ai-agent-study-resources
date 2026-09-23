@@ -811,7 +811,7 @@ def id(self) -> str:
 
 **下层：LangChain / LangGraph**
 
-- [LangGraph 09：预建工具层](../langgraph/09-prebuilt-tool-layer.md)——工具节点与执行环境的连接方式
+- [LangGraph 11：预建工具层](../langgraph/11-prebuilt-tool-layer.md)——工具节点与执行环境的连接方式
 
 **本系列**
 

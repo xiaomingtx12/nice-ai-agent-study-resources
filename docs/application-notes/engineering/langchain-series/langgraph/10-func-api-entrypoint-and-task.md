@@ -1,6 +1,6 @@
 ---
 sidebar_position: 12
-sidebar_label: 10 函数式工作流
+sidebar_label: 10 扩展：函数式工作流
 description: 追踪 entrypoint 直接构造 Pregel、task 动态调度及结果复用，解释 previous、final、恢复顺序与缓存边界。
 ---
 
@@ -8,19 +8,57 @@ description: 追踪 entrypoint 直接构造 Pregel、task 动态调度及结果�
 
 ## 源码定位
 
-> **源码基线**：langgraph 1.2.10，本文使用的源码快照不含 Git 元数据，commit 未知。版本范围与文件指纹见[导读](./index.md#源码基线)。
+> **源码基线**：langgraph 1.2.10，使用与本系列相同的本地源码快照。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >
 > - 入口构造：`libs/langgraph/langgraph/func/__init__.py` → `entrypoint.__call__()`、`_TaskFunction.__call__()`、`entrypoint.final`。
 > - 调用桥接：`libs/langgraph/langgraph/pregel/_call.py` → `_call_with_options()`、`get_runnable_for_task()`。
 > - 任务调度：`libs/langgraph/langgraph/pregel/_runner.py` → `_call()`；`libs/langgraph/langgraph/pregel/_loop.py` → `accept_push()`。
 
-函数式 API 允许用普通 Python 控制流组织可恢复工作流。`@entrypoint` 将函数变成可执行的 Pregel 入口；`@task` 将函数调用转换为运行时任务，并返回 Future（未来结果句柄）。它直接构造 Pregel，不先生成一张 StateGraph，也没有另造一套恢复引擎。
+如果业务已经写成“调用函数 A，拿到结果后调用 B”，是否还要把每个步骤改写成 `add_node()` 和 `add_edge()`？函数式 API 允许保留这类 Python 控制流，同时把需要单独记录结果的工作交给图运行时。
+
+`@entrypoint` 将函数变成可调用的工作流入口，返回的 Pregel 对象提供与前文编译图相同的执行基础；`@task` 将函数调用转换为运行时任务，并返回 Future（未来结果句柄）。它直接构造 Pregel，不先生成一张 StateGraph，也没有另造一套恢复引擎。
 
 区别在控制流的存放位置：StateGraph 用节点和边表达依赖，函数式工作流通过函数中的调用、条件和等待表达依赖。两者都可以有重试、检查点、流式事件和人工中断。
 
-## 一、entrypoint 创建入口节点和三个通道
+本篇放在核心运行时之后阅读：任务派发与执行见[第 04 篇](./04-pregel-task-execution.md)，结果保存与人工恢复见[第 06 篇](./06-checkpoints-store-and-recovery.md)和[第 07 篇](./07-interrupts-and-command.md)。这里追踪函数式入口如何接入这些机制。
 
-装饰器先把用户函数包装成 Runnable，再检查输入和返回类型。入口函数必须有输入参数；生成器和异步生成器在此基线中被拒绝。实际构造的 Pregel 含一个入口节点，其输入通道和触发通道都是 `START`。
+## 一、用两个函数观察提交和等待
+
+下面是完整应用示例，用于区分提交和等待：
+
+```python
+from langgraph.func import entrypoint, task
+
+@task
+def increment(number: int) -> int:
+    return number + 1
+
+@entrypoint()
+def workflow(numbers: list[int]) -> list[int]:
+    futures = [increment(number) for number in numbers]
+    return [future.result() for future in futures]
+
+result = workflow.invoke([1, 2])  # [2, 3]
+```
+
+第一行列表推导先提交全部调用，第二行才取结果，运行时因此可以并发执行。`.result()` 负责等待，不负责创造并行；如果在每次循环里立刻提交并等待，调用顺序就基本串行。
+
+返回列表按 Future 的收集顺序排列，不按任务完成先后排列。异步入口可用 `await asyncio.gather(...)` 等待多个任务；同步上下文调用异步 task 在该路径中会报错。节点/任务超时策略同样要求异步执行，不能用它强制杀死普通同步函数。
+
+这个示例没有配置保存器，用来观察任务调度。`@task` 不等于创建操作系统线程；它把一次调用交给当前图运行，由运行时决定执行安排。跨调用恢复还需要第四节讨论的检查点与 thread。
+
+回到熟悉的 StateGraph，可以这样对应：
+
+| 应用里写的东西 | 运行时接到什么 | 在示例中的含义 |
+| --- | --- | --- |
+| `@entrypoint()` | 一张包含入口节点的 Pregel 图 | workflow 提供 invoke 接口 |
+| `workflow.invoke([1, 2])` | 入口节点的一次任务 | 运行列表推导，准备两个调用 |
+| `increment(1)`、`increment(2)` | 两份带参数的子任务 | 同一个函数，两份独立输入与结果 |
+| `future.result()` | 等待相应任务的返回值 | 按提交顺序组装 `[2, 3]` |
+
+## 二、entrypoint 创建入口节点和三个通道
+
+Runnable 是统一同步、异步和流式调用的执行接口。装饰器先把用户函数包装成 Runnable，再检查输入和返回类型。入口函数必须有输入参数；生成器和异步生成器在此基线中被拒绝。实际构造的 Pregel 含一个入口节点，其输入通道和触发通道都是 `START`。
 
 源码：`libs/langgraph/langgraph/func/__init__.py` → `entrypoint.__call__`（第 576–609 行节选；未展示部分省略）。
 
@@ -35,6 +73,7 @@ graph: Pregel[Any, ContextT, Any, Any] = Pregel(
             writers=[
                 ChannelWrite(
                     [
+                        # 对外输出与后续调用读取的值分别写入通道。
                         ChannelWriteEntry(END, mapper=_pluck_return_value),
                         ChannelWriteEntry(PREVIOUS, mapper=_pluck_save_value),
                     ]
@@ -61,11 +100,13 @@ graph: Pregel[Any, ContextT, Any, Any] = Pregel(
 )
 ```
 
-`PregelNode` 是运行节点描述；`ChannelWriteEntry` 指定写哪个通道、如何从返回值取出数据。入口结束时，两项 writer 分别写 `END` 和 `PREVIOUS`。
+对照开头示例，`func` 是 workflow，`bound` 是包装后的 workflow 执行对象，`input_type` 和 `output_type` 对应输入、输出类型。构造器此时只装配入口；increment 的两份任务要等 invoke 真正执行到函数调用位置才产生。
+
+`PregelNode` 是运行节点描述；`ChannelWrite` 将返回值转换为通道写入，`ChannelWriteEntry` 指定目标通道和数据提取方式。入口结束时，两项 writer 分别写 `END` 和 `PREVIOUS`。
 
 `START` 用临时通道接收本次输入，`END` 用末值通道保存对外输出，`PREVIOUS` 保存供后续调用读取的值。检查点、Store、缓存和重试策略都直接交给 Pregel。默认流模式变量在前面设为 updates，不代表函数式工作流只能使用这一种观察模式。
 
-## 二、task 调用通过运行配置进入 Runner
+## 三、task 调用通过运行配置进入 Runner
 
 `@task` 装饰器保留原函数及重试、缓存、超时等策略。调用装饰后的对象时，`_TaskFunction.__call__()` 把参数交给 `_call_with_options()`，后者取得当前运行配置中的调度回调：
 
@@ -73,6 +114,7 @@ graph: Pregel[Any, ContextT, Any, Any] = Pregel(
 
 ```python
 config = get_config()
+# 取出当前任务上下文中的调度回调，不直接执行用户函数。
 impl = config[CONF][CONFIG_KEY_CALL]
 fut = impl(
     func,
@@ -111,29 +153,6 @@ if next_task := schedule_task(
 `Call` 是内部函数调用描述，保存函数、参数和执行策略；它与路由用的 `Send` 不同。Loop 为它建立带独立 ID 的子任务，`get_runnable_for_task()` 将业务返回值写入 `RETURN` 控制通道，Future 再取得这份返回值。
 
 这些动态子任务可在入口函数尚未返回时运行，否则入口等待 Future 就无法完成。它们不要求等待整个入口节点提交后才执行下一轮。
-
-## 三、并行来自先提交多个调用，再等待结果
-
-下面是完整应用示例，用于区分提交和等待：
-
-```python
-from langgraph.func import entrypoint, task
-
-@task
-def increment(number: int) -> int:
-    return number + 1
-
-@entrypoint()
-def workflow(numbers: list[int]) -> list[int]:
-    futures = [increment(number) for number in numbers]
-    return [future.result() for future in futures]
-
-result = workflow.invoke([1, 2])  # [2, 3]
-```
-
-第一行列表推导先提交全部调用，第二行才取结果，运行时因此可以并发执行。`.result()` 负责等待，不负责创造并行；如果在每次循环里立刻提交并等待，调用顺序就基本串行。
-
-返回列表按 Future 的收集顺序排列，不按任务完成先后排列。异步入口可用 `await asyncio.gather(...)` 等待多个任务；同步上下文调用异步 task 在该路径中会报错。节点/任务超时策略同样要求异步执行，不能用它强制杀死普通同步函数。
 
 ## 四、恢复会重跑入口，但可复用已完成 task 的结果
 
@@ -186,7 +205,23 @@ def _pluck_save_value(value: Any) -> Any:
     return value.save if isinstance(value, entrypoint.final) else value
 ```
 
-假设入口维护累计数，对外返回“本次处理完成”的文本，但下次需要继续累计。它可以把文本放在 value，将累计整数放在 save。下一次使用同一 thread 调用时，previous 是累计整数，而不是文本。
+下面是独立的完整应用示例，用同一个 thread 连续累计两次。`entrypoint.final` 是分别指定“对外返回值”和“下次保留值”的结果容器；注解中的两个类型依次对应这两个值。
+
+```python
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.func import entrypoint
+
+@entrypoint(checkpointer=InMemorySaver())
+def accumulate(number: int, *, previous: int | None = None) -> entrypoint.final[str, int]:
+    total = (previous or 0) + number
+    return entrypoint.final(value=f"已处理 {number}", save=total)
+
+config = {"configurable": {"thread_id": "counter-A"}}
+assert accumulate.invoke(3, config) == "已处理 3"
+assert accumulate.invoke(2, config) == "已处理 2"
+```
+
+第一次保留 3，第二次的 previous 因而是 3，累计后保留 5。previous 由运行时注入，调用方输入仍然只有这一次的 number。换一个 thread_id，就会从那条历史读取；新 thread 的 previous 为 None。
 
 | 本次输入 | 进入时 previous | 返回对象 | 调用方得到 | 下次 previous |
 | --- | --- | --- | --- | --- |

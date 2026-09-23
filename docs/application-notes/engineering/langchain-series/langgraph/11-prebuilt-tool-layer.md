@@ -1,24 +1,78 @@
 ---
-sidebar_position: 11
-sidebar_label: 09 工具执行与参数注入
-description: 沿 ToolNode 的输入解析、上下文提取、参数注入、执行与输出归并解释工具错误和图级恢复边界。
+sidebar_position: 13
+sidebar_label: 11 扩展：工具执行与参数注入
+description: 沿工具注册、参数注入、并行调用和返回值处理解释 ToolNode，连接图任务恢复边界与 LangChain 的工具装配。
 ---
 
-# LangGraph 源码 09：工具调用怎样变成消息与状态更新
+# LangGraph 源码 11：ToolNode 如何执行工具与注入上下文
 
 ## 源码定位
 
-> **源码基线**：langgraph-prebuilt 1.1.0、langgraph 1.2.10，本文使用的源码快照不含 Git 元数据，commit 未知。版本范围与文件指纹见[导读](./index.md#源码基线)。
+> **源码基线**：langgraph-prebuilt 1.1.0、langgraph 1.2.10。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >
 > - 工具执行主链：`libs/prebuilt/langgraph/prebuilt/tool_node.py` → `ToolNode._func()`、`_parse_input()`、`_run_one()`、`_execute_tool_sync()`。
 > - 注入与结果：同文件 → `_extract_state()`、`_get_all_injected_args()`、`_inject_tool_args()`、`_normalize_tool_response()`、`_combine_tool_outputs()`。
 > - 路由：同文件 → `tools_condition()`；旧工厂派发：`libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py` → `create_react_agent()` 内部 `should_continue()`。
 
-`ToolNode` 将模型请求的工具调用转换为可执行工具参数，再把结果转换为消息或图控制更新。它负责工具层协议；图的状态提交、检查点和任务恢复仍由 Pregel 处理。
+模型返回工具名和参数以后，还需要代码查找对应函数、补入用户上下文、执行调用并把结果交还模型。`ToolNode` 就是把这套处理封装成图节点的组件。本篇看它如何接住工具请求，以及图能恢复到哪一层调用。
+
+它负责工具层协议；图的状态提交、检查点和任务恢复仍由前面几篇介绍的 Pregel 处理。
 
 `BaseTool` 是 LangChain Core 的工具抽象，负责参数结构和统一调用；`ToolMessage` 是携带 `tool_call_id` 的工具结果消息，用来与模型的某次请求配对。ToolNode 可直接作为 StateGraph 节点，但它本身不决定模型何时再次运行，那由图边或上层 Agent 工厂决定。
 
-## 一、注册时建立名称表和注入表
+建议先读[任务执行](./04-pregel-task-execution.md)、[动态派发](./05-dynamic-routing-and-send.md)和[持久化](./06-checkpoints-store-and-recovery.md)，理解图能分别记录哪些工作。本篇沿工具协议展开；模型如何选择工具并继续下一轮，接着读 [LangChain 的 Agent 装配](../langchain/03-create-agent-assembly.md)。
+
+## 一、一条工具请求怎样变成结果消息
+
+下面是完整应用示例，手动构造模型已经返回的工具请求，不需要模型 API。`AIMessage` 表示模型消息，里面的 tool_calls 保存待执行请求；`MessagesState` 是预先声明 messages 字段并使用 add_messages 归并规则的状态结构。`@tool` 将有类型标注和描述的函数转换为可注册工具。
+
+```python
+from langchain_core.messages import AIMessage
+from langchain_core.tools import tool
+from langgraph.graph import START, END, MessagesState, StateGraph
+from langgraph.prebuilt import ToolNode
+
+@tool
+def add(a: int, b: int) -> int:
+    """计算两个整数的和。"""
+    return a + b
+
+builder = StateGraph(MessagesState)
+builder.add_node("tools", ToolNode([add]))
+builder.add_edge(START, "tools")
+builder.add_edge("tools", END)
+graph = builder.compile()
+
+request = AIMessage(
+    content="",
+    tool_calls=[{
+        "name": "add",
+        "args": {"a": 2, "b": 3},
+        "id": "call-1",
+        "type": "tool_call",
+    }],
+)
+result = graph.invoke({"messages": [request]})
+reply = result["messages"][-1]
+assert reply.content == "5"
+assert reply.tool_call_id == "call-1"
+assert reply.status == "success"
+assert len(result["messages"]) == 2
+```
+
+这里的 tools 运行一次就结束，因为图没有定义回到模型的边。ToolNode 的职责是执行请求并交回结果；要让模型继续解释 5 的含义，还需在外层图中接上模型节点。
+
+| 请求或返回字段 | 示例中的值 | 对应处理动作 |
+| --- | --- | --- |
+| name | add | 在注册表中找出工具对象 |
+| args | a=2、b=3 | 校验并作为函数参数传入 |
+| 请求 id | call-1 | 标识这一次调用，同一个工具可被请求多次 |
+| 结果 tool_call_id | call-1 | 将 ToolMessage 与原请求配对 |
+| 结果 content | 字符串 5 | 放入 messages 更新，再由图归并 |
+
+ToolMessage 自身的消息 ID 用于消息列表归并，tool_call_id 用于请求与响应配对，二者不是同一个用途。图里最终保留请求和响应两条消息，不是把原 AIMessage 改成字符串 5。
+
+### 注册时建立名称表和注入表
 
 构造器接受 `BaseTool` 或可转换为工具的 callable。普通函数经 `create_tool()` 转换，再按工具名保存；同时解析哪些参数应由运行时注入：
 
@@ -34,6 +88,8 @@ for tool in tools:
     # 初始化时一次解析 State、Store 和 Runtime 等注入参数。
     self._injected_args[tool_.name] = _get_all_injected_args(tool_)
 ```
+
+在示例中，`self._tools_by_name["add"]` 指向 add 工具；`_injected_args` 记录的是隐藏参数的注入方式。add 只接收 a、b，所以没有需要额外注入的业务参数。
 
 传入“name 加 func 的任意字典”不属于这里声明的工具注册契约。普通函数也需要符合工具转换要求，例如具备可用的参数结构和描述；不是所有 lambda 都能直接成为有效工具。
 
@@ -56,6 +112,8 @@ for tool in tools:
 消息输入不存在、找不到 AIMessage 都有错误分支。`tools_condition()` 的行为还略有不同：它检查**最后一条消息**是否带工具调用，而不是向前搜索最近 AIMessage。路由和执行器接受的历史形态不同，不能据此把不完整消息历史当作通用输入。
 
 ## 三、单次工具调用经过包装器，再注入可信参数
+
+示例中的 a、b 来自请求。如果工具还需要当前用户、图状态或调用 ID，这些值应由运行环境提供；不能要求模型自己猜出运行现场。参数注入就是在真正调用函数前补齐这些值。
 
 每个调用进入 `_run_one()`，构造 `ToolCallRequest`，即包含原始调用、工具对象与上下文的请求。配置了 `wrap_tool_call` 时，包装器可修改请求、重试、缓存或短路返回，再决定是否调用实际执行函数。
 
@@ -80,6 +138,8 @@ try:
             call["name"], exc, call["args"], filtered_errors
         ) from exc
 ```
+
+下段讨论的注入对象属于 ToolNode 的扩展参数协议：`InjectedState` 声明一个参数从图状态读取，`InjectedStore` 声明一个参数来自业务数据存储，`ToolRuntime` 则提供工具调用的完整上下文。
 
 `InjectedState("user_context")` 表示从 State 的该字段填充参数；不指定字段时注入整份状态。`InjectedStore` 请求图配置的业务 Store；`ToolRuntime` 将工具运行上下文整体注入。工具向模型暴露的调用结构隐藏这些参数，但隐藏本身还不够，执行端必须拒绝模型伪造同名值。
 
@@ -165,6 +225,8 @@ return ToolMessage(
 此时“ToolNode task 成功返回”和“工具业务成功”是两层状态。监控不能只看图任务是否抛异常；需要按 ToolMessage 的 `status` 和业务结果判断。把所有服务错误都转给模型，也可能隐藏基础设施故障，应按异常类型划定可修正和应中止的边界。
 
 ## 六、返回值如何进入图状态
+
+回到 add 示例：函数返回整数 5，工具调用层把它包装成 content 为字符串 5、tool_call_id 为 call-1 的 ToolMessage；ToolNode 再返回 messages 更新。负责把它和原 AIMessage 合在一起的是图的 add_messages reducer。
 
 `BaseTool.invoke()` 处理普通工具返回值并形成相应结果；ToolNode 的 `_normalize_tool_response()` 接受 ToolMessage、Command 或符合约束的结果列表。`_combine_tool_outputs()` 将普通消息包装成 `{"messages": [...]}`，再交给图的字段 writer 和 reducer。
 
