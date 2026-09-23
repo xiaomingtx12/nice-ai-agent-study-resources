@@ -92,6 +92,7 @@ const config: Config = {
             'https://github.com/xiaomingtx12/nice-ai-agent-study-resources/edit/main/',
           showLastUpdateAuthor: true,
           showLastUpdateTime: true,
+          beforeDefaultRemarkPlugins: [require('./src/plugins/staticMermaid/index.cjs')],
         },
         blog: false,
         theme: {

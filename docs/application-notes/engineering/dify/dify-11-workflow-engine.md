@@ -698,13 +698,14 @@ flowchart TD
         P4["WorkflowResumptionContext<br/>generate_entity + serialized_state"]
         P1 --> P2 --> P3 --> P4
     end
-    P4 --> subgraph Resume["恢复流程"]
+    subgraph Resume["恢复流程"]
         R1["resume_workflow_execution<br/>Celery 任务"]
         R2["GraphRuntimeState.from_snapshot<br/>反序列化恢复状态"]
         R3["WorkflowAppGenerator.resume<br/>传入 graph_runtime_state"]
         R4["WorkflowAppRunner.run<br/>resume_state is not None → 恢复模式"]
         R1 --> R2 --> R3 --> R4
     end
+    P4 --> Resume
 ```
 
 `WorkflowResumptionContext`（api/core/app/layers/pause_state_persist_layer.py:36-53）是恢复的完整上下文：

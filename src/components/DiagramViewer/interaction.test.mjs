@@ -29,7 +29,7 @@ async function harness() {
     return require(name);
   }});
   const root=createRoot(document.getElementById("app"));
-  await act(async()=>root.render(React.createElement(module.exports.default,{result:{svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 288 148"><rect width="288" height="148"/></svg>'}})));
+  await act(async()=>root.render(React.createElement(module.exports.default,{result:{svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 288 148"><rect width="288" height="148"/></svg>',width:288,height:148}})));
   const canvas=document.querySelector("[aria-label=图表画布]");
   const wrapper=document.querySelector(".react-transform-component");
   const mouse=(target,type,x,y)=>target.dispatchEvent(new dom.window.MouseEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:y,button:0,buttons:type==="mouseup"?0:1}));

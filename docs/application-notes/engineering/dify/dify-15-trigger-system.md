@@ -348,9 +348,9 @@ flowchart TD
     C --> D[3. 队列路由<br/>QueueDispatcherManager 按 tenant 订阅等级选队列]
     D --> E[4. 确定 created_by_role<br/>Account / EndUser]
     E --> F["5. 创建 WorkflowTriggerLog<br/>status=PENDING"]
-    F --> G[6. 配额检查<br/>QuotaService.reserve(QuotaType.WORKFLOW)]
+    F --> G["6. 配额检查<br/>QuotaService.reserve(QuotaType.WORKFLOW)"]
     G -- 超限 --> H["status=RATE_LIMITED<br/>raise WorkflowQuotaLimitError"]
-    G -- 通过 --> I[7. 派发 Celery 任务<br/>execute_workflow_{professional|team|sandbox}]
+    G -- 通过 --> I["7. 派发 Celery 任务<br/>execute_workflow_{professional|team|sandbox}"]
     I --> J["8. 更新 trigger_log<br/>status=QUEUED, celery_task_id"]
 ```
 

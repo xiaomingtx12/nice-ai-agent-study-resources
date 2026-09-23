@@ -60,8 +60,8 @@ function LearningLayers(): ReactNode {
 
   return (
     <figure className="kh-atlas">
-      <div className="kh-atlas-caption"><span>学习的积累</span><span>从理解到复用</span></div>
-      <svg viewBox="0 0 480 400" role="img" aria-label="学习的三个层次：阅读形成理解，源码与实践加深认识，复盘沉淀出可复用的方法。">
+      <div className="kh-atlas-caption"><span>工程判断的积累</span><span>从学习到实践</span></div>
+      <svg viewBox="0 0 480 400" role="img" aria-label="资源导航：精选学习资料；应用拆解：理解真实项目；方法复盘：沉淀工程判断。">
         <defs>
           <linearGradient id={id + '-paper'} x1="0" y1="0" x2="0.5" y2="1">
             <stop className="kh-atlas-paper-light" />
@@ -92,9 +92,9 @@ function LearningLayers(): ReactNode {
           <path d="m34 292 206 81 207-113M34 212l206 81 207-113" />
         </g>
         {[
-          {name: 'foundation', y: 160, title: '复盘 / 方法', detail: 'Reflect · Reuse'},
-          {name: 'practice', y: 80, title: '源码 / 实践', detail: 'Code · Practice'},
-          {name: 'reading', y: 0, title: '阅读 / 理解', detail: 'Read · Understand'},
+          {name: 'foundation', y: 160, title: '方法复盘', detail: '沉淀工程判断'},
+          {name: 'practice', y: 80, title: '应用拆解', detail: '理解真实项目'},
+          {name: 'reading', y: 0, title: '资源导航', detail: '精选学习资料'},
         ].map((layer) => (
           <g key={layer.name} className={'kh-atlas-layer kh-atlas-' + layer.name} transform={'translate(0 ' + layer.y + ')'}>
             <g filter={paint('shadow')}>
@@ -124,7 +124,7 @@ function LearningLayers(): ReactNode {
           <circle cx="450" cy="266" r="3" />
         </g>
       </svg>
-      <figcaption>读过、做过，再整理成自己的理解。</figcaption>
+      <figcaption>理解设计取舍，形成自己的判断。</figcaption>
     </figure>
   );
 }
@@ -135,7 +135,7 @@ export default function KnowledgeHome(): ReactNode {
       <header className="kh-intro">
         <div className="kh-intro-copy">
           <p className="kh-eyebrow">AI Agent 学习沉淀</p>
-          <h1>把学到的，<br />留给下一次实践。</h1>
+          <h1>在学习与实践中，<br />提升判断力。</h1>
           <p className="kh-lead">记录值得读的资料、拆过的源码与实践后的复盘。<br />把零散的理解，慢慢整理成下次用得上的经验。</p>
           <div className="kh-actions">
             <Link className="kh-action-primary" to="/resources/">浏览学习资源 <Arrow /></Link>
@@ -173,6 +173,17 @@ export default function KnowledgeHome(): ReactNode {
         </section>
 
         <aside className="kh-index" aria-label="阅读索引">
+          <section className="kh-collections" aria-labelledby="kh-collections-title">
+            <div className="kh-section-head">
+              <h2 id="kh-collections-title">学习内容</h2>
+            </div>
+            {collections.map((collection) => (
+              <Link className="kh-collection" to={collection.to} key={collection.stat}>
+                <span>{collection.title}</span>
+                <span className="kh-count"><SiteCount stat={collection.stat} /> {collection.unit}</span>
+              </Link>
+            ))}
+          </section>
           <section aria-labelledby="kh-questions-title">
             <div className="kh-section-head">
               <h2 id="kh-questions-title">按问题阅读</h2>
@@ -189,17 +200,6 @@ export default function KnowledgeHome(): ReactNode {
               ))}
             </div>
             <Link className="kh-index-more" to="/notes/agent-system-design/">查看工程方法 <Arrow /></Link>
-          </section>
-          <section className="kh-collections" aria-labelledby="kh-collections-title">
-            <div className="kh-section-head">
-              <h2 id="kh-collections-title">学习内容</h2>
-            </div>
-            {collections.map((collection) => (
-              <Link className="kh-collection" to={collection.to} key={collection.stat}>
-                <span>{collection.title}</span>
-                <span className="kh-count"><SiteCount stat={collection.stat} /> {collection.unit}</span>
-              </Link>
-            ))}
           </section>
           <p className="kh-editor-note">这里记录学习过程，也保留实践后的判断。<br />内容随着理解深入，持续补充和修订。</p>
           <Link className="kh-index-more" to="/about/">关于本站 <Arrow /></Link>

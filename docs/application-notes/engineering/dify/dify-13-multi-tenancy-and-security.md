@@ -462,7 +462,7 @@ def generate_api_key(prefix: str, n: int) -> str:
 
 ```mermaid
 flowchart TD
-    V1[Authorization: Bearer {token}] --> V2[ApiTokenCache.get<br/>Redis: api_token:{scope}:{token}]
+    V1["Authorization: Bearer {token}"] --> V2["ApiTokenCache.get<br/>Redis: api_token:{scope}:{token}"]
     V2 -- 命中 --> V3[record_token_usage<br/>Redis SET 1h]
     V2 -- 未命中 --> V4[fetch_token_with_single_flight]
     V4 --> V5[Redis lock acquire]

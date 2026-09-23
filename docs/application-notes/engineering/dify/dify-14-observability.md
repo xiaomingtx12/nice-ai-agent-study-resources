@@ -1066,7 +1066,7 @@ sequenceDiagram
     PL->>TQ: add_trace_task(WORKFLOW_TRACE)
     TQ->>Q: put(TraceTask)
 
-    every 5s
+    loop 每 5 秒
         TQ->>Q: collect_tasks (batch ≤100)
         Q-->>TQ: tasks
         TQ->>TQ: 序列化 JSON → 存储文件

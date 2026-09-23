@@ -36,6 +36,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install diagram renderer browser dependencies
+        run: npx puppeteer browsers install chrome --install-deps
+
+      - name: Cache pre-rendered diagrams
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/mermaid-svg
+          key: mermaid-${{ runner.os }}-${{ hashFiles('package-lock.json', 'src/plugins/staticMermaid/**', 'src/theme/Mermaid/palette.mjs') }}-${{ hashFiles('docs/**') }}
+          restore-keys: |
+            mermaid-${{ runner.os }}-${{ hashFiles('package-lock.json', 'src/plugins/staticMermaid/**', 'src/theme/Mermaid/palette.mjs') }}-
+
       - name: Build site
         env:
           # 从 configure-pages 输出推导：项目页为 /<repo>/，将来绑自定义域名自动变 /

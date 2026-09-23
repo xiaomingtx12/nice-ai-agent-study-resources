@@ -599,7 +599,7 @@ Workflow 的"双层事件"——节点级（`QueueNodeStartedEvent` / `QueueNode
 
 ```mermaid
 flowchart TD
-    Click[用户点击"停止生成"] --> API_stop["API: POST /chat-messages/stop<br/>AppQueueManager.set_stop_flag"]
+    Click["用户点击“停止生成”"] --> API_stop["API: POST /chat-messages/stop<br/>AppQueueManager.set_stop_flag"]
     API_stop --> Auth[验证用户身份<br/>task_belong 缓存比对]
     Auth --> Redis_stop["写入 Redis<br/>generate_task_stopped:{task_id} = 1<br/>TTL 600s"]
 
@@ -993,7 +993,7 @@ return {"task_id": task.id, "status": "queued"}
 ```mermaid
 flowchart TD
     Q{Worker 是否在运行?}
-    Q -- 否 --> A1[检查 worker 进程: docker ps | grep worker]
+    Q -- 否 --> A1["检查 worker 进程: docker ps | grep worker"]
     A1 --> A2[查看 worker 日志: docker logs dify-api-worker]
     A2 --> A3[常见原因:<br/>- OOM 被 kill<br/>- 数据库连接超时<br/>- LLM API 限速卡死]
 
@@ -1027,7 +1027,7 @@ flowchart LR
     Check -- 有 --> PauseType{类型?}
     PauseType -- Wait/Pause --> P1[检查后续节点配置<br/>查看 WAITING 状态原因]
     PauseType -- HumanInput --> P2[检查 human_input_form_timeout<br/>Celery Beat 是否运行]
-    PauseType -- Webhook --> P3[查看 Webhook 触发日志:<br/>GET /v1/triggers/webhook/{id}]
+    PauseType -- Webhook --> P3["查看 Webhook 触发日志:<br/>GET /v1/triggers/webhook/{id}"]
 
     Check -- 无 --> Loop[可能是节点死循环:<br/>查看 ExecutionLimitsLayer 日志]
 ```

@@ -1,30 +1,17 @@
-import {memo, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {memo, useEffect, useRef, useState, type ReactNode} from 'react';
 import {TransformComponent, TransformWrapper, useControls, useTransformComponent} from 'react-zoom-pan-pinch';
-import type {RenderResult} from 'mermaid';
+import '@fontsource/noto-sans-sc/400.css';
 import styles from './styles.module.css';
+
+export type DiagramResult = {svg: string; width: number; height: number};
 
 function Icon({kind}: {kind: 'plus' | 'minus' | 'fit' | 'expand'}): ReactNode {
   const paths = {plus: 'M5 12h14M12 5v14', minus: 'M5 12h14', fit: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M8 8h8v8H8z', expand: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5'};
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[kind]} /></svg>;
 }
 
-const DiagramMarkup = memo(function DiagramMarkup({result}: {result: RenderResult}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const prepared = useMemo(() => {
-    const svg = new DOMParser().parseFromString(result.svg, 'image/svg+xml').documentElement;
-    const box = svg.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
-    const width = box?.length === 4 && box[2] > 0 ? box[2] : 800;
-    const height = box?.length === 4 && box[3] > 0 ? box[3] : 400;
-    svg.setAttribute('width', String(width));
-    svg.setAttribute('height', String(height));
-    const style = (svg as unknown as SVGSVGElement).style;
-    style.width = width + 'px';
-    style.height = height + 'px';
-    style.maxWidth = 'none';
-    return {svg: new XMLSerializer().serializeToString(svg), width, height};
-  }, [result]);
-  useEffect(() => {if (ref.current) result.bindFunctions?.(ref.current);}, [result]);
-  return <div ref={ref} className={'docusaurus-mermaid-container ' + styles.markup} style={{width: prepared.width + 32, height: prepared.height + 32}} dangerouslySetInnerHTML={{__html: prepared.svg}} />;
+const DiagramMarkup = memo(function DiagramMarkup({result}: {result: DiagramResult}) {
+  return <div className={'docusaurus-mermaid-container ' + styles.markup} style={{width: result.width + 32, height: result.height + 32}} dangerouslySetInnerHTML={{__html: result.svg}} />;
 });
 
 function ScaleLabel() {
@@ -104,29 +91,7 @@ function Controls({ready, interactive, setInteractive, fullscreen, expand, reduc
   </div>;
 }
 
-export default function DiagramViewer({result}: {result: RenderResult | null}) {
-  if (result) return <ReadyDiagramViewer result={result} />;
-  // 长文中的离屏图只保留等高占位，不预先创建缩放实例、ResizeObserver 和全局手势监听。
-  return <div className={styles.viewer} data-diagram-viewer="" data-interactive="false">
-    <div className={styles.toolbar} role="group" aria-label="图表工具">
-      <span className={styles.title}>图表</span>
-      <div className={styles.tools}>
-        <button type="button" disabled aria-label="缩小图表"><Icon kind="minus" /></button>
-        <span className={styles.scale} aria-label="图表缩放比例">—</span>
-        <button type="button" disabled aria-label="放大图表"><Icon kind="plus" /></button>
-        <span className={styles.divider} />
-        <button type="button" disabled aria-label="适应画布"><Icon kind="fit" /></button>
-        <button type="button" disabled aria-label="原始比例">1:1</button>
-        <button type="button" disabled>拖动</button>
-        <button type="button" disabled aria-label="全屏查看图表"><Icon kind="expand" /></button>
-      </div>
-    </div>
-    <div className={styles.stage} aria-busy="true"><div className={styles.placeholder} role="status">正在准备图表…</div></div>
-    <div className={styles.caption}>滚动阅读文章 · 开启拖动可平移与缩放</div>
-  </div>;
-}
-
-function ReadyDiagramViewer({result}: {result: RenderResult}) {
+export default function DiagramViewer({result}: {result: DiagramResult}) {
   const root = useRef<HTMLDivElement>(null);
   const [interactive, setInteractive] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -164,12 +129,12 @@ function ReadyDiagramViewer({result}: {result: RenderResult}) {
       // 拖动结束后不再自动把内容吸回边界，避免“拖不跟手”和松手跳位。
       autoAlignment={{disabled: true, animationTime: 0}}>
       <Controls ready={!!result} interactive={interactive} setInteractive={setInteractive} fullscreen={fullscreen} expand={() => void expand()} reducedMotion={reducedMotion} />
-      <div className={styles.stage} aria-busy={!result}>
-        {result ? <TransformComponent wrapperClass={styles.canvas} contentClass={styles.content} wrapperProps={{role: 'region', 'aria-label': '图表画布', tabIndex: interactive ? 0 : -1}}>
+      <div className={styles.stage}>
+        <TransformComponent wrapperClass={styles.canvas} contentClass={styles.content} wrapperProps={{role: 'region', 'aria-label': '图表画布', tabIndex: interactive ? 0 : -1}}>
           <DiagramMarkup result={result} />
           <FitOnResize />
           <WheelZoom enabled={interactive} />
-        </TransformComponent> : <div className={styles.placeholder} role="status">正在准备图表…</div>}
+        </TransformComponent>
       </div>
       <div className={styles.caption} aria-live="polite">{message || (interactive ? '拖动平移 · 滚轮缩放 · 方向键移动 · Esc 结束拖动' : '滚动阅读文章 · 开启拖动可平移与缩放')}</div>
     </TransformWrapper>
