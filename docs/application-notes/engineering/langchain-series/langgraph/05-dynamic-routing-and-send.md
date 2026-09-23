@@ -1,25 +1,84 @@
 ---
-sidebar_position: 6
-sidebar_label: 04 Send 与 Command
-description: 沿控制写入、TASKS 通道和任务准备追踪动态派发，并解释共享状态合并、静态边叠加与父图命令。
+sidebar_position: 7
+sidebar_label: 05 Send 与动态控制流
+description: 沿状态更新、控制写入和 TASKS 通道追踪动态派发，解释独立输入、共享状态合并与静态边叠加。
 ---
 
-# LangGraph 源码 04：Send 和 Command 如何产生下一步任务
+# LangGraph 源码 05：Send 和 Command 如何产生下一步任务
 
 ## 源码定位
 
-> **源码基线**：langgraph 1.2.10，本文使用的源码快照不含 Git 元数据，commit 未知。版本范围与文件指纹见[导读](./index.md#源码基线)。
+> **源码基线**：langgraph 1.2.10。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >
 > - 控制对象：`libs/langgraph/langgraph/types.py` → `Send`、`Command`。
-> - 返回值拆解：`libs/langgraph/langgraph/graph/state.py` → `attach_node()`、`_control_branch()`。
+> - 返回值拆解：`libs/langgraph/langgraph/graph/state.py` → `attach_node()`、`attach_branch()`、`_control_branch()`。
 > - 派发任务：`libs/langgraph/langgraph/pregel/_algo.py` → `prepare_next_tasks()`、`prepare_push_task_send()`。
-> - 跨图命令：`libs/langgraph/langgraph/pregel/_retry.py` → `run_with_retry()`。
+
+固定边可以表达“处理完就进入下一步”。如果待处理的主题数量到运行时才知道，想让同一个 worker 分别处理每个主题，就需要为每次调用提供不同输入。本篇从这个问题解释 `Send` 和 `Command`。
 
 `Send` 描述一次“把独立输入交给指定节点”的调用；`Command` 描述状态更新和控制动作。它们本身不执行下游函数，而是由编译后的 writer 转换为通道写入，再由运行时准备任务。
 
 两者的区别可以从输入理解：`Command(goto="worker")` 触发 worker 从图状态读取输入；`Command(goto=Send("worker", {"item": "A"}))` 则把 `{"item": "A"}` 直接作为本次 worker 的输入。后者适合按数据数量动态创建任务。
 
-## 一、Command 的返回值被拆成两组写入
+## 一、主题有几个，就派发几次 summarize
+
+下面是完整应用示例。主图保存主题列表与汇总结果，summarize 每次只接收一个主题；这里用固定字符串生成摘要，便于观察派发与汇合，不依赖模型。
+
+```python
+import operator
+from typing import Annotated
+from typing_extensions import TypedDict
+from langgraph.graph import START, END, StateGraph
+from langgraph.types import Send
+
+class State(TypedDict):
+    topics: list[str]
+    summaries: Annotated[list[str], operator.add]
+    report: str
+
+class WorkerInput(TypedDict):
+    topic: str
+
+def dispatch(state: State):
+    if not state["topics"]:
+        return "collect"  # 没有 worker 时，也要生成空结果。
+    return [Send("summarize", {"topic": topic}) for topic in state["topics"]]
+
+def summarize(state: WorkerInput):
+    return {"summaries": [f"{state['topic']}：已整理"]}
+
+def collect(state: State):
+    return {"report": "；".join(sorted(state["summaries"])) or "没有主题"}
+
+builder = StateGraph(State)
+builder.add_node("summarize", summarize)
+builder.add_node("collect", collect)
+builder.add_conditional_edges(START, dispatch, ["summarize", "collect"])
+builder.add_edge("summarize", "collect")
+builder.add_edge("collect", END)
+graph = builder.compile()
+result = graph.invoke({"topics": ["A", "B"], "summaries": [], "report": ""})
+assert result["report"] == "A：已整理；B：已整理"
+empty = graph.invoke({"topics": [], "summaries": [], "report": ""})
+assert empty["report"] == "没有主题"
+```
+
+`dispatch` 是条件路由函数，它的返回值用来选择下一步，不是业务状态更新。两份 Send 指向同一个节点定义，却携带不同的 `topic`；worker 返回的 `summaries` 则是主图字段，按列表拼接规则合并。
+
+| 这次调用经过的位置 | 具体数据 | 接下来发生什么 |
+| --- | --- | --- |
+| dispatch 返回 | 两份 Send，参数分别为 A、B | 写入用于收集派发请求的 TASKS 通道 |
+| 准备下一轮 | 两份 summarize 任务，各有自己的输入和 ID | Runner 可以并行执行 |
+| summarize 返回 | `["A：已整理"]`、`["B：已整理"]` 两份字段更新 | 本轮结束后归并到 summaries |
+| collect 输入 | 已合并的 summaries | 返回 report，再结束 |
+
+如果 topics 为空，路由直接触发 collect。仅返回空 Send 列表不会让 summarize 执行，也不会自动触发它后面的 collect。
+
+### 同时更新状态与选择下一步时，用 Command
+
+示例中路由只选择目标，所以直接返回 Send。若一个业务节点还要写入审核结果，再决定去哪，就可以返回 Command；下面沿源码看它如何拆开处理。
+
+### Command 的返回值被拆成两组写入
 
 `Command` 的 `update` 携带状态更新，`goto` 携带目标节点名或 `Send`。例如一次审核返回 `Command(update={"approved": True}, goto="publish")` 时，运行时分别提取 `approved` 字段写入和 `branch:to:publish` 触发信号。
 
@@ -47,6 +106,8 @@ for command in commands:
 return rtn
 ```
 
+这里的 `commands` 是从节点返回值中取出的命令集合，`rtn` 是即将交给运行时的通道写入列表。`TASKS` 是派发通道的内部名字，不是 Python 的任务线程池。
+
 `_CHANNEL_BRANCH_TO.format(go)` 生成 `branch:to:<目标>`。字符串目标写入触发通道，`Send` 写入 `TASKS`；状态更新与控制写入一起进入当前任务的写入队列。字段更新仍受 reducer 约束，`Command` 不能绕过并行写冲突。
 
 这里的 `END` 只是不再添加这条动态后继。**Command.goto 不会覆盖已有静态边。** 若 `review` 还有一条固定到 `audit` 的边，返回 `goto="publish"` 仍可能让两个节点都运行；`goto=END` 也不会取消固定边或其他活跃任务。
@@ -57,7 +118,7 @@ return rtn
 
 `Send(node, arg)` 包含目标名和本次输入，还可携带本次调用的超时策略。多份 `Send` 写入 `TASKS`，这是收集派发数据的 `Topic` 通道。下一轮 `prepare_next_tasks()` 遍历它，为每个下标创建 `(PUSH, idx)` 任务路径。
 
-`prepare_push_task_send()` 根据路径重新取出数据包，确认类型和目标节点：
+`prepare_push_task_send()` 根据路径重新取出数据包，确认类型和目标节点。套回示例，`sends` 是两份派发请求，`idx` 选中其中一份，`packet.node` 为 summarize，`packet.arg` 为单个主题字典；`processes` 则保存已编译的节点定义：
 
 源码：`libs/langgraph/langgraph/pregel/_algo.py` → `prepare_push_task_send`（第 964–979 行节选；未展示部分省略）。
 
@@ -90,7 +151,7 @@ PULL 与 PUSH 是调度来源的区别，不是线程与进程的区别，也不
 
 ## 三、动态输入独立，输出仍汇入图状态
 
-假设派发节点为两个主题各发送一份 `Send("summarize", {"topic": ...})`，两个 worker 都返回 `{"summaries": [本次摘要]}`：
+回到开头示例，条件路由为两个主题各发送一份 `Send("summarize", {"topic": ...})`，两个 worker 都返回 `{"summaries": [本次摘要]}`：
 
 | 位置 | 保存的数据 | 作用 |
 | --- | --- | --- |
@@ -105,33 +166,8 @@ PULL 与 PUSH 是调度来源的区别，不是线程与进程的区别，也不
 
 当动态分支跨不同轮次、还包含循环时，必须重新设计汇合条件，例如显式记录预期 ID 与完成 ID，或在适合“等全图其他工作耗尽”的情况下使用延迟节点。`Send` 数量为零时也不会凭空触发 worker 的后继，空输入路径要单独定义。
 
-## 四、Command.PARENT 沿调用边界向上传播
+## 四、按输入和控制边界选择入口
 
-子图中的节点可以返回 `Command(graph=Command.PARENT, update=..., goto=...)`。子图的状态 writer 跳过这份更新，控制 writer 抛出 `ParentCommand`。它是内部控制异常，不代表业务节点失败。
-
-`run_with_retry()` 沿图调用边界处理该异常：
-
-源码：`libs/langgraph/langgraph/pregel/_retry.py` → `run_with_retry`（第 618–631 行节选；未展示部分省略）。
-
-```python
-except ParentCommand as exc:
-    ns: str = config[CONF][CONFIG_KEY_CHECKPOINT_NS]
-    cmd = exc.args[0]
-    # 比较命名空间时去掉任务 ID，以匹配目标图。
-    if cmd.graph in (ns, recast_checkpoint_ns(ns), task.name):
-        # 命令属于当前边界，交给此任务的 writers 处理。
-        for w in task.writers:
-            w.invoke(cmd, config)
-        break
-    elif cmd.graph == Command.PARENT:
-        # 将 PARENT 改写为具体父图命名空间。
-        exc.args = (replace(cmd, graph=_checkpoint_ns_for_parent_command(ns)),)
-    # 未到目标边界时继续向外传播。
-    raise
-```
-
-到达目标边界后，父节点的 writers 处理命令，于是 `update` 按父图字段过滤并归并，`goto` 转换为父图触发信号。它没有在子图内部直接调用父图函数，也不做任意层级节点查找。
-
-父图已有静态后继依然可能随 writers 一起执行。父子共享字段上的 reducer 也要按实际输出设计，尤其避免把已累计的完整列表再次作为增量返回。跨图接口最好只返回需要交给父图的结果或控制对象，减少两层对同一字段重复归并。
+`Command(graph=Command.PARENT, ...)` 将控制交给父图。上面的 `ParentCommand` 是传出该命令的内部控制异常；父子状态、命名空间和异常传播需要放在一起理解，完整链路见[子图篇](./08-subgraphs-and-cross-graph-control.md)。
 
 `Command(resume=...)` 是另一个入口：由调用方向图传入恢复值，而非节点选择下一跳。它按中断身份匹配，详见[暂停与恢复](./07-interrupts-and-command.md)。固定依赖用边，动态独立输入用 `Send`，一次业务判断同时产生更新与下一跳时用 `Command`；选择依据应是数据与执行边界。

@@ -776,7 +776,7 @@ libs/deepagents/tests/unit_tests/test_async_subagents.py
 
 **下层：LangChain / LangGraph**
 
-- [LangGraph 05：子图与跨图控制](../langgraph/05-subgraphs-and-cross-graph-control.md)——跨执行单元的边界控制
+- [LangGraph 08：子图与跨图控制](../langgraph/08-subgraphs-and-cross-graph-control.md)——跨执行单元的边界控制
 - [LangGraph 06：Checkpoint、Store 与恢复](../langgraph/06-checkpoints-store-and-recovery.md)——远程任务索引与本地检查点的分工
 
 **本系列**

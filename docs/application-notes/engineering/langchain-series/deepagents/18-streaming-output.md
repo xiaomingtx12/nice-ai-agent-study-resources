@@ -461,7 +461,7 @@ if interrupts:
 
 **下层：LangChain / LangGraph**
 
-- [LangGraph 08：Stream 系统](../langgraph/08-stream-system.md)——图层的流式输出与多种 stream mode
+- [LangGraph 09：Stream 系统](../langgraph/09-stream-system.md)——图层的流式输出与多种 stream mode
 
 **本系列**
 

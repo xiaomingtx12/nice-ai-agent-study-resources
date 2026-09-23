@@ -8,7 +8,7 @@ description: 从组件调用、Agent 装配与状态流转进入 LangChain 源�
 
 本系列沿真实调用链解释 LangChain 的组件协议、Agent 装配和运行机制。正文说明关键对象、数据变化、异常分支与设计取舍，让读者不打开源码也能理解核心实现；每篇头部保留源码相对路径和函数入口，便于按需核对。
 
-> **阅读基线**：LangChain 仓库快照 `76c32db9b38dfc287c958dc2a914d4834f022c1c`，其中 langchain 为 1.3.7，langchain-core 为 1.4.6；RAG 两篇还分析 langchain-classic 1.0.8、langchain-text-splitters 1.1.2。版本对应本文代码，不代表最新版。正文中的 `libs/…` 路径相对 LangChain 仓库根目录，依赖包路径另行说明。
+> **阅读基线**：LangChain 为 1.3.7，langchain-core 为 1.4.6；RAG 两篇还分析 langchain-classic 1.0.8、langchain-text-splitters 1.1.2。版本对应本文代码，不代表最新版。正文中的 `libs/…` 路径相对 LangChain 仓库根目录，依赖包路径另行说明。
 
 ## 一、按问题选择阅读路线
 

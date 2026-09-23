@@ -1,27 +1,34 @@
 ---
 sidebar_position: 5
-sidebar_label: 03 Pregel 调度与提交
-description: 沿任务准备、Runner、重试与超时、写入记录和轮次提交解释状态可见性、失败清理与恢复粒度。
+sidebar_label: 03 执行循环与轮次提交
+description: 沿触发版本、任务准备、执行交接和轮次提交理解状态可见性，并解释协作式停止如何让当前轮次收尾。
 ---
 
-# LangGraph 源码 03：一轮任务如何运行、失败和提交
+# LangGraph 源码 03：下一轮运行哪些任务，状态何时提交
 
 ## 源码定位
 
-> **源码基线**：langgraph 1.2.10，本文使用的源码快照不含 Git 元数据，commit 未知。版本范围与文件指纹见[导读](./index.md#源码基线)。
+> **源码基线**：langgraph 1.2.10。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >
 > - 主循环：`libs/langgraph/langgraph/pregel/main.py` → `Pregel.stream()`。
 > - 轮次管理：`libs/langgraph/langgraph/pregel/_loop.py` → `PregelLoop.tick()`、`after_tick()`。
 > - 任务与状态：`libs/langgraph/langgraph/pregel/_algo.py` → `prepare_next_tasks()`、`_triggers()`、`apply_writes()`。
-> - 执行与重试：`libs/langgraph/langgraph/pregel/_runner.py` → `PregelRunner.tick()`、`commit()`、`_panic_or_proceed()`；`libs/langgraph/langgraph/pregel/_retry.py` → `run_with_retry()`、`_arun_with_timeout()`、`_TimedAttemptScope._guard_send()`。
+> - 执行交接：`libs/langgraph/langgraph/pregel/_runner.py` → `PregelRunner.tick()`。
+> - 协作式停止：`libs/langgraph/langgraph/runtime.py` → `RunControl.request_drain()`；`libs/langgraph/langgraph/pregel/main.py` → `Pregel.stream()`。
 
-Pregel 使用 superstep（超级步）组织图执行：先从已提交状态准备任务，再执行这些任务，收集写入，在轮次边界合并。任务完成与状态提交是两个时刻，检查点真正保存完成又是另一个时刻。
+第 00 篇的加一图只需要执行一次 increment；图里出现两个可并行节点时，`invoke()` 就得反复决定“这一轮运行谁，什么时候让下游读取结果”。本篇解释这个决定过程。
 
-`PregelLoop` 管理轮数、通道和检查点，`PregelRunner` 负责执行任务并处理完成、重试和异常。`PregelExecutableTask` 是某次节点调用的运行记录，包含输入、调用对象、任务 ID、触发来源和写入队列；同一个节点可以有多个任务实例。
+`Pregel` 是编译图继承的执行实现；一次调用进入它的 `stream()` 后，会创建管理本次进度的 `Loop` 和执行节点调用的 `Runner`。Loop 持有当前状态、待执行工作和轮次。它的 `tick()` 准备一轮任务，`after_tick()` 在这一轮结束后合并更新。
+
+每个 task 是某个节点带着本次输入的一次调用记录。例如 increment 节点加上 `{"count": 0}` 的输入，就对应这次要执行的工作；`PregelExecutableTask` 是源码中这份记录的类型名。节点函数具体怎样被执行、失败怎样处理，留给[第 04 篇](./04-pregel-task-execution.md)。
+
+先读前四节，跟完“准备调用 → 执行 → 合并”的正常过程。第五节再看外部要求停止时，循环在哪个位置收尾。
 
 ## 一、从一次汇合看状态何时变化
 
-设 `left` 与 `right` 同轮运行，`items` 的 reducer 为列表拼接；`merge` 通过等待边依赖二者。忽略接收输入的隐藏 `START` 轮次后，变化如下：
+沿用[第 01 篇的完整示例](./01-state-schema-channels-and-reducers.md)：START 同时指向 left、right，两个节点分别返回一项 items，merge 用 `add_edge(["left", "right"], "merge")` 等待两者。这里不改图，换成调度器的视角看同一次调用。
+
+即使 left 先完成，right 也不会因此获得包含 left 的新输入；merge 更不能提前开始。业务依赖写在边上，节点返回只表示这次任务产生了一份结果。忽略接收输入的隐藏 START 轮次后，变化如下：
 
 | 时刻 | 任务行为 | 已提交 items | 待合并写入 |
 | --- | --- | --- | --- |
@@ -44,6 +51,8 @@ Pregel 使用 superstep（超级步）组织图执行：先从已提交状态准
 
 `prepare_next_tasks()` 用上一轮更新的通道及 `trigger_to_nodes` 反向索引缩小候选节点范围。候选不等于必定执行，还需检查通道是否可读、版本是否比该节点上次读过的更新：
 
+下段代码只回答“这个节点有没有尚未处理的新信号”。`proc.triggers` 是该节点等待的信号通道；`channels[chan]` 找到一个通道；`versions` 记录信号的新旧版本，`seen` 记录这个节点上次处理到了哪个版本。可以把版本理解为更新序号，而不是业务字段的值。
+
 源码：`libs/langgraph/langgraph/pregel/_algo.py` → `_triggers`（第 1267–1277 行节选；未展示部分省略）。
 
 ```python
@@ -62,13 +71,26 @@ return False
 
 `channel_versions` 记录通道当前版本，`versions_seen` 记录节点上次处理过的触发版本。只检查“通道里有值”会导致旧信号被反复消费；版本比较避免无新输入时再次运行。
 
+用 left 的入口信号举例，下表的 v1、v2 只是表示新旧关系，真实版本格式由运行时和保存器决定：
+
+| 检查时的情况 | `_triggers()` 判断 | 后续行为 |
+| --- | --- | --- |
+| 信号可读，left 从未读过 | 有新触发 | 准备 left 的任务 |
+| 信号可读，当前 v1，left 已读 v1 | 没有更新 | 不因同一旧信号再运行 |
+| 后续循环再次写信号，版本变为 v2 | v2 新于已读 v1 | 可以准备下一次 left 调用 |
+| 临时信号已清空 | 不可读 | 即使留有版本记录也不触发 |
+
+在 StateGraph 中，这里通常检查编译器生成的边信号，例如 `branch:to:left`。不是 items 一变，所有读取 items 的节点就自动运行；编译后的 triggers 才决定节点等哪些信号。
+
 无任务时本轮循环结束。轮数超出限制时，`tick()` 将状态置为 `out_of_steps`，外层 `stream()` 抛出 `GraphRecursionError`。这里限制的是执行轮次，不是 Python 调用栈深度，也不是单个模型调用的 token 数。
 
-准备出任务后，Loop 还会检查运行控制对象的 drain 请求和静态断点，再决定是否交给 Runner。协作式停止拦截的是下一轮执行，不会撤销刚刚完成轮次的提交；正常完成与停止请求同时出现时，无任务的完成判断优先。停止信号如何进入 Loop，见[第 07 篇](./07-interrupts-and-command.md)。
+准备出任务后，Loop 还会检查运行控制对象的 drain 请求和静态断点，再决定是否交给 Runner。协作式停止拦截的是下一轮执行，不会撤销刚刚完成轮次的提交；正常完成与停止请求同时出现时，无任务的完成判断优先。停止信号如何进入 Loop，在本篇第五节展开；静态断点见[第 07 篇](./07-interrupts-and-command.md)。
 
-## 三、Runner 执行尚无结果的任务
+## 三、主循环把尚无结果的任务交给 Runner
 
-主循环在交给 Runner 前过滤已恢复结果或命中缓存的任务：
+准备出的任务放在 `loop.tasks` 中。`t.writes` 保存一个任务已有的结果记录，`not t.writes` 筛出仍需执行的任务。代码还会先匹配缓存结果，再把剩余任务交给 Runner；结果为什么可以复用，在第 06 篇展开。
+
+下面的两个 tick 分属不同对象：`loop.tick()` 准备任务，`runner.tick(...)` 执行任务。
 
 源码：`libs/langgraph/langgraph/pregel/main.py` → `Pregel.stream`（第 2964–2972 行节选；未展示部分省略）。
 
@@ -84,116 +106,13 @@ while loop.tick():
     ):
 ```
 
-普通多任务路径将任务交给执行器，使用 `FIRST_COMPLETED` 等待完成事件；单任务、无轮次超时且无流式等待器时有直接执行的快速路径。异步路径对应 `atick()`。同轮任务有并发资格，并不保证同时占用线程或连接，实际并发还受执行器和资源限制。
+Runner 在任务完成时记录写入并输出事件。同轮兄弟任务仍读取各自准备时的输入；一个任务先完成，不会让其他任务立即读到它的新字段值。执行器怎样等待完成、处理失败和取消，见[任务执行篇](./04-pregel-task-execution.md)。
 
-Runner 可以在一个任务完成时记录它的结果并输出事件，但不会因此提前把该任务的业务字段合并给同轮兄弟任务。`@task` 这类函数式子任务还可在父任务未结束时动态调度，不能将所有 PUSH 都笼统描述为“必须等下一超级步”；`Send` 经 `TASKS` 派发和函数式调用的具体路径不同。
+已有的成功写入或缓存结果可以让主循环跳过任务；跨调用怎样保存、匹配结果，在[持久化篇](./06-checkpoints-store-and-recovery.md)展开。这里先区分“任务已有结果”和“整轮状态已提交”。
 
-## 四、重试清理暂存写入，不回滚外部副作用
+## 四、after_tick 合并写入并推进状态
 
-### 1. 异常策略决定当前任务是否再试
-
-`run_with_retry()` 在每次尝试前清除该 task 上次留下的写入，再调用完整的节点执行对象：
-
-源码：`libs/langgraph/langgraph/pregel/_retry.py` → `run_with_retry`（第 613–617、641–661 行节选；未展示部分省略）。
-
-```python
-try:
-    # 丢弃上一次尝试的暂存写入。
-    task.writes.clear()
-    # 从入口重新执行当前任务。
-    return task.proc.invoke(task.input, config)
-
-# ……省略中间实现……
-
-except Exception as exc:
-    if SUPPORTS_EXC_NOTES:
-        exc.add_note(f"During task with name '{task.name}' and id '{task.id}'")
-    if not retry_policy:
-        raise
-
-    # 选择第一条匹配该异常的重试策略。
-    matching_policy = None
-    for policy in retry_policy:
-        if _should_retry_on(policy, exc):
-            matching_policy = policy
-            break
-
-    if not matching_policy:
-        raise
-
-    # attempts 记录失败次数，每次失败后增加。
-    attempts += 1
-    # 达到尝试上限时继续向外抛出异常。
-    if attempts >= matching_policy.max_attempts:
-        raise
-```
-
-没有匹配策略或耗尽次数时异常向外传播；符合策略时按退避间隔重跑当前任务。`GraphInterrupt` 和跨图控制信号有专门分支，不作为普通服务错误重试。
-
-配置节点错误处理器时，Runner 可将失败转交处理器任务；没有处理器或处理仍失败时，运行会退出并尝试取消其余任务。取消不代表已经发出的 HTTP 请求撤销，也不能强制停止任意同步线程。
-
-### 2. 超时先封住旧尝试的写入，再发出取消
-
-`TimeoutPolicy` 是节点每次尝试的时间限制，`run_timeout` 限制总运行时间，`idle_timeout` 限制无进展时间。默认进展检测可以由模型回调、任务写入等活动刷新；选择 `refresh_on="heartbeat"` 时，需要节点显式调用 `runtime.heartbeat()`。节点没有输出 token，不一定就代表空闲。
-
-异步重试层的 `_arun_with_timeout()` 同时等待节点任务和超时监控任务。监控先触发时，它会关闭本次尝试、清理暂存写入、取消节点，并抛出 `NodeTimeoutError`：
-
-源码：`libs/langgraph/langgraph/pregel/_retry.py` → `_arun_with_timeout`（第 490–502 行节选；未展示部分省略）。
-
-```python
-except asyncio.TimeoutError as exc:
-    elapsed = time.monotonic() - start
-    scope.close()  # 关闭本次尝试的受控写入和子任务调度入口。
-    task.writes.clear()  # 本次失败尝试的更新不用于正常提交。
-    bg.cancel()  # 请求节点协程取消，不保证外部服务撤销操作。
-    bg.add_done_callback(_drain_cancelled)
-    raise NodeTimeoutError(
-        task.name,
-        elapsed,
-        kind=kind,
-        idle_timeout=idle_timeout_s,
-        run_timeout=run_timeout_s,
-    ) from exc
-```
-
-`_TimedAttemptScope` 是控制一次超时尝试是否仍可写入的内部对象。取消可能需要时间，甚至有用户代码吞掉取消信号；只调用 `cancel()`，旧尝试就可能在重试开始后继续返回写入。`scope.close()` 在锁内将 `_active` 设为 False，配合注入到配置里的写入包装器拒收这些迟到结果：
-
-源码：`libs/langgraph/langgraph/pregel/_retry.py` → `_TimedAttemptScope._guard_send`（第 228–235 行节选；未展示部分省略）。
-
-```python
-def guarded_send(writes: Sequence[tuple[str, Any]]) -> None:
-    with self._lock:
-        if self._active:
-            if writes and self._refresh_on == "auto":
-                self._last_progress = time.monotonic()
-            send(writes)
-
-return guarded_send
-```
-
-同一尝试的函数式子任务调度入口也有活动检查，关闭后不再允许继续派发。这个约束保护的是运行时注入的写入和调用接口，不会拦住业务代码直接写数据库或修改共享对象。
-
-`NodeTimeoutError` 进入普通错误策略后可能重试；每次重试重新开始一次受限尝试，因此节点超时上限不等于整次 Agent 调用的总耗时上限。调用方主动取消异步执行时，`CancelledError` 则继续传播到资源清理路径，不能当成普通可重试超时处理。
-
-节点的 TimeoutPolicy 在此基线下要求异步执行，同步路径显式拒绝该配置。Runner 的 `step_timeout` 限制的是整轮等待，超时后 `_panic_or_proceed()` 请求取消尚未完成的任务并抛出超时错误。两者都不能强制终止已经运行的同步线程；执行器退出与工具取消的边界见[第 07 篇](./07-interrupts-and-command.md)。
-
-## 五、commit 先记录任务结果，after_tick 再合并
-
-`PregelRunner.commit()` 在成功时将任务写入交给 Loop；没有字段写入也会补 `NO_WRITES` 标记，避免恢复时把“成功但无输出”误判为没运行：
-
-源码：`libs/langgraph/langgraph/pregel/_runner.py` → `PregelRunner.commit`（第 609–613 行节选；未展示部分省略）。
-
-```python
-if not task.writes:
-    # 标记任务成功完成，即使它没有字段更新。
-    task.writes.append((NO_WRITES, None))
-# 按 task ID 记录写入，供恢复时匹配。
-self.put_writes()(task.id, task.writes)  # type: ignore[misc]
-```
-
-错误分支保存 `ERROR`，动态中断分支保存 `INTERRUPT` 和已有恢复值。这些都是控制记录，不由普通字段 reducer 合并。配置保存器时，Loop 可通过 `put_writes()` 保存任务结果；实际落盘时机还受持久化模式影响。
-
-本轮任务正常收束后，`after_tick()` 调用统一提交：
+Runner 先按任务 ID 记录结果，具体协议见[第 04 篇](./04-pregel-task-execution.md)。本轮任务正常收束后，`after_tick()` 调用统一提交：
 
 源码：`libs/langgraph/langgraph/pregel/_loop.py` → `PregelLoop.after_tick`（第 691–698、713–718 行节选；未展示部分省略）。
 
@@ -219,12 +138,82 @@ self._put_checkpoint({"source": "loop"})
 
 `apply_writes()` 按任务路径排序，更新节点已读版本，消费触发通道，再把业务写入按通道分组。通道的 `update()` 决定覆盖、合并或拒绝；没有新写入的临时通道也会收到空更新，以清除过期信号。暂时没有下一步任务时，还会通知支持 `finish()` 的通道，让延迟节点获得执行机会。
 
+套回示例，left 的任务完成、items 变成合并后的列表、保存器写入检查点，是三个不同时间点：
+
+| 位置 | 已完成什么 | 还不能据此断言什么 |
+| --- | --- | --- |
+| Runner 记录 left 的结果 | 得到 left 的更新，可能输出 updates 事件 | right 已成功、merge 已可运行 |
+| `after_tick()` 应用本轮写入 | items 合并完成，下一轮可以读取 | 外部数据库中的检查点已保存成功 |
+| 按持久化模式完成保存 | 保存器已有相应恢复记录 | 节点调用过的外部系统也参与了同一事务 |
+
 “统一提交”表示正常调度的状态可见性边界，不是跨数据库的原子事务。reducer 抛错会中止本次推进，应用不应依赖失败调用留下的内存对象继续业务，而应依据保存器中可恢复的记录重新进入。
 
-## 六、恢复粒度取决于任务边界
+## 五、协作式停止让当前轮次收尾
 
-同轮 `left` 成功、`right` 失败时，保存器可保留 `left` 的 pending writes（待合并写入）。恢复后，Loop 按 task ID 挂回成功结果，过滤 `ERROR`、`INTERRUPT` 等控制记录，Runner 只执行仍无成功写入的任务。
+`RunControl` 是一次图运行的控制对象，保存是否请求停止以及停止原因。drain（等待当前工作收尾的协作式停止）适合服务下线或允许当前操作完成的停止请求，不会直接取消正在执行的节点。
 
-完整检查点属于图的轮次，**不是每个任务各存一份完整检查点**。任务级恢复依赖独立身份及 `put_writes()`。这也解释了两种工具并行的差异：一个 `ToolNode` 内部并行十个工具时，图只看到一个任务；用十个 `Send` 派发时，图才能分别记录十个任务的结果。
+### 1. 请求先写入标志，再由 Loop 检查
 
-需要独立恢复的操作适合拆成独立任务，但拆分增加调度和保存开销。无论怎样拆分，外部请求成功与成功写入保存之间仍有故障窗口，扣费、发信等操作需要稳定的业务幂等键。持久化模式和历史重放的区别见[第 06 篇](./06-checkpoints-store-and-recovery.md)。
+调用方将控制对象通过 `invoke(..., control=control)` 或 `stream(..., control=control)` 传入。`Pregel.stream()` 将它放入节点运行上下文 `Runtime`，未显式指定的嵌套调用可继承父运行控制；Loop 从 Runtime 取得同一对象。节点也可通过 `runtime.drain_requested` 读取停止意图。
+
+源码：`libs/langgraph/langgraph/runtime.py` → `RunControl.request_drain / drain_requested`（第 95–100 行节选；未展示部分省略）。
+
+```python
+def request_drain(self, reason: str = "shutdown") -> None:
+    self._drain_reason = reason
+
+@property
+def drain_requested(self) -> bool:
+    return self._drain_reason is not None
+```
+
+写入标志后，正在执行的任务不会跳出函数。`tick()` 在准备出下一轮任务后、交给 Runner 执行前检查它：
+
+源码：`libs/langgraph/langgraph/pregel/_loop.py` → `PregelLoop.tick`（第 652–659 行节选；未展示部分省略）。
+
+```python
+# 没有后续任务时，按正常完成退出。
+if not self.tasks:
+    self.status = "done"
+    return False
+
+if self.control is not None and self.control.drain_requested:
+    self.status = "draining"
+    return False
+```
+
+检查顺序决定了一个边界：如果当前轮次已经是最后一轮，图正常完成，不必因为恰好收到停止请求就报告异常。存在后续任务时，Loop 标记 `draining`，外层入口将它转换为 `GraphDrained`，让调用方知道流程提前退出。
+
+源码：`libs/langgraph/langgraph/pregel/main.py` → `Pregel.stream`（第 3012–3015 行节选；未展示部分省略）。
+
+```python
+elif loop.status == "draining":
+    if loop.control is None:
+        raise RuntimeError("Draining status requires run control")
+    raise GraphDrained(loop.control.drain_reason or "shutdown")
+```
+
+`GraphDrained` 是携带停止原因的控制异常。`GraphBubbleUp` 是需传出当前任务的内部控制异常基类；`GraphDrained` 会传给调用方，不作为普通节点服务错误重试。人工暂停的 `GraphInterrupt` 在顶层转换为中断结果，具体区别见[第 07 篇](./07-interrupts-and-command.md)。
+
+### 2. 停止请求与停止完成之间还有一轮收尾
+
+假设图的顺序是 `model → tools → model`，在 tools 执行期间请求停止：
+
+| 时间点 | 执行动作 | 状态与下一步 |
+| --- | --- | --- |
+| tools 正在运行 | 外部调用 `request_drain()` | 控制标志改变，工具仍可继续 |
+| 本轮任务完成 | Runner 记录结果，`after_tick()` 合并写入 | 工具结果进入已提交状态，准备检查点 |
+| 下一次 `tick()` | 准备 model 任务后检查停止标志 | model 不交给 Runner 执行 |
+| 退出清理完成 | 等待相应保存和资源退出，抛出 `GraphDrained` | 调用方才能确认这次运行已停止 |
+
+同轮有多个任务时，要等本轮执行收束；其中某个失败或中断，仍按对应的异常路径退出，drain 不是覆盖所有退出原因的最高优先级开关。节点一直阻塞时，仅设置标志不能保证停止延迟。
+
+`@task` 是把函数调用转换为运行时任务的装饰器，详见[函数式篇](./10-func-api-entrypoint-and-task.md)。当前任务为了完成自身逻辑，仍可以创建这类子任务并等待它们。这条动态调度路径不经过下一超级步的 drain 检查，因此“停止后续轮次”不等于“请求后禁止创建任何任务”。它允许正在执行的入口收尾，代价是停止时间取决于当前工作及其依赖。
+
+### 3. 恢复依靠检查点，停止标志属于本次运行
+
+根图配置保存器、保存成功且退出清理完成后，可以使用相同执行线的 `graph.invoke(None, config)` 继续。刚才未执行的 model 会根据保存的通道版本重新准备，不需要 `Command(resume=...)`，因为这里没有等待回答的动态中断。
+
+`RunControl` 为一次运行设计，调用 `request_drain()` 后没有自动复位逻辑。恢复时应省略旧控制对象或创建新对象，不能把已停止的 control 再传入，否则新运行仍可能在入口轮次被挡住。`thread_id` 标识可跨调用恢复的执行线，control 则控制其中某一次调用，不能混用生命周期。
+
+`durability="exit"` 也有正常退出时的检查点保存路径，但进程被强制终止、保存失败或没有持久后端时，不能保证当前进度可恢复。具体保存时机见[第 06 篇](./06-checkpoints-store-and-recovery.md)。

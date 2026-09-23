@@ -8,20 +8,74 @@ description: 沿 Schema 解析、写入分组和通道更新解释并行冲突�
 
 ## 源码定位
 
-> **源码基线**：langgraph 1.2.10，本文使用的源码快照不含 Git 元数据，commit 未知。版本范围与文件指纹见[导读](./index.md#源码基线)。
+> **源码基线**：langgraph 1.2.10。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >
 > - Schema 解析：`libs/langgraph/langgraph/graph/state.py` → `_get_channels()`、`_get_channel()`、`_is_field_binop()`。
 > - 提交入口：`libs/langgraph/langgraph/pregel/_algo.py` → `apply_writes()`。
 > - 字段合并：`libs/langgraph/langgraph/channels/last_value.py` → `LastValue.update()`；`libs/langgraph/langgraph/channels/binop.py` → `BinaryOperatorAggregate.update()`。
+> - 临时信号：`libs/langgraph/langgraph/channels/ephemeral_value.py` → `EphemeralValue.update()`。
 > - 消息与持久化：`libs/langgraph/langgraph/graph/message.py` → `add_messages()`；`libs/langgraph/langgraph/channels/delta.py` → `DeltaChannel`；`libs/langgraph/langgraph/channels/untracked_value.py` → `UntrackedValue`。
 
-节点返回 `{"items": ["left"]}` 时，运行时不会立刻把这份字典覆盖到全局状态。返回值先转换为字段写入，本轮结束后按字段分组，再交给对应 Channel（通道）的 `update()`。**同一字段能否接收多份更新，由它的通道规则决定。**
+在第 00 篇，increment 返回 `{"count": 1}` 后，图的 count 从 0 变为 1。这个覆盖动作看起来很自然，但换成两个并行节点都返回 `{"items": [...]}`，框架就必须知道：保留哪一份，还是把两份合起来？
 
-State Schema（状态结构声明）定义字段及类型；Channel 保存字段值和更新规则；reducer（归并函数）定义当前值与更新怎样合成新值。`BinaryOperatorAggregate` 是调用二元 reducer 的通道，例如以 `operator.add` 将列表更新逐份拼接。
+**通道保存字段值，reducer 决定多份更新怎样合并。** Channel（通道）是框架管理值和更新的对象；reducer（归并函数）是你可以提供的一条合并规则，例如用列表相加收集两个节点的结果。示例中的节点依旧收发字典，使用框架时不需要逐个操作通道对象。
 
-## 一、Schema 在构建阶段决定字段规则
+下面先让两个节点各交回一份结果，再沿字段声明和提交代码解释结果如何合在一起。消息、临时信号和恢复优化在后半篇展开。
 
-`StateGraph` 初始化时通过 `_add_schema()` 登记结构；`_get_channels()` 保留 `Annotated` 元数据，为每个字段调用 `_get_channel()`。`Annotated[T, metadata]` 是 Python 的类型标注形式，LangGraph 从 metadata 中读取通道或 reducer 配置。
+## 一、两个节点都返回 items，应该得到什么
+
+下面是完整应用示例，不调用模型。left 和 right 从同一个入口出发，merge 等两者完成后生成展示文本。`operator.add` 用列表相加收集结果；`Annotated` 让我们在字段类型旁声明这条合并规则。
+
+```python
+import operator
+from typing import Annotated
+from typing_extensions import TypedDict
+from langgraph.graph import START, END, StateGraph
+
+class State(TypedDict):
+    items: Annotated[list[str], operator.add]
+    report: str
+
+def left(state: State):
+    return {"items": ["left"]}
+
+def right(state: State):
+    return {"items": ["right"]}
+
+def merge(state: State):
+    return {"report": ", ".join(sorted(state["items"]))}
+
+builder = StateGraph(State)
+builder.add_node("left", left)
+builder.add_node("right", right)
+builder.add_node("merge", merge)
+builder.add_edge(START, "left")
+builder.add_edge(START, "right")
+builder.add_edge(["left", "right"], "merge")
+builder.add_edge("merge", END)
+graph = builder.compile()
+result = graph.invoke({"items": [], "report": ""})
+assert sorted(result["items"]) == ["left", "right"]
+assert result["report"] == "left, right"
+```
+
+两个节点各自只返回新增项，merge 才读取合并后的列表。示例显式排序展示结果，不把任务完成顺序当成业务顺序。
+
+只修改字段声明，就会改变同一批返回值的含义：
+
+| items 的声明或返回方式 | 本轮会发生什么 | 对应使用方式 |
+| --- | --- | --- |
+| `items: list[str]` | 两份并行更新冲突 | 同一轮只有一个节点负责写这个字段 |
+| `Annotated[list[str], operator.add]` | 两份列表依次拼接 | 每个节点返回自己的新增项 |
+| 使用拼接规则，却返回“旧列表 + 新项” | 旧数据也被当作新增数据再次拼接 | 不要把累计全量误作增量返回 |
+
+### 字段声明怎样决定更新规则
+
+沿用加一例子，`count: int` 表示没有额外合并规则，框架会选 `LastValue`，即“保留上次值，收到新值时替换”的通道。若声明 `items: Annotated[list[str], operator.add]`，则会选 `BinaryOperatorAggregate`，它把每份更新交给你提供的二元合并函数，列表相加就是其中一种用法。
+
+`State Schema` 指这里声明字段及类型的结构，例如示例里的 `State`。`StateGraph` 初始化时通过 `_add_schema()` 登记结构；`_get_channels()` 保留 `Annotated` 元数据，为每个字段调用 `_get_channel()`。`Annotated[T, metadata]` 是 Python 的类型标注形式，LangGraph 从 metadata 中读取通道或 reducer 配置。
+
+读下面代码时，`annotation` 是某个字段的类型标注，`name` 是字段名。先关注“发现 reducer 时创建聚合通道，否则采用 LastValue”两个分支；托管值和手动指定通道是额外配置路径。
 
 源码：`libs/langgraph/langgraph/graph/state.py` → `_get_channel`（第 1845–1859 行节选；未展示部分省略）。
 
@@ -34,10 +88,12 @@ if manager := _is_field_managed_value(name, annotation):
 elif channel := _is_field_channel(annotation):
     channel.key = name
     return channel
+# 字段标注中带有 reducer 时，使用执行该 reducer 的聚合通道。
 elif channel := _is_field_binop(annotation):
     channel.key = name
     return channel
 
+# 普通字段没有附加规则时，默认使用 LastValue。
 fallback: LastValue = LastValue(annotation)
 fallback.key = name
 return fallback
@@ -52,6 +108,8 @@ return fallback
 ## 二、一轮写入如何到达字段通道
 
 假设 `left` 与 `right` 在同一轮运行，分别返回 `{"items": ["left"]}` 和 `{"items": ["right"]}`。`apply_writes()` 按任务路径确定应用顺序，再将两份更新归到 `items`。
+
+这里的“写入”就是某个节点返回的字段更新。`pending_writes_by_channel` 按字段名收集本轮更新，例如 items 对应两份列表；`channels` 则按字段名找到负责它的通道对象。`apply_writes()` 是把这一批更新应用到状态的内部函数。
 
 源码：`libs/langgraph/langgraph/pregel/_algo.py` → `apply_writes`（第 315–323 行节选；未展示部分省略）。
 
@@ -157,6 +215,8 @@ for m in right:
 merged = [m for m in merged if m.id not in ids_to_remove]
 ```
 
+`left` 是已有消息，`right` 是本次更新；`merged_by_id` 把消息 ID 映射到列表位置，避免靠文本内容判断是否为同一条消息。
+
 这里有两个容易漏掉的动作：追加时更新 `merged_by_id`，使同一批后续相同 ID 的消息能替换刚追加的消息；已有消息被重新写入时，`ids_to_remove.discard()` 撤销之前的删除标记。删除不存在的 ID 会抛错，而不是静默忽略。
 
 例如旧列表含 `id="a"` 的消息，更新中再出现 `id="a"` 就覆盖原位置；出现 `id="b"` 则追加。两条内容相同但 ID 不同的消息仍会共存。每次重试都生成新 ID 时，`add_messages` 也不会自动实现业务去重。
@@ -164,6 +224,38 @@ merged = [m for m in merged if m.id not in ids_to_remove]
 纯追加场景可以用列表拼接，但编辑、删除、重放同 ID 消息需要 `add_messages` 的语义。恢复机制本身不等于重复追加消息；重复与否还取决于任务是否重跑、返回的 ID 是否稳定以及 reducer 如何处理更新。
 
 ## 四、字段值与调度信号使用不同通道
+
+count 的旧值需要保留，直到节点给出新值；“increment 这轮可以运行”的标记只描述当前的触发情况。框架为它们采用了不同的通道。
+
+**`EphemeralValue` 是收到空更新时清除旧值的临时通道。** 它出现在 `compile()` 的源码中，是因为编译器需要保存短暂的节点触发信号。`LastValue` 在空更新时保留值，两者在这里的区别很具体。
+
+下面只看 `EphemeralValue.update()` 的空更新分支。`values` 是本轮给这个通道的更新列表，`MISSING` 是表示“当前没有值”的内部标记。
+
+源码：`libs/langgraph/langgraph/channels/ephemeral_value.py` → `EphemeralValue.update`（第 55–61 行节选；后续处理新写入的分支省略）。
+
+```python
+def update(self, values: Sequence[Value]) -> bool:
+    if len(values) == 0:
+        if self.value is not MISSING:
+            # 没有新写入时，清除上一轮留下的临时值。
+            self.value = MISSING
+            return True
+        else:
+            return False
+```
+
+以普通节点的触发通道为例，编译器使用 `EphemeralValue(Any, guard=False)`。`Any` 表示不要求某种固定值类型；`guard=False` 允许同轮收到多份信号，取最后一份保存。
+
+| 给通道的更新 | 更新后的状态 | 这里要理解的事 |
+| --- | --- | --- |
+| `[None]` | 有一个值，值恰好为 None | None 也可以表达“收到触发信号” |
+| 下一轮收到 `[]` | 变成 MISSING，没有值 | 没有新信号时清空旧值 |
+| 同轮收到 `[None, None]`，guard=False | 仍是一个值为 None 的信号 | 多份普通触发信号不会变成多个独立输入 |
+
+信号何时触发任务还受通道版本检查约束，第 03 篇再解释。这里先认清“保存业务值”和“保存触发信号”各自的生命周期。
+
+<details>
+<summary>进阶查阅：其他通道、屏障与增量保存</summary>
 
 字段通道决定“数据怎样存”，编译器生成的触发通道决定“谁可以运行”。常见实现如下，不能将这张表理解为全部通道类型：
 
@@ -211,6 +303,8 @@ return True
 常规轮次主要保存写入，恢复时从祖先检查点收集历史写入，经 reducer 重建状态；运行时按快照策略间隔保存完整值，以限制重建深度。该实现处于 beta，且需要保存器支持增量历史读取。
 
 批次可能在恢复时被重新组合，因此 reducer 必须满足 `reduce(reduce(state, xs), ys) == reduce(state, xs + ys)`。减少大消息列表的重复保存可能有收益，但代价是更复杂的恢复、迁移和历史保留要求，不能将普通二元 reducer 原样换进去。
+
+</details>
 
 ## 五、输入、内部状态与输出是不同视图
 
