@@ -1,5 +1,6 @@
 ---
 sidebar_position: 0
+sidebar_label: 导读与内容地图
 description: 从模块本质与运行原理出发，连接 LangChain、LangGraph、Deep Agents 的配置入口、业务定制方法与验收标准。
 ---
 
@@ -8,6 +9,21 @@ description: 从模块本质与运行原理出发，连接 LangChain、LangGraph
 > **工程本质：** 将概率性的模型决策接入有状态、有权限边界、可恢复、可验证的运行时，让开放任务通过受控动作推进，并以真实结果确认完成。
 
 这一栏从模块的本质和原理出发，落到框架中的配置、扩展位置与业务验收。理解状态为什么要独立于上下文之后，还要知道怎样配置检查点、如何设计状态字段，以及恢复时由谁核对已经发生的外部动作。
+
+
+按当前问题选择阅读入口：
+
+| 分类 | 解决什么问题 | 阅读入口 |
+| --- | --- | --- |
+| 模型前置知识 | 模型如何处理输入，工程技巧与模型机制有什么关系 | [理解 Transformer](./00-prerequisites/agent-thinking-transformer-from-prompt.md)、[工程技巧与模型架构](./00-prerequisites/agent-engineering-to-architecture.md) |
+| Task：任务合同 | 用户要完成什么，参数、约束和成功条件如何确定 | [任务合同与输入路由](./01-task/agent-intent-recognition.md) |
+| State：状态与恢复 | 哪些事实需要保存，中断后依据什么继续 | [状态与恢复](./02-state/agent-state-architecture.md) |
+| View：上下文、记忆与知识 | 每轮模型调用需要看到什么，知识与经验如何进入输入 | [上下文装配](./03-view/agent-context-management.md) |
+| Decision：决策与协作 | 哪些步骤由代码固定，模型和多个 Agent 如何推进任务 | [Workflow、Agent Loop 与协作](./04-decision/agent-vs-workflow-architecture.md) |
+| Action：能力、权限与执行空间 | 模型提案如何变成有权限边界、可验收的动作 | [工具执行与副作用](./05-action/agent-tool-calling.md) |
+| Observation：观察与评测 | 如何记录真实结果，发现失败并验证改进 | [证据与反馈](./06-observation/agent-observability.md)、[Agent 评测](./06-observation/agent-evaluation.md) |
+
+整体取舍与跨组件组合归入“设计原则与方案”；单个组件的职责与机制归入对应六组件分类；服务接纳、运行装配、资源承载与任务收尾归入“服务端与运行时”。每篇文章保留一个主要归属，相关主题通过链接连接。例如，自进化工程方案放在“设计原则与方案”，观察与评测部分提供经验回流的阅读入口。
 
 框架可以封装模型调用、工具注册、状态保存、流程编排和多 Agent 调度，减少重复实现；但它不会替系统决定任务边界、上下文来源、权限策略、失败出口和成功标准。纯代码开发需要自己实现这些基础设施，框架开发则需要在框架提供的能力之上补齐这些语义。
 
@@ -113,13 +129,16 @@ Task → State → View → Decision → Action → Observation
 | 当前问题 | 阅读入口 | 重点核对 |
 | --- | --- | --- |
 | 重启后重复执行，或外部成功但本地无记录 | [状态与恢复](./02-state/agent-state-architecture.md) | 动作登记、未知结果对账、恢复前重新校验 |
+| 新消息已经发送，任务却仍按旧方向执行 | [运行中干预](./04-decision/agent-runtime-intervention.md) | 消息目标、进入调用的边界与取消收尾 |
+| 新事故一直沿着旧事故的根因调查 | [会话续接与分支](./02-state/agent-session-branching.md) | 历史继承范围、任务归属与现场刷新 |
+| 同一种问题已经纠正，新任务仍然再犯 | [项目规则](./03-view/agent-project-rules.md)与[经验提炼](./03-view/agent-skill-design.md#从案例中分离方法与旧答案) | 稳定要求、加载范围与独立任务验证 |
 | 任务反复重排，子任务费用失控 | [Agent Loop](./04-decision/agent-brain.md) | 计划失效范围、真实进度、共享预算和取消收尾 |
 | 参数格式正确，却修改了错误资源 | [工具执行](./05-action/agent-tool-calling.md) | 实体归属、业务前置条件与后置验收 |
 | 已批准的动作在恢复后发生变化 | [人机协作](./04-decision/agent-human-in-the-loop.md) | 动作快照、请求去重、资源版本与审批过期 |
 | 检索遗漏关键限制，旧记忆反复影响决策 | [RAG](./03-view/rag-engineering.md)、[记忆设计](./03-view/agent-memory-design.md) | 约束读取、冲突范围、替代与删除 |
 | 多个 Agent 消息隔离，却覆盖同一份数据 | [多 Agent 协作](./04-decision/agent-multi-agent-orchestration.md) | 资源隔离、单一写入者与版本条件提交 |
 | 请求全部成功，但业务没有完成 | [证据与反馈](./06-observation/agent-observability.md) | 调用结果、业务终态、状态提交分别记录 |
-| 改完策略后不知道是否退化 | [Agent 评测](./06-observation/agent-evaluation.md) | 固定响应测试、事故回放、逐题差异和发布门禁 |
+| 改完策略后不知道是否退化 | [Agent 评测](./06-observation/agent-evaluation.md)与[评测题构造](./06-observation/agent-eval-environment-design.md) | 固定响应测试、事故回放、逐题差异和发布门禁 |
 
 这些入口按同一问题的主要责任归类。方法文章提炼选择依据和验收条件，文中的源码链接用于核对具体框架提供了哪些保证，以及应用仍需补齐什么。
 
@@ -154,6 +173,8 @@ State 负责事实、版本和共享变量，也保存恢复所需的动作身�
 文章：
 
 - [Agent 状态：事实、进度与共享变量](pathname:///notes/agent-system-design/state/agent-state-architecture)
+- [会话续接与分支：让历史经验留在正确的任务里](./02-state/agent-session-branching.md)
+- [长任务的进度与失败经验：怎样保存、恢复和复用](./02-state/agent-progress-and-failure-records.md)
 
 ### 3. View：模型上下文与知识视图 {/* #view模型上下文与知识视图 */}
 
@@ -177,12 +198,14 @@ View 下的文章按三组组织：
 
 - [上下文装配](pathname:///notes/agent-system-design/view/agent-context-management)
 - [上下文压缩与外部化](pathname:///notes/agent-system-design/view/agent-context-compression)
+- [证据进入上下文：渐进发现与多模态核验](./03-view/agent-evidence-intake.md)
 
 #### 记忆与程序性经验 {/* #记忆与程序性经验 */}
 
 处理跨轮次保留的事实，以及按任务激活的工作方法。
 
 - [记忆设计](pathname:///notes/agent-system-design/view/agent-memory-design)
+- [项目规则：让一次纠正持续影响后续任务](./03-view/agent-project-rules.md)
 - [Skill 激活与经验封装](pathname:///notes/agent-system-design/view/agent-skill-design)
 
 #### 外部知识 {/* #外部知识 */}
@@ -229,6 +252,8 @@ Decision 负责推进任务，统一处理确定性流程和模型提案：
 - [控制平面](pathname:///notes/agent-system-design/decision/agent-vs-workflow-architecture)
 - [决策内核](pathname:///notes/agent-system-design/decision/agent-brain)
 - [人机协作：澄清、审批与接管](pathname:///notes/agent-system-design/decision/agent-human-in-the-loop)
+- [运行中干预：排队、转向、中断与停止](./04-decision/agent-runtime-intervention.md)
+- [Agent 推理设计：路由、证据与假设验证](./04-decision/agent-reasoning-budget-and-hypotheses.md)
 - [多 Agent 协作：主控-子 Agent、同步/异步与 Agent Team](pathname:///notes/agent-system-design/decision/agent-multi-agent-orchestration)
 
 ### 5. Action：能力、权限与执行空间 {/* #action能力权限与执行空间 */}
@@ -249,6 +274,8 @@ Task 决定任务目标，Action 负责“能不能做、在哪里做、怎么�
 - [工具执行](pathname:///notes/agent-system-design/action/agent-tool-calling)
 - [权限、审批与结果验收](pathname:///notes/agent-system-design/action/agent-permission-and-postconditions)
 - [Agent 操作空间：沙箱、工作区与资源边界](pathname:///notes/agent-system-design/action/agent-workspace-sandbox)
+- [计划与工件契约：按依赖执行、在局部恢复](./05-action/agent-plan-contracts.md)
+- [影响范围与渐进授权：限制累计效果，按证据放权](./05-action/agent-risk-budget-and-autonomy.md)
 - [跨进程能力适配：MCP](pathname:///notes/agent-system-design/action/agent-mcp)
 - [能力适配与扩展隔离](pathname:///notes/agent-system-design/action/agent-provider-extension)
 
@@ -269,7 +296,11 @@ Observation 汇总动作和外部世界返回的事实，把成功、失败、�
 
 - [证据与反馈](pathname:///notes/agent-system-design/observation/agent-observability)
 - [Agent 评测](pathname:///notes/agent-system-design/observation/agent-evaluation)
+- [Agent 评审与自愈：绑定版本、独立验收、有界修复](./06-observation/agent-review-repair-loop.md)
+- [评测题构造：共享规格、单题规格与运行校准](./06-observation/agent-eval-environment-design.md)
+- [Web Agent 断线后如何继续：事件序号、持久化与快照](./06-observation/web-agent-event-recovery.md)
 - [知识视图专项：RAG 评测](pathname:///notes/agent-system-design/observation/rag-evaluation)
+
 
 ## 四、从模块原理走到框架定制 {/* #从模块原理到框架定制 */}
 

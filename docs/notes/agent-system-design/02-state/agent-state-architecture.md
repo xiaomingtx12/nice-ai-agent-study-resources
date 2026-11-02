@@ -284,6 +284,53 @@ LangChain 的 `create_agent()` 用于装配模型与工具循环，`state_schema
 
 是否补记成功由服务证据决定，是否继续执行还需重新核对取消、授权、草稿与预算。`get_state()` 用于读取图快照，`update_state()` 按图的更新规则修改状态；它们都不能验证远端发布结果，也不能单独充当任务锁。业务核验后才能选择恢复或更新状态的入口。实现细节见[检查点、恢复与分叉](../../../application-notes/engineering/langchain-series/langgraph/06-checkpoints-store-and-recovery.md)和[状态字段与 reducer](../../../application-notes/engineering/langchain-series/langgraph/01-state-schema-channels-and-reducers.md)。
 
+### 4. Web Agent 的表单恢复：同一任务换执行片段
+
+本地 `my-dify` 的源码提交 `4e21eae6006c719a560a0b2f1af0aeba58d9b9ed` 提供了一个 Web 场景：`ask_user` 用 LangGraph 的 `interrupt()` 暂停图，等待用户填写表单，而不是让线程一直阻塞。这里的 `AgentExecution` 是一次任务的业务执行记录；`AgentExecutionSubmission` 是某批表单答案的接受记录，不是新对话。源码：`internal/core/agent_v2/tools/ask_user.py`（第 9–17 行）；`internal/service/agent/agent_execution_service.py` → `submit_answers()`（第 203–284 行）。
+
+**等待批次必须一次回答完整。** `AgentExecutionInteraction.input_batch_id()` 对答案中的中断 ID 集合排序后计算哈希，不把答案值和键顺序当作批次身份。`validate_answers()` 只接受 `waiting_input` 状态，而且答案 ID 集合必须与当前 `pending_inputs` 完全相等；多填、漏填和旧表单都会被拒绝。各表单字段仍由自己的载荷校验。源码：`internal/entity/agent_execution_interaction.py` → `input_batch_id()`、`validate_answers()`（第 49–75 行，节选，原注释译为中文）。
+
+```python
+# 中断 ID 集合标识一批表单，答案值和请求键顺序不影响身份。
+encoded = json.dumps(sorted(answers), ensure_ascii=False, separators=(",", ":"))
+return sha256(encoded.encode("utf-8")).hexdigest()
+
+# validate_answers()：只能提交当前等待批次的全部答案；后续字段校验略。
+if self.status != "waiting_input":
+    raise ValueError("当前任务没有等待填写的表单")
+pending = self._pending_inputs()
+if not pending or set(answers) != {item.interrupt_id for item in pending}:
+    raise ValueError("表单已失效，请刷新后填写所有待回答问题")
+```
+
+**重复提交按原批次回执处理。** 服务先锁会话，查找此前接受的批次；同一批次、同一答案返回原 Run 和接受序号，答案被改动则拒绝。这个查找发生在读取最新待填 Run 之前，因此旧批次的迟到重试不会错交给后来创建的任务。源码：`internal/service/agent/agent_execution_service.py` → `submit_answers()`（第 212–228 行，节选）。
+
+```python
+# 已结束批次的迟到重试也返回原回执，不能误交给后来创建的 Run。
+batch_id = AgentExecutionInteraction.input_batch_id(answers)
+submission = (
+    self.db.session.query(AgentExecutionSubmission)
+    .join(AgentExecution, AgentExecution.id == AgentExecutionSubmission.execution_id)
+    .filter(
+        AgentExecution.conversation_id == conversation_id,
+        AgentExecution.app_id == app_id,
+        AgentExecution.invoke_from == invoke_from.value,
+        AgentExecutionSubmission.input_batch_id == batch_id,
+    )
+    .one_or_none()
+)
+if submission is not None:
+    if submission.answers != answers:
+        raise ValidateErrorException("该表单已提交，不能重复修改")
+    return ExecutionAccepted(submission.execution_id, submission.accepted_sequence)
+```
+
+**新答案只能认领一次恢复执行权。** 服务锁定最新 Run，校验当前待填批次、前一执行片段已释放以及应用定义指纹未变，再把答案、问答历史、清空后的待填状态和新执行标识写在同一事务里；提交成功才启动后台执行（同文件第 229–284、321–353 行）。指纹比较的是本次入口的有效应用定义，配置变化时应让用户恢复原配置或发起新任务，不能拿新工具或提示词继续旧检查点。
+
+取消也有状态区别：等待表单的 Run 可直接转取消；正在执行的 Run 先持久记录取消请求，再通知本地线程排空，返回值仍可能是 `running`（同文件第 288–319 行）。页面不能把“已请求取消”当成“工具已停止”。
+
+这套协议解决表单重试和单任务恢复，不等于外部业务写入的幂等；发布、付款等副作用仍要按本篇的外部事实对账。验收时应分别提交缺一项答案、过期批次、同批同答案重试、同批改答案、配置变化后的答案和执行中取消。这里列的是源码推导的验收条件。事件如何把暂停状态恢复到页面，见 [Web Agent 事件恢复](../06-observation/web-agent-event-recovery.md)。
+
 ## 十三、常见状态失败 {/* #常见状态失败 */}
 
 | 失败现象 | 原因 | 调整方式 |

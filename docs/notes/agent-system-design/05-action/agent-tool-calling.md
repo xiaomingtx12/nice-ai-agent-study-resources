@@ -250,6 +250,23 @@ return Command(
 
 将本例接入框架时，按以下顺序拆开责任：工具入口解析页面与草稿参数，通过 `ToolRuntime` 获取可信上下文；业务服务绑定或复用 `A903` 并处理发布；工具将已知结果包装成 `ToolMessage`，需要更新图状态时通过 `Command` 返回结果引用。外围中间件记录尝试与耗时，但不替发布服务定义事务。接口详见[工具运行时注入](../../../application-notes/engineering/langchain-series/langchain/10-tool-injection.md)和[工具执行层](../../../application-notes/engineering/langchain-series/langgraph/11-prebuilt-tool-layer.md)。
 
+### 4. 真实项目按副作用划分重试范围
+
+本地 `my-dify` 源码提交 `4e21eae6006c719a560a0b2f1af0aeba58d9b9ed` 的 `ToolRetryMiddleware` 是工具执行的重试中间件；它只覆盖平台列出的只读工具，超时或连接错误最多重试两次。源码：`internal/core/agent_v2/assembly/graph/platform_middleware.py` → `build_platform_middleware()`（第 54–61 行，原注释保留）。
+
+```python
+# 只有无副作用的内置读取工具可以自动重试；写入和未知业务工具
+# 无法仅凭异常确认前一次调用是否已经生效。
+ToolRetryMiddleware(
+    max_retries=2,
+    tools=list(_RETRYABLE_READ_ONLY_TOOLS),
+    retry_on=(TimeoutError, ConnectionError),
+    on_failure="error",
+),
+```
+
+这不是“所有读请求都安全重试”：名单外工具仍不自动重试。飞书客户跟进模板要求写入超时后先查询，但它的创建工具没有业务幂等键，也不在此重试名单中（`internal/core/tools/builtin_tools/providers/feishu/tools.py` 第 91–120 行）。因此对新增客户这类动作，超时后先核对远端是否已创建；确认不了就保留未知状态。业务场景的完整边界还包括查重、字段结构与记录归属。
+
 ## 八、常见失败 {/* #常见失败 */}
 
 | 现象 | 原因 | 调整方式 |

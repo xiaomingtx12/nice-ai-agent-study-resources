@@ -5,7 +5,7 @@ description: "方法与复盘栏的定位：从应用拆解里提炼能带到下
 
 # 方法与复盘
 
-这一栏从应用拆解里提炼能带到下一次的判断、模式和技巧，目标是把它们封成 skill，让工程判断越攒越准。不追求记全方案，追求把关键的那几条写成下次真会回头翻、真会照着校准的文章——而不是写完就忘的笔记。
+这一栏从课程学习、资料研究和应用拆解中提炼能带到下一次的判断、模式和技巧。笔记按知识问题组织，直接说明方法、实施方案和验收条件；适合反复使用的操作经验，进一步整理成 Skill。
 
 这也是跨资源、跨项目还能继续复用的东西的存放地：学习方法、踩坑复盘、对 Agent 学习路径的阶段性判断。
 
@@ -27,26 +27,33 @@ description: "方法与复盘栏的定位：从应用拆解里提炼能带到下
 - [Agent 产品功能形态图谱：从理解输入到持续推进任务](./agent-product-method/agent-product-functional-form-atlas.md)
 - [Agent 自进化：让使用经验进入下一轮](./agent-product-method/agent-self-evolution.md)
 
-## Agent 系统设计
+## Agent 工程技巧
 
 提炼 Agent Harness 的元组件方法。文章面向人阅读，但按问题选择合适的写法：上下文写装配和预算，记忆写生命周期，RAG 写离线/在线数据链，Skill 写激活与版本。方法正文不复述本地应用拆解，后续可沉淀成 Skill。Transformer 是理解模型本身的前置项，不计入运行时元组件。
 
-- [元组件谱系总览](./agent-system-design/index.md)
+- [导读与内容地图](./agent-system-design/index.md)
 
 **模型前置知识**
 
 - [从 AI 应用开发者的角度理解 Transformer 架构](./agent-system-design/00-prerequisites/agent-thinking-transformer-from-prompt.md)
 - [工程技巧 -> 架构层](./agent-system-design/00-prerequisites/agent-engineering-to-architecture.md)
-- [Agent 工程的第一性原理](./agent-system-design/00-prerequisites/agent-engineering-first-principles.md)
 
 **Task：任务合同**
 
 - [任务合同与输入路由](./agent-system-design/01-task/agent-intent-recognition.md)
 
-**View：上下文、知识与经验**
+**State：状态与恢复**
+
+- [Agent 状态：事实连续性、恢复与执行边界](./agent-system-design/02-state/agent-state-architecture.md)
+- [会话续接与分支：让历史经验留在正确的任务里](./agent-system-design/02-state/agent-session-branching.md)
+- [长任务的进度与失败经验：怎样保存、恢复和复用](./agent-system-design/02-state/agent-progress-and-failure-records.md)
+
+**View：上下文、记忆与知识**
 
 - [上下文装配](./agent-system-design/03-view/agent-context-management.md)
+- [证据进入上下文：渐进发现与多模态核验](./agent-system-design/03-view/agent-evidence-intake.md)
 - [记忆设计：存什么，何时读，何时忘](./agent-system-design/03-view/agent-memory-design.md)
+- [项目规则：让一次纠正持续影响后续任务](./agent-system-design/03-view/agent-project-rules.md)
 - [上下文压缩与外部化](./agent-system-design/03-view/agent-context-compression.md)
 - [Skill 激活与经验封装](./agent-system-design/03-view/agent-skill-design.md)
 - [RAG 工程：离线建库到在线证据链](./agent-system-design/03-view/rag-engineering.md)
@@ -57,11 +64,15 @@ description: "方法与复盘栏的定位：从应用拆解里提炼能带到下
 
 - [控制平面：Workflow、Agent Loop 与协作](./agent-system-design/04-decision/agent-vs-workflow-architecture.md)
 - [决策内核：Agent 大脑](./agent-system-design/04-decision/agent-brain.md)
+- [Agent 推理设计：路由、证据与假设验证](./agent-system-design/04-decision/agent-reasoning-budget-and-hypotheses.md)
+- [运行中干预：排队、转向、中断与停止](./agent-system-design/04-decision/agent-runtime-intervention.md)
 - [多 Agent 协作：主控-子 Agent、同步/异步与 Agent Team](./agent-system-design/04-decision/agent-multi-agent-orchestration.md)
 
 **Action：能力、权限与执行空间**
 
 - [能力执行：Tool 合同与副作用](./agent-system-design/05-action/agent-tool-calling.md)
+- [计划与工件契约：按依赖执行、在局部恢复](./agent-system-design/05-action/agent-plan-contracts.md)
+- [影响范围与渐进授权：限制累计效果，按证据放权](./agent-system-design/05-action/agent-risk-budget-and-autonomy.md)
 - [权限、审批与结果验收](./agent-system-design/05-action/agent-permission-and-postconditions.md)
 - [Agent 操作空间：沙箱、工作区与资源边界](./agent-system-design/05-action/agent-workspace-sandbox.md)
 
@@ -69,10 +80,8 @@ description: "方法与复盘栏的定位：从应用拆解里提炼能带到下
 
 - [证据与反馈](./agent-system-design/06-observation/agent-observability.md)
 - [Agent 评测](./agent-system-design/06-observation/agent-evaluation.md)
-
-**State：状态与恢复**
-
-- [Agent 状态：事实连续性、恢复与执行边界](pathname:///notes/agent-system-design/state/agent-state-architecture)
+- [Agent 评审与自愈：绑定版本、独立验收、有界修复](./agent-system-design/06-observation/agent-review-repair-loop.md)
+- [Web Agent 断线后如何继续：事件序号、持久化与快照](./agent-system-design/06-observation/web-agent-event-recovery.md)
 
 **横切概念**
 
@@ -99,16 +108,9 @@ Harness 不单独占一个目录；它把 View、Action、Observation 和 State 
 
 - 想看演变趋势和脉络判断：演变趋势观察
 - 想看 Agent 产品的场景、形态和人机分工：Agent 产品思维
-- 想看 agent 系统的元组件和方法论：Agent 系统设计
+- 想看 Agent 系统的通用元组件和方法论：Agent 工程技巧
 - 想看工具驾驭方法：工具应用与驾驭
 - 想看市面 AI 应用的实现形态：市场观察
-
-## 这一节不放什么
-
-- 单条资源的总览或章节笔记（这属于资源导航）
-- 为了留痕而留痕的日常流水账
-
-这些内容都应该回到 [资源导航](../resources/) 下的具体资源目录里。
 
 ## 这一栏怎么回喂应用拆解
 

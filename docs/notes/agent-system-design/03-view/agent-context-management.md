@@ -82,6 +82,23 @@ ContextView =
 
 不要为少量稳定工具预先建立复杂检索目录，也不要为了少一次读取，把整份文档永久放在每轮输入中。选择依据应是任务效果、完整运行成本与维护负担。
 
+### 4、材料可访问，不代表模型已经看见 {/* #材料可访问不代表模型已经看见 */}
+
+工作区、任务历史、本轮上下文与事件日志需要分别检查。工作区保存可查找的材料；任务历史保存此前发生的过程；上下文是当前模型调用实际采用的输入；事件日志帮助观察运行过程，但未必完整记录了输入装配结果。
+
+例如，一份详细变更记录已经放进工作目录，Agent 却只引用部署工具返回的摘要。应沿着材料进入输入的路径排查：
+
+| 检查位置 | 要确认什么 | 常见修正 |
+| --- | --- | --- |
+| 发现入口 | 是否知道有这份材料及其用途 | 提供目录索引或明确的查找线索 |
+| 工具读取 | 是否读取正文，是否被截断或只返回路径 | 分段读取必要内容，保留版本和位置 |
+| 输入装配 | 工具结果是否在关键判断前进入调用 | 检查历史筛选、阶段过滤与结果关联 |
+| 决策采用 | 模型是否理解材料支持或削弱什么判断 | 对照证据检查结论，保留尚未确认的部分 |
+
+不能因为读取命令成功，就断言完整正文始终在后续输入中。结果可能被截断、外部化或在压缩后退出当前工作集；重新读取也可能得到更新后的文件。因此，需要同时确认读取时间、材料版本和发生判断的调用位置。
+
+一个小型对照练习是：先让 Agent 仅根据告警列出事实，再要求读取变更记录并重新判断。检查新增事实是否出现在读取之后、是否带有来源，以及模型有没有把时间相邻直接当成因果。这里检验的是证据进入判断的路径，不是回答篇幅有没有变长。
+
 ## 二、上下文装配流程 {/* #二上下文装配流程 */}
 
 ### 1. 收集来源 {/* #1-收集来源 */}
@@ -335,6 +352,23 @@ def wrap_tool_call(self, request, handler):
 若存在多个修改请求的中间件，应在尽可能靠近模型适配器的位置检查最终消息和工具目录，确认后续中间件没有重新加入被移除的工具。同步与异步调用使用各自的包装入口，验收应覆盖业务实际使用的路径。
 
 接口基线为 LangChain 1.3.7。进一步的中间件顺序与动态工具实现见[中间件控制面](../../../application-notes/engineering/langchain-series/langchain/04-middleware-control-plane.md)和[动态工具](../../../application-notes/engineering/langchain-series/langchain/11-tool-dynamics.md)。
+
+### 真实项目：上下文计量不能代替事实选择
+
+本地 `my-dify` 源码提交 `4e21eae6006c719a560a0b2f1af0aeba58d9b9ed` 中，`ContextWindowMiddleware` 是包住模型调用的上下文观测中间件：调用前按系统规则、历史摘要、用户消息、工具返回和工具定义分类估算，调用后补上供应商给出的实际用量。源码：`internal/core/agent_v2/middleware/context_window_middleware.py` → `build_context_snapshot()`（第 62–133 行，节选）。
+
+```python
+budget = request_input_budget(request.model)
+counted = ([request.system_message] if request.system_message else []) + list(request.messages)
+compaction_count = count_tokens_approximately(counted, tools=request.tools)
+fixed_count = count_tokens_approximately([request.system_message] if request.system_message else [], tools=request.tools)
+if budget and fixed_count >= budget:
+    raise ValueError("系统提示与工具定义已用尽模型输入预算，请减少固定配置或提高可用窗口")
+```
+
+检查固定部分是否吃光预算，可以及早暴露“工具定义太多”这种无法靠裁剪聊天历史解决的问题。多模态输入没有按 Base64 长度伪算媒体 token；真实用量要等供应商响应后补齐（同文件第 89–95、137 行以后）。主动压缩由 `ConversationCompactionMiddleware` 适配 Deep Agents 的摘要实现，并校验摘要及媒体归档结果（`internal/core/agent_v2/middleware/conversation_compaction.py` 第 19–57 行）。
+
+这些机制能说明**输入占用在哪里**，却不能独自判断客户字段、记录 ID 或逾期规则是否是本轮必需事实。后者要回到客户跟进的业务上下文定义，再用本篇的信息充分性和业务结果两层指标对照验证。
 
 ## 八、常见装配失败 {/* #七常见装配失败 */}
 

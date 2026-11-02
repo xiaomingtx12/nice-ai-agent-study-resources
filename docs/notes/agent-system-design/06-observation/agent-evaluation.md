@@ -39,7 +39,7 @@ description: 从固定响应测试、事故回放、轨迹约束和业务终态�
 
 生产轨迹是“发生过什么”的证据，必须经过审核才能成为“应该怎样做”的判据。一次错误发布应保存为失败输入和禁止条件，不能把当时的工具顺序直接设成期望路径。
 
-数据集、判定规则和评测器分别版本化。业务规则改变后，先标记受影响用例待复审，再决定更新或归档；不要为了让新版通过而静默改掉旧答案。用于生成策略的案例与最终检验策略的保留集也应分开，避免只测到对已见题目的适应。
+数据集、判定规则和评测器分别版本化。业务规则改变后，先标记受影响用例待复审，再决定更新或归档；不要为了让新版通过而静默改掉旧答案。用于生成策略的案例与最终检验策略的保留集也应分开，避免只测到对已见题目的适应。[评测题构造](./agent-eval-environment-design.md)进一步讨论如何从轨迹、代码和领域知识写出可审阅的规格，再变成可运行题目。
 
 ## 三、用固定模型响应覆盖危险分支 {/* #用固定模型响应覆盖危险分支 */}
 
@@ -95,6 +95,14 @@ Fake Model（固定响应的模型替身）按预设顺序返回模型消息，�
 裁判输入应包括任务、约束、可见证据、实际结果和评分标准。要求它给出可核对的理由与证据位置，证据不足时输出“不确定”。不要要求提供不可获得的模型内部思考过程，也不要把模型自报的置信度直接当作正确概率。
 
 更换裁判模型可以作为偏差检查，但不能替代校准。可以用人工标注样本检查一致性，交换候选答案顺序检查位置偏差，并单独复核裁判与程序判据冲突的样本。裁判失败、超时或无法读取证据时，记录评测异常，不能默认给满分。
+
+### 用固定轨迹比较评测器：LangChain 的 Jev 实验
+
+LangChain 2026 年 9 月 20 日的 [Agent 评测器对比实验](https://www.langchain.com/blog/jev-agent-evals-langsmith)提供了一个可借鉴的实验设计。Jev 是返回带类型的选择、分数或概率的判别模型；博客拿它与三个生成式模型裁判比较，而不是比较四个 Agent 的任务完成能力。
+
+实验固定了天气 Agent 的 **5 条运行结果**，由人工按同一评分标准标注。四个评测器读取相同的已保存结果，对每条分别输出连续质量分数和是否通过的二元判断；每条重复评判 100 次，再分别计算二元判断与人工标签的一致程度、连续分数在同一条结果上的波动。这样可把“同一结果能否判得稳定”和“判断是否符合人工标准”拆开；若每次重新运行 Agent，轨迹本身的变化就会混入评测器波动。
+
+博客报告 Jev 在这组结果上的二元判断与人工标签完全一致，连续分数方差也最低。**这只能说明该小样本、该评分标准下的观察结果**：5 条天气任务不能代表长链路、写操作或高风险业务；重复 100 次增加的是同一批样本的测量次数，不会把业务覆盖扩展为 500 条。低方差也可能是稳定地判错。把这套方法用于自己的 Agent 时，应先补足不同失败类型的人工标注样本，逐项检查裁判分歧，并保存评测器、提示词、模型与轨迹版本；程序能够确定的权限和副作用仍由程序断言。
 
 ## 七、比较版本时保留逐题差异 {/* #比较版本时保留逐题差异 */}
 
@@ -155,6 +163,27 @@ LangChain 的 `GenericFakeChatModel` 是按给定消息序列返回结果的测�
 采用 Deep Agents Evals 报告链时，独立读取报告中的通过数、失败数、运行错误与证据，而不只检查进程退出码。必需用例未运行、结果缺失或硬边界失败时，应阻止候选发布；评分提高不能抵消这些失败。报告字段与运行行为要跟随评测包版本一起核对。
 
 已有实现入口见[Deep Agents Evals](../../../application-notes/engineering/langchain-series/deepagents/16-deepagents-evals.md)与[故障路径验证](../../../application-notes/engineering/langchain-series/deepagents/21-production-failure-validation.md)。这些实现提供测试和报告机制，业务仍需维护自己的任务样本、通过标准与发布门禁。
+
+### 4. 真实项目把“证据不足”保留为独立结果
+
+本地 `my-dify` 源码提交 `4e21eae6006c719a560a0b2f1af0aeba58d9b9ed` 中，`AgentEvaluationService.submit()` 冻结本次任务材料与标准，再交由独立测评任务处理；重复投递由执行权认领收敛（`internal/service/agent_evaluation/agent_evaluation_service.py` 第 81–145 行）。回答评分器 `evaluate_answer()` 只拿原问题、回答和标准，不能调用生产 Agent 的工具。提示词要求“真实文件或工具是否成功，不能只凭回答自称完成”并允许 `insufficient_evidence`，输出还要经过程序校验。
+
+源码：`internal/entity/agent_evaluation_entity.py` → `EvaluationGrade.validate_material()`（第 72–85 行）。
+
+```python
+ids = sorted(check.criterion_id for check in self.checks)
+if ids != list(range(1, criterion_count + 1)):
+    raise ValueError("评分未逐项覆盖标准")
+material = {"query": query, "answer": answer, "none": ""}
+for check in self.checks:
+    quote = check.evidence_quote
+    if quote and quote not in material[check.evidence_source]:
+        raise ValueError("评分引用不在原始文本中")
+    if check.verdict == "passed" and not quote:
+        raise ValueError("通过项缺少证据")
+```
+
+这一校验能拒绝漏评、重复标准和伪造的原文引用，但引用来自回答本身时，仍不能证明外部动作真实发生。该项目另有执行式测评入口，用冻结的草稿定义运行候选并按证据规则检查结果（`agent_evaluation_service.py` 第 267–288、222–253 行）；具体业务仍要明确什么记录、文件或远端状态才算完成。评测代码只证明判据链存在，不代表已经有业务任务集或发布门禁。
 
 ## 十、从小规模用例集开始维护 {/* #从小规模用例集开始维护 */}
 
