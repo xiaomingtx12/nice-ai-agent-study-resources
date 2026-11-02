@@ -679,7 +679,3 @@ Profile 注册表属于进程级配置。应在应用初始化阶段登记模型
 
 - [01：`create_deep_agent()` 总装配](./01-create-deep-agent-assembly.md)——Profile 在装配链上的位置
 - [17：Prompt Caching 中间件](./17-prompt-caching.md)——Profile 通过 `extra_middleware` 插入的又一类能力
-
-**上层：方法论与案例**
-
-- [Agent 系统设计 00：工程第一性原理](../../../../notes/agent-system-design/00-prerequisites/agent-engineering-first-principles.md)——模型差异为什么要收敛到适配层

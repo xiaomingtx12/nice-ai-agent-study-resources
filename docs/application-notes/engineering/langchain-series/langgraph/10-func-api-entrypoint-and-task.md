@@ -6,7 +6,9 @@ description: 追踪 entrypoint 直接构造 Pregel、task 动态调度及结果�
 
 # LangGraph 源码 10：函数调用如何接入可恢复任务
 
-## 源码定位
+**源码定位**
+
+> 快照身份与验证范围见[源码基线](./source-baseline.md)。源码节选以该快照为准，文中的应用示例不等于框架实现。
 
 > **源码基线**：langgraph 1.2.10，使用与本系列相同的本地源码快照。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >

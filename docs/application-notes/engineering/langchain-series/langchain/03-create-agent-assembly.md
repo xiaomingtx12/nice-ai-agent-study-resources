@@ -6,7 +6,9 @@ description: 沿 create_agent() 的真实顺序，追踪输入配置如何变成
 
 # LangChain 源码解析 03：`create_agent()` 如何组装 Agent 图
 
-## 一、源码定位
+> 固定提交与已阅读测试见[源码基线](source-baseline.md)。
+
+**源码定位**
 
 > **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
 > 源码路径相对 LangChain 仓库根目录；版本与阅读路线见 [系列导读](index.md)。
@@ -31,7 +33,9 @@ description: 沿 create_agent() 的真实顺序，追踪输入配置如何变成
 > 5. LangGraph 依赖包：`langgraph`
 >    - **作用**：`create_agent()` 导入 `StateGraph`、`END`、`START`、`Send`、`Command` 等 API 完成建图和编译。这里只看 LangChain 调用了什么，不追踪 LangGraph 内部实现。
 
-## 二、先看工厂产出什么
+本篇沿总览的订单处理案例看装配：应用交入订单查询、政策检索、提交申请工具，以及审批与输出约定，工厂把它们变成可执行规则。此时订单尚未查询、人工尚未审批，业务工具也尚未运行。
+
+## 一、先看工厂产出什么
 
 `create_agent()` 接收模型、工具、Middleware、状态 Schema 和运行配置，返回一张已经编译的 `CompiledStateGraph`。中间经过的是几组可以在源码中定位的装配动作：
 
@@ -55,11 +59,16 @@ model
 
 后文始终区分两个时间点：装配期决定节点、工具、状态字段和边；执行期消费这些装配结果。这样读工厂代码时，不会把“创建节点”和“调用模型”混成同一个动作。
 
-## 三、入口参数：工厂先确定 Agent 的边界
+## 二、入口参数：工厂先确定 Agent 的边界
 
 `create_agent()` 的签名已经暴露了 Agent 的主要扩展面：
 
 model 和 tools 可以按位置传入，其余参数为仅限关键字参数。返回的是已编译的 CompiledStateGraph，类型参数描述内部状态、运行时 Context、输入与输出；它不是尚未编译的 StateGraph 构建器。
+
+初读先看三组配置：模型与工具决定可调用能力，中间件与状态决定扩展位置，保存器等参数决定运行时服务。完整类型和默认值可按需展开。
+
+<details>
+<summary>完整参数类型、默认值与容器形式</summary>
 
 下表对应该版本工厂签名，按参数解释装配职责：
 
@@ -88,7 +97,9 @@ model 和 tools 可以按位置传入，其余参数为仅限关键字参数。�
 - `type[ResponseT]` 表示可以直接传一个结构化输出 Schema 类型；
 - `dict[str, Any]` 在 `tools` 中代表 provider 原生工具定义，在 `response_format` 中则是原始 JSON Schema；工厂会把后者包成 `AutoStrategy`，二者不是同一种字典。
 
-### 1. 参数归一化：入口形态 → 内部统一结构
+</details>
+
+### 1、参数归一化：入口形态 → 内部统一结构
 
 签名中的默认值只是入口形态。`create_agent()` 进入函数体后，先把几个可选参数转换为后续代码统一使用的结构。
 
@@ -178,11 +189,11 @@ transformers=None → 不追加用户自定义 Transformer
 
 工厂的作用是把这些入口形态归一化为后续节点可以直接消费的对象。
 
-## 四、入口参数如何进入模型调用
+## 三、入口参数如何进入模型调用
 
 这一阶段先看 `system_prompt` 如何进入模型调用链，以及用户工具如何被拆成客户端工具和 provider 原生工具。
 
-### 1. system_prompt 的传递路径
+### 1、system_prompt 的传递路径
 
 ```text
 create_agent(system_prompt=...)
@@ -199,63 +210,22 @@ create_agent(system_prompt=...)
 - Middleware 可以在一次模型调用前通过 `ModelRequest` 改写系统消息；
 - 工具循环回到模型时，工厂可以用同一个系统消息重新组装本轮模型输入。
 
-## 五、结构化输出如何改变图的行为
+## 四、为结构化结果预留工具与出口
 
-`response_format` 不是"模型返回后再套一个 Parser"。它在工厂中提前介入，改变了三个关键行为：
+`response_format` 在装配期就参与图构造。裸 Schema 会被包成 `AutoStrategy`；工厂为可能使用的工具策略准备结构化工具绑定，供后续模型调用与结果解析使用。
 
-- **模型绑定**：策略决定 `_get_bound_model()` 用 provider 原生参数还是把 Schema 伪装成特殊工具，这会改变模型调用时实际传入的参数。
-- **循环出口**：条件边会检查 `state["structured_response"]`；但这个检查排在待执行的普通工具调用之后。只有没有 `pending_tool_calls` 时，已有结构化结果才会结束本轮循环。
-- **输出 State**：`agent.invoke()` 仍返回图的状态映射，其中保留 `messages`，并在成功时额外包含 `structured_response`。Schema 决定的是 `result["structured_response"]` 的类型，不是把整个返回值替换成该对象。
+这些工具用于表达最终结果，不是订单查询或提交申请的业务函数。工厂把它们单独保存在 `structured_output_tools`，避免路由误把它们当成普通业务待办。
 
-它会在装配期准备策略和工具，在运行期影响模型绑定、结果解析和循环出口。
+| 装配结果 | 运行时用途 |
+| --- | --- |
+| 初始响应策略 | 每轮模型调用据此确定最终绑定方式 |
+| 结构化工具绑定 | 解析模型给出的结构化工具参数 |
+| `structured_response` 字段 | 保存解析成功后的结构化对象 |
+| 对应条件边 | 按待处理工具与结构化结果决定继续或结束 |
 
-### 1. 裸 Schema 先归一化为 `AutoStrategy`
+装配期准备候选，不表示自动策略已经永久选定。中间件可以替换本轮模型或响应格式，所以实际绑定仍发生在模型调用时。策略选择、解析失败、修复消息和重试预算集中到 [14：结构化输出与修复](./14-structured-output-and-repair.md)。
 
-```python
-# 初始化响应格式：裸 Schema 暂时包成 AutoStrategy，
-# 显式策略则直接沿用。
-if response_format is None:
-    initial_response_format = None
-elif isinstance(response_format, (ToolStrategy, ProviderStrategy, AutoStrategy)):
-    initial_response_format = response_format
-else:
-    initial_response_format = AutoStrategy(schema=response_format)
-```
-
-如果是 `AutoStrategy`，工厂会先按 `ToolStrategy` 创建候选工具：
-
-```python
-# 为 AutoStrategy 预先准备 ToolStrategy，先得到结构化工具绑定信息；
-# 真正调用模型时仍可能切换成 ProviderStrategy。
-if isinstance(initial_response_format, AutoStrategy):
-    tool_strategy_for_setup = ToolStrategy(schema=initial_response_format.schema)
-elif isinstance(initial_response_format, ToolStrategy):
-    tool_strategy_for_setup = initial_response_format
-
-# 结构化输出工具单独保存，不和普通业务工具混用。
-structured_output_tools: dict[str, OutputToolBinding[Any]] = {}
-if tool_strategy_for_setup:
-    # 先建立结构化工具的绑定信息，供后续模型绑定和结果解析使用。
-    for response_schema in tool_strategy_for_setup.schema_specs:
-        binding = OutputToolBinding.from_schema_spec(response_schema)
-        structured_output_tools[binding.tool.name] = binding
-```
-
-这段代码先为 `AutoStrategy` 准备候选结构化工具，提前确定工具名、Schema 和错误处理；到真正调用模型时，再根据模型能力选择 Provider 或 Tool 策略。
-
-### 2. 三种策略改变的是调用协议
-
-| 策略 | 模型调用侧 | Agent 结果侧 |
-| --- | --- | --- |
-| `ProviderStrategy` | 绑定 `response_format` JSON Schema 参数 | 当模型结果没有 `tool_calls` 时，从消息内容解析 `structured_response` |
-| `ToolStrategy` | 把 Schema 绑定成特殊工具 | 解析特殊工具调用并回灌 `ToolMessage` |
-| `AutoStrategy` | 根据模型能力选择前两者之一 | 跟随最终策略处理结果 |
-
-这三种策略分别会在三个位置生效：`_get_bound_model()` 负责绑定模型，`_handle_model_output()` 负责解析结果，条件边负责根据 `structured_response` 决定是否结束。
-
-这里的 `ProviderStrategy` 是 API 层的策略名，不表示工厂会针对每个 provider 分别适配参数。`1.3.7` 的 `ProviderStrategy.to_model_kwargs()` 固定生成 OpenAI 风格的 `response_format={"type": "json_schema", ...}`，再交给模型适配器处理；阅读源码时不要把它误解成一个通用的 provider 参数转换层。
-
-## 六、Middleware 如何进入工厂
+## 五、Middleware 如何进入工厂
 
 工厂不会在这里执行 Middleware，而是把同一个实例拆成几类能力，分别接入工具节点、图节点、模型包装栈和 State Schema：
 
@@ -294,7 +264,7 @@ tool_node = (
 )
 ```
 
-## 七、合并 State Schema
+## 六、合并 State Schema
 
 Middleware 可以往 State 里加字段（如调用限额中间件的计数），调用方也可以通过 `state_schema` 声明字段。合并顺序决定了最终谁赢：
 
@@ -306,9 +276,9 @@ resolved_state_schema, input_schema, output_schema = _resolve_schemas(state_sche
 
 Middleware Schema 在前，基础 Schema 在后；内部同名字段按实际遍历顺序覆盖。输入、输出 Schema 各自过滤字段声明，不能推断后加的私有标记会删除此前公开的同名字段；重复类型还会按字典 key 合并。具体算法与边界见 [05](05-state-graph-runtime.md)。
 
-## 八、注册图节点和确定生命周期位置
+## 七、注册图节点和确定生命周期位置
 
-### 1. 固定节点与扩展节点
+### 1、固定节点与扩展节点
 
 工厂的图至少围绕两个固定节点装配：
 
@@ -340,7 +310,7 @@ if tool_node is not None:
 
 这里的重点不是 LangGraph 如何执行节点，而是工厂在编译前决定了图上有哪些名字和位置。
 
-### 2. 一次性入口和循环入口分开
+### 2、一次性入口和循环入口分开
 
 工厂会分别计算：
 
@@ -382,7 +352,7 @@ flowchart TD
 
 before_agent 不在常规工具回环中；before_model 每次走到模型入口时执行，但包装器内部重试 handler 不会自动再走一次 before_model。结束 hook 若请求回到模型，after_agent 也可能多次执行。
 
-## 九、模型节点：State → 模型调用 → 结果
+## 八、模型节点：State → 模型调用 → 结果
 
 模型节点负责把当前 State 转成一次模型调用，再把结果写回图状态。它的内部流程分两层：
 
@@ -428,45 +398,17 @@ return handler(request)
 
 `_handle_model_output()` 在 ③ 之后根据策略做结果分发：`ProviderStrategy` → 解析 `structured_response` 写入 State；`ToolStrategy` → 解析特殊工具调用，回灌带 `tool_call_id` 的 `ToolMessage`；无策略 → 直接返回消息更新。
 
-## 十、模型绑定和结构化结果回灌
+## 九、模型节点保留运行时绑定入口
 
-`_get_bound_model()` 定义在装配期，但由 `_execute_model_sync()` / `_execute_model_async()` 在**每次模型调用时**执行。Middleware 可以通过 `request.override()` 改写本次请求的模型、工具、响应格式和 `model_settings`，因此不能把它理解成 `create_agent()` 时只做一次的决定。
+`_get_bound_model()` 定义在工厂内部，实际由每次模型调用执行。它读取本轮 `ModelRequest`，检查工具执行入口，确定输出策略，再把工具与模型设置绑定到请求。
 
-它先为本次请求确定 `effective_response_format`，再按该结果选择对应绑定分支：
+订单流程中，第一次模型调用可能只需要只读工具，后续中间件可能调整模型或可见工具。若把绑定误解为只在 `create_agent()` 执行一次，就无法解释这些动态行为。
 
-```python
-# 分支 1：本次确定为 ProviderStrategy。
-if isinstance(effective_response_format, ProviderStrategy):
-    kwargs = effective_response_format.to_model_kwargs()
-    return (
-        request.model.bind_tools(final_tools, strict=True, **kwargs, **request.model_settings),
-        effective_response_format,
-    )
+`_handle_model_output()` 随后把模型消息转换为局部 State 更新；结构化解析成功时，还加入 `structured_response`。返回值经模型节点交给图合并，工厂闭包里没有另一份独立对话历史。
 
-# 分支 2：本次确定为 ToolStrategy；存在预先声明的结构化工具时强制 tool_choice="any"。
-if isinstance(effective_response_format, ToolStrategy):
-    tool_choice = "any" if structured_output_tools else request.tool_choice
-    return (
-        request.model.bind_tools(final_tools, tool_choice=tool_choice, **request.model_settings),
-        effective_response_format,
-    )
+动态工具的声明与真实执行需同时具备，见 [11](./11-tool-dynamics.md)；结构化输出的 Provider、Tool 与 Auto 策略细节见 [14](./14-structured-output-and-repair.md)。
 
-# 分支 3：有普通工具但无结构化输出——只绑定业务工具。
-if final_tools:
-    return (
-        request.model.bind_tools(final_tools, tool_choice=request.tool_choice, **request.model_settings),
-        None,
-    )
-
-# 分支 4：无工具——原始模型直接调用。
-return request.model.bind(**request.model_settings), None
-```
-
-这不是“`ProviderStrategy` 总是优先于 `ToolStrategy`”的策略排序。显式传入的 `ProviderStrategy` 或 `ToolStrategy` 会原样保留；只有 `AutoStrategy` 才会调用 `_supports_provider_strategy(request.model, tools=request.tools)` 自动选择。判断结果为真时改用 `ProviderStrategy`，否则使用 `ToolStrategy`。显式的 `ProviderStrategy` 不会因为能力探测失败而自动降级。
-
-因此，`AutoStrategy` 在本轮被选为 `ProviderStrategy` 时走第一条；能力不支持时走 `ToolStrategy`。普通工具分支只表示本轮没有有效的结构化输出策略。
-
-## 十一、工具节点：LangGraph 的 prebuilt 执行器
+## 十、工具节点：LangGraph 的 prebuilt 执行器
 
 `tools` 节点使用的是 LangGraph prebuilt 的 `ToolNode`。工厂直接从 `langgraph.prebuilt.tool_node` 导入它，并将 available_tools 和 wrap_tool_call 包装器交给它：
 
@@ -483,11 +425,19 @@ ToolNode 负责分发工具并整理返回的 ToolMessage 或 Command，状态�
 - 具体执行链（`invoke → run → _run → _format_output`）见 [02：聊天模型、消息与工具](./02-core-abstractions.md)；
 - `wrap_tool_call` 的拦截与工具结果改写见 [04：Middleware 执行边界](./04-middleware-control-plane.md)。
 
-## 十二、条件边：Agent 的循环逻辑
+## 十一、条件边把模型和工具接成循环
 
-模型输出后，工厂根据最后一条 `AIMessage` 中的 `tool_calls` 计算下一条边。
+工厂根据是否有工具节点、结构化输出和生命周期 hook，安装相应的边。这里解释装配选择；一次请求中的消息变化交给 [05](./05-state-graph-runtime.md)。
 
-`_make_model_to_tools_edge()` 只会在存在 `tool_node` 时注册到 `loop_exit_node`。它的第一步是计算待处理的工具调用：
+| 条件 | 安装的主要路由 | 决定什么 |
+| --- | --- | --- |
+| 存在工具节点 | `_make_model_to_tools_edge`、`_make_tools_to_model_edge` | 未配对业务工具派发，工具后回模型或结束 |
+| 没有普通工具节点，但有结构化工具 | `_make_model_to_model_edge` | 结构化结果未生成时继续调用模型 |
+| 没有上述循环需求 | 模型或结束 hook 接出口 | 普通单轮结果如何返回 |
+
+实际图还受中间件 hook 和 `jump_to` 影响，不能把这些分支当成所有 Agent 共用的一张固定图。
+
+有业务工具时，路由先找出没有配对结果的普通调用，再按调用拆成工具任务。以下是 `factory.py` · `_make_model_to_tools_edge` 的两个相邻阶段，中间只省略源码注释：
 
 ```python
 pending_tool_calls = [
@@ -495,94 +445,20 @@ pending_tool_calls = [
     for c in last_ai_message.tool_calls
     if c["id"] not in tool_message_ids and c["name"] not in structured_output_tools
 ]
+
+# 待处理调用逐项派发；ToolNode 执行时从通道读取运行状态，
+# 因此不再把完整 State 塞进每一个 Send。
+if pending_tool_calls:
+    return [Send("tools", [tool_call]) for tool_call in pending_tool_calls]
 ```
 
-只有没有配对 ToolMessage、且不属于结构化输出工具的调用才进入 pending_tool_calls。这里依据消息 ID 去重，不查询外部业务动作是否已经提交；恢复后的幂等执行仍需由工具与业务服务保证。
+`Send` 是 LangGraph 的动态任务派发对象。这里每项只带一个工具调用；这与手工把一整个调用批次放进同一个 ToolNode 任务不同。底层恢复粒度要结合对应 LangGraph 版本判断。
 
-**第二步：六层判断路由。**
+待处理普通工具的分支位于 `structured_response` 结束检查之前。即使模型同一轮给出结构化结果，只要还有普通工具待办，也不能仅靠结构化字段结束。相反，审批拒绝产生配对 ToolMessage 后，该次调用不再派发，路由可以回到模型解释结果。
 
-```text
-                                         ┌──────────────────┐
-                   middleware 的 jump_to  │ set? → 按值解析跳转    │ (1) 最高优先级
-                                         └──────────────────┘
-                                                │ 无
-                                         ┌──────────────────┐
-                   last_ai_message 不存在  │ → END             │ (2)
-                                         └──────────────────┘
-                                                │ 有
-                                         ┌──────────────────┐
-                   AIMessage.tool_calls   │ 空 → END          │ (3)
-                                         └──────────────────┘
-                                                │ 非空
-                                         ┌──────────────────┐
-                   pending_tool_calls     │ 非空 → Send(tools) │ (4) 每个 call 独立派发
-                                         └──────────────────┘
-                                                │ 空
-                                         ┌──────────────────┐
-                   structured_response    │ 已写入 → END      │ (5)
-                                         └──────────────────┘
-                                                │ 未写入
-                                         ┌──────────────────┐
-                                          → 回到 model       │ (6) 继续处理工具结果
-                                         └──────────────────┘
-```
+工具执行后的出口还考虑 `return_direct` 等条件。最简的“有调用就执行、没有就结束”适合建立第一印象，真实路由应回到这三个函数逐项核对。
 
-`Send("tools", [call])` 的含义：每个待处理的工具调用独立派发到 `tools` 节点（前述 ToolNode），由 LangGraph 负责并行调度。这不同于 `RunnableParallel` 的固定构造期分支——Send 的数量和内容由模型运行时输出决定。
-
-`_make_model_to_tools_edge()` 和 `_make_model_to_model_edge()` 只调用 `_resolve_jump()`，不会在这里读取某个 Hook 的 `can_jump_to` 声明。`can_jump_to` 的作用是让 `_add_middleware_edge()` 为普通 Middleware 节点注册可选目的地；不要把它理解成对所有 `jump_to` 状态更新的统一运行时鉴权。
-
-**工具节点之后还有一条回环边。** 模型到工具的边只解决了"要不要派发工具"。工具执行完往哪走，由另一条独立的 `_make_tools_to_model_edge` 决定：
-
-```python
-def tools_to_model(state: dict[str, Any]) -> str | None:
-    last_ai_message, tool_messages = _fetch_last_ai_and_tool_messages(state["messages"])
-
-    # 1. 没有 AIMessage（如消息被清空），回到模型。
-    if last_ai_message is None:
-        return model_destination
-
-    # 2. 所有客户端工具都 return_direct=True → 直接结束。
-    client_side_tool_calls = [
-        c for c in last_ai_message.tool_calls if c["name"] in tool_node.tools_by_name
-    ]
-    if client_side_tool_calls and all(
-        tool_node.tools_by_name[c["name"]].return_direct for c in client_side_tool_calls
-    ):
-        return end_destination
-
-    # 3. 结构化输出工具已执行 → 直接结束。
-    if any(t.name in structured_output_tools for t in tool_messages):
-        return end_destination
-
-    # 4. 默认：工具结果已就绪，回到模型继续推理。
-    return model_destination
-```
-
-它和模型→工具的边是**两条独立的函数**，不是一条边里的两个分支。模型→工具的边管"派发"，工具→模型的边管"回收"。
-
-**没有 `ToolNode` 时的模型自环。** 若没有客户端工具和工具包装器，但 `ToolStrategy` 在装配期创建了 `structured_output_tools`，工厂不会为了这些特殊工具创建 `ToolNode`：结构化工具调用由 `_handle_model_output()` 在模型节点内解析。此时才会把 `_make_model_to_model_edge()` 注册到 `loop_exit_node`，用于在结构化输出未成功时再次调用模型：
-
-```python
-def model_to_model(state: dict[str, Any]) -> str | None:
-    # 1. jump_to 优先。
-    if jump_to := state.get("jump_to"):
-        return _resolve_jump(jump_to, model_destination=model_destination, end_destination=end_destination)
-
-    # 2. 结构化响应已生成 → 结束。
-    if "structured_response" in state:
-        return end_destination
-
-    # 3. 默认：回到模型重试结构化输出。
-    return model_destination
-```
-
-三套路由函数不是同时注册到同一张图：
-
-- 有 `tool_node` 时，工厂注册 `_make_model_to_tools_edge()` 和 `_make_tools_to_model_edge()`；前者的第六个分支可直接回到模型，处理人工注入的 `ToolMessage` 或结构化输出重试。
-- 没有 `tool_node`、但存在 `structured_output_tools` 时，工厂只注册 `_make_model_to_model_edge()`。
-- 两者都没有且没有 `after_model` Hook 时，模型节点直接连到最终出口；存在 `after_model` Hook 时，由该 Hook 的边决定默认出口和允许的跳转。
-
-## 十三、编译并返回图
+## 十二、编译并返回图
 
 工厂最后把运行能力作为参数交给 `graph.compile()`：
 
@@ -617,23 +493,23 @@ return graph.compile(
 - Transformer 不参与 State 的 reducer 或节点更新；它处理的是运行时对外复用的流事件通道；
 - 内置 Transformer 和 Middleware 自带 Transformer 的具体装配位置放在 06 篇。
 
-## 十四、完整流程回放
+## 十三、完整流程回放
 
-以“搜索资料后输出 Answer”为例，装配和执行应分开观察：
+以总览的“查询订单与政策，按决定提交申请，再返回处理结果”为例，装配和执行应分开观察：
 
 | 阶段 | 工厂或运行时做什么 | 此时尚未发生什么 |
 | --- | --- | --- |
-| 装配 | 初始化模型、登记 search 工具、准备 Answer 的响应策略，编译节点与边 | 没有搜索，也没有生成答案 |
-| 第一次模型节点执行 | 根据当前请求绑定工具与策略，模型提出 search 调用 | 工具函数尚未执行 |
-| 条件路由与工具执行 | 未配对调用进入 ToolNode，结果以 ToolMessage 回到 State | 工具成功不代表 Answer 已生成 |
-| 再次模型节点执行 | 模型消费搜索结果，按有效策略返回结构化数据 | schema 通过不代表答案事实正确 |
+| 装配 | 初始化模型、登记查询与提交工具、准备处理结果策略及审批 hook，编译节点与边 | 没有查询、审批或提交业务动作 |
+| 第一次模型节点执行 | 根据当前请求绑定工具与策略，模型提出订单与政策查询 | 工具函数尚未执行 |
+| 条件路由与工具执行 | 未配对调用进入 ToolNode，结果以 ToolMessage 回到 State | 查询成功不代表退货申请已提交 |
+| 再次模型节点执行 | 模型消费工具与审批结果，按有效策略整理结构化数据 | schema 通过不代表答案事实正确 |
 | 结束阶段 | 满足路由结束条件，经过配置的结束 hook，返回输出状态 | 不会自动发布答案或提交外部业务结果 |
 
-response_format=Answer 改变的是模型绑定、结果解析和循环出口；调用方仍从返回状态中读取 structured_response。checkpointer 只是在编译时接入持久化能力，真正保存状态发生在运行期间。
+response_format 改变的是模型绑定、结果解析和循环出口；调用方仍从返回状态中读取 structured_response。checkpointer 只是在编译时接入持久化能力，真正保存状态发生在运行期间。
 
 源码中的 model_to_tools、tools_to_model 和 model_to_model 分别处理工具派发、工具后的回环和无普通工具时的结构化重试。它们与 Middleware 的跳转共同决定实际执行路线，因此“模型没有 tool_calls 就结束”只适合解释最简循环。
 
-## 十五、扩展点选择与后续阅读
+## 十四、扩展点选择与后续阅读
 
 新增能力时先选择它影响的对象：临时模型参数交给请求包装器，需要保存的数据放进 State schema，可独立调用的动作注册为工具，超出标准循环的节点拓扑则交给 LangGraph。
 

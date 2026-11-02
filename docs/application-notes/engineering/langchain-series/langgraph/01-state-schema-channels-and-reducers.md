@@ -6,7 +6,9 @@ description: 沿 Schema 解析、写入分组和通道更新解释并行冲突�
 
 # LangGraph 源码 01：字段更新怎样合并成下一版状态
 
-## 源码定位
+**源码定位**
+
+> 快照身份与验证范围见[源码基线](./source-baseline.md)。源码节选以该快照为准，文中的应用示例不等于框架实现。
 
 > **源码基线**：langgraph 1.2.10。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >
@@ -20,7 +22,7 @@ description: 沿 Schema 解析、写入分组和通道更新解释并行冲突�
 
 **通道保存字段值，reducer 决定多份更新怎样合并。** Channel（通道）是框架管理值和更新的对象；reducer（归并函数）是你可以提供的一条合并规则，例如用列表相加收集两个节点的结果。示例中的节点依旧收发字典，使用框架时不需要逐个操作通道对象。
 
-下面先让两个节点各交回一份结果，再沿字段声明和提交代码解释结果如何合在一起。消息、临时信号和恢复优化在后半篇展开。
+下面先让两个节点各交回一份结果，再沿字段声明和提交代码解释结果如何合在一起。left、right 对应总览中的两项材料处理；消息、临时信号和恢复优化在后半篇展开，文末再区分业务状态与运行依赖。
 
 ## 一、两个节点都返回 items，应该得到什么
 
@@ -69,7 +71,7 @@ assert result["report"] == "left, right"
 | `Annotated[list[str], operator.add]` | 两份列表依次拼接 | 每个节点返回自己的新增项 |
 | 使用拼接规则，却返回“旧列表 + 新项” | 旧数据也被当作新增数据再次拼接 | 不要把累计全量误作增量返回 |
 
-### 字段声明怎样决定更新规则
+### 1、字段声明怎样决定更新规则
 
 沿用加一例子，`count: int` 表示没有额外合并规则，框架会选 `LastValue`，即“保留上次值，收到新值时替换”的通道。若声明 `items: Annotated[list[str], operator.add]`，则会选 `BinaryOperatorAggregate`，它把每份更新交给你提供的二元合并函数，列表相加就是其中一种用法。
 
@@ -127,7 +129,7 @@ for chan, vals in pending_writes_by_channel.items():
 
 这里实际调用的是 `items_channel.update([["left"], ["right"]])`：外层列表代表两份写入，内层列表才是每个节点提供的字段值。`update()` 的布尔返回值表示通道是否报告了变化；通道值和通道版本是两件事，值相同也可能因一次写入而推进版本。
 
-### 1. 默认通道为什么拒绝并行覆盖
+### 1、默认通道为什么拒绝并行覆盖
 
 源码：`libs/langgraph/langgraph/channels/last_value.py` → `LastValue.update`（第 56–67 行节选；未展示部分省略）。
 
@@ -150,7 +152,7 @@ def update(self, values: Sequence[Value]) -> bool:
 
 如果两份结果都应保留，配置 reducer；如果右节点必须读取左节点的结果，应改变依赖关系，让它们分轮执行。还要移除使右节点提前运行的其他入口边，只补一条 `left → right` 不会取消原来的触发路径。
 
-### 2. 聚合通道怎样调用 reducer
+### 2、聚合通道怎样调用 reducer
 
 `BinaryOperatorAggregate` 初始化时尝试调用字段类型的空构造器，例如 `list()` 得到 `[]`；类型无法空构造时才使用 `MISSING`（尚无值的内部标记）。因此“第一次更新必然直接赋值”并不成立。
 
@@ -272,7 +274,7 @@ def update(self, values: Sequence[Value]) -> bool:
 
 `NamedBarrierValue` 记录的是名字集合。例如等待 `search` 和 `profile` 时，`search` 报到两次不能代替 `profile`；未知名字会抛出更新错误。它只表达就绪条件，不合并两个节点返回的业务数据。
 
-### 1. UntrackedValue 不保存值，但仍可触发
+### 1、UntrackedValue 不保存值，但仍可触发
 
 源码：`libs/langgraph/langgraph/channels/untracked_value.py` → `UntrackedValue.checkpoint / from_checkpoint`（第 48–54 行节选；未展示部分省略）。
 
@@ -288,7 +290,7 @@ def from_checkpoint(self, checkpoint: Value) -> Self:
 
 “Untracked”在这里指字段值不进入检查点。它的 `update()` 仍返回变化，`apply_writes()` 没有将它排除在通道版本更新之外。底层 Pregel 节点若订阅它作为触发通道，仍可以被它触发；恢复时它的旧值则不存在。普通 StateGraph 业务字段是否触发节点，还取决于编译后的边。
 
-### 2. DeltaChannel 用重建成本换保存体积
+### 2、DeltaChannel 用重建成本换保存体积
 
 `DeltaChannel` 的 reducer 接收 `(state, [write1, write2, ...])`，一次处理整批更新。它不是预设的字典浅合并器。
 
@@ -313,3 +315,43 @@ return True
 运行时维护的是通道集合，并按需要构造输入对象，不是同时维护三份独立状态。`TypedDict` 主要提供结构元数据，不会因此获得完整的运行时类型校验；未知输出键可能被过滤。Pydantic 模型会在转换节点输入时提供相应校验，但也不等于所有字段写入都经过业务验证。
 
 普通并行节点读取的是轮次开始时的已提交值。条件路由有一条特殊路径：它可以在通道副本上应用**当前源节点自己的写入**，读取更新后的局部视图，以便根据刚生成的结果选择分支；它仍看不到其他并行节点尚未提交的结果。这个局部读取机制在[编译章节](./02-stategraph-builder-and-compilation.md)展开。
+
+<a id="state-context-config-store"></a>
+
+## 六、State、Runtime context、config 与 Store 分别放什么
+
+材料处理函数除了读材料与结果，还可能需要数据库客户端、当前用户身份和长期偏好。把这些都塞进 State，会混淆工作流进度与运行依赖，也可能把不适合序列化的对象交给保存器。
+
+`Runtime` 是注入节点的运行上下文对象，提供本次 context、Store、流式 writer 等能力。`RunnableConfig` 是运行配置，携带 thread_id 等执行配置以及回调等信息；当前 Runtime 类本身不包含 config，需要通过单独的参数或配置访问接口取得。
+
+| 数据 | 建议位置 | 谁提供、如何使用 | 恢复时要注意什么 |
+| --- | --- | --- | --- |
+| 材料、处理结果、报告、审批结论 | State | 入口与节点通过字段更新推进 | 普通受跟踪字段参与检查点；仍有 UntrackedValue 等例外 |
+| 已认证用户身份、本次数据库客户端 | Runtime context | 应用在调用入口提供，节点读取运行依赖 | 不会因作为 context 传入就自动成为 State 检查点值；跨进程恢复需重新提供适当依赖 |
+| thread_id、指定 checkpoint_id、回调 | config | 应用控制执行身份、历史位置和观测 | thread_id 只是定位键，授权仍由应用检查 |
+| 用户偏好、跨会话业务资料 | Store | 应用提供后端，节点显式读写 | 重放可能读到当前值，而非历史值；不会随图状态回退 |
+
+这张表是基于运行机制的工程放置建议。context 被定位为运行期间的依赖，并不使里面所有 Python 对象天然不可变，也不自动提供秘密保护。节点若主动把 context 内容返回到 State 或日志，仍会改变数据暴露范围。
+
+运行入口实际构造 Runtime 的代码如下。源码为 `libs/langgraph/langgraph/pregel/main.py` → `Pregel.stream`（第 2872–2883 行）；父运行时与 server_info 的准备位于片段之前。
+
+```python
+runtime = Runtime(
+    context=_coerce_context(self.context_schema, context),
+    store=store,
+    stream_writer=stream_writer,
+    previous=None,
+    execution_info=None,
+    server_info=server_info,
+    control=control or parent_runtime.control or RunControl(),
+)
+runtime = parent_runtime.merge(runtime)
+config[CONF][CONFIG_KEY_RUNTIME] = runtime
+
+```
+
+`context_schema` 描述运行依赖的结构；`_coerce_context` 根据它处理传入值，再把 Runtime 接到本次配置供任务使用。这个过程没有调用字段 reducer，也没有把数据库连接等对象当作节点返回值合并进 State。
+
+`libs/langgraph/tests/test_runtime.py` 的 `test_injected_runtime` 和 `test_context_runtime` 分别检查参数注入与 `get_runtime` 读取；它们只证明上下文可以到达节点，测试中的示例字符串并不应被当作生产日志设计。本次未运行这些测试。
+
+这一区分还影响缓存：03 中的输入键来自节点输入，不会自动捕获所有 context 与 Store 依赖。如果结果随用户或资料版本变化，必须把相应身份纳入缓存设计，不能仅因输入材料相同就跨用户复用。

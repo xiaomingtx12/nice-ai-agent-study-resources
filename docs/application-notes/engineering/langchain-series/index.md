@@ -12,6 +12,8 @@ description: 自底向上拆解 LangGraph 图状态机、LangChain 最小 Agent 
 本系列不是横向罗列三个框架的功能，而是沿 **LangGraph 运行时 → LangChain 最小 Agent 框架 → Deep Agents Harness 预置套件**，观察工程能力如何逐层封装。
 :::
 
+熟悉 Spring 的读者，可以先读 [写过 Spring，如何理解 LangChain、LangGraph 和 Deep Agents](./ecosystem-through-spring.md)：从已有退货服务怎样供 Agent 使用讲起，借助接口、组件组合和拦截器经验理解 LangChain，再通过审批恢复与材料整理需求理解 LangGraph 和 Deep Agents。
+
 ## 一、为什么从底层向上读源码
 
 手写一个“模型调用工具再继续推理”的循环并不难。复杂 Agent 的成本主要来自循环之外：状态如何合并、工具如何授权、上下文如何装配、长历史如何压缩、外部能力如何接入、子 Agent 如何隔离。

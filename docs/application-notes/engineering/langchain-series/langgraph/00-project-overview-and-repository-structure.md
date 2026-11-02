@@ -6,7 +6,9 @@ description: 从 StateGraph、compile 和 invoke 的加一例子出发，逐步�
 
 # LangGraph 源码 00：一次调用如何穿过图运行时
 
-## 源码定位
+**源码定位**
+
+> 快照身份与验证范围见[源码基线](./source-baseline.md)。源码节选以该快照为准，文中的应用示例不等于框架实现。
 
 > **源码基线**：langgraph 1.2.10。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >
@@ -15,11 +17,40 @@ description: 从 StateGraph、compile 和 invoke 的加一例子出发，逐步�
 > - 轮次与提交：`libs/langgraph/langgraph/pregel/_loop.py` → `tick()`、`after_tick()`；`libs/langgraph/langgraph/pregel/_algo.py` → `apply_writes()`。
 > - 临时通道：`libs/langgraph/langgraph/channels/ephemeral_value.py` → `EphemeralValue.update()`。
 
-你已经会用 `StateGraph` 定义节点和边，再调用 `compile()`、`invoke()`。理解内部实现需要回答三个问题：编译后得到什么对象，调用时怎样执行你的函数，函数返回的值什么时候成为新状态。正文用核心源码片段和具体数据变化逐步解释这三个问题。
+LangGraph 为有状态工作流提供执行运行时。应用定义哪些函数处理任务、如何衔接、哪些结果需要保存；框架负责把定义变成具体调用，合并更新，并在配置保存器后支持中断与恢复。节点可以调用模型，也可以只执行普通 Python 逻辑。
 
-本篇用一个加一节点走完这个过程，再把并行、thread、暂停和流式输出放回同一条执行线上。后续专题会逐项展开这些能力。
+理解这套运行时，要能追踪一份结果的去向：它何时只是节点返回值，何时进入下一轮可读状态，何时有了可靠的恢复记录。本文先给出贯穿系列的工作流，再用单节点源码解释基本执行链。
 
-## 一、先看我们自己写的代码
+## 一、工作流：并行整理材料，汇总后等待确认
+
+假设团队要整理两份材料。left 和 right 各处理一份，merge 汇总报告，approve 请求人工确认，deliver 在批准后交付，拒绝则结束本次流程。应用负责材料处理与审批规则，LangGraph 负责这些步骤的执行与状态流转。
+
+```mermaid
+flowchart LR
+    S[输入两份材料] --> L[left：处理材料 A]
+    S --> R[right：处理材料 B]
+    L --> M[merge：汇总报告]
+    R --> M
+    M --> A[approve：请求人工确认]
+    A -->|同一执行历史恢复，批准| D[deliver：交付]
+    A -->|同一执行历史恢复，拒绝| E[结束]
+```
+
+图中汇总要求两项处理都完成；两条箭头表达业务依赖，不表示随便添加两条普通边就自动获得屏障。对应的显式汇合编译在 [02](./02-stategraph-builder-and-compilation.md) 解释。
+
+这是用于贯穿讲解的工作流推演，不是本次已执行的完整应用。01 的 left/right/merge 是它的并行部分；07 的审批小例子单独演示恢复协议；05 将固定的两份材料扩展为运行时才知道数量的任务。独立小例子保留，让每个机制可以单独理解。
+
+| 业务时点 | 需要查清的运行时问题 | 主讲文章 |
+| --- | --- | --- |
+| left、right 同时产生 items 更新 | 结果如何合并，谁决定何时提交？ | 01、03 |
+| left 成功，right 重试耗尽 | 哪些结果保留，恢复后谁会再运行？ | 04、06 |
+| merge 已产生报告 | 报告已显示，是否就一定可靠保存？ | 03、06、09 |
+| approve 等待人确认 | 本次调用怎样退出，下一次怎样找到原任务？ | 07 |
+| 同样的材料再次处理 | 使用缓存与恢复旧任务有什么不同？ | 03、06 |
+
+业务上的“完成”至少有三种含义：某项材料处理完成、报告进入已合并状态、交付动作在外部系统完成。后两项不能只根据某个节点结束事件推断。外部交付的幂等与验收还需应用负责。
+
+## 二、先看我们自己写的代码
 
 下面是完整应用示例，用来说明框架在什么位置接手工作；它不是 LangGraph 内部源码。
 
@@ -51,7 +82,7 @@ result = graph.invoke({"count": 0})  # {"count": 1}
 
 因此，读到编译源码中的 `attach_node()`，先把它理解为“装配已登记的节点”。真正调用 `increment` 要等到 `invoke()`。
 
-## 二、compile 后的 graph 与 Pregel 是什么关系
+## 三、compile 后的 graph 与 Pregel 是什么关系
 
 `compile()` 返回的对象类型叫 `CompiledStateGraph`，直译就是“编译后的状态图”。它继承 `Pregel`，这个基类提供执行图的主要逻辑，包括 `invoke()` 和 `stream()`。
 
@@ -73,7 +104,7 @@ graph：CompiledStateGraph 对象
 
 源码 `libs/langgraph/langgraph/graph/state.py` 中，`CompiledStateGraph` 的类声明直接继承 `Pregel`；`invoke()` 的执行代码则位于 `pregel/main.py`。文件名变化对应的是实现所在位置，业务上仍在处理同一次 `graph.invoke(...)`。
 
-## 三、节点和 task 有什么区别
+## 四、节点和 task 有什么区别
 
 `increment` 是你登记过的节点函数。框架准备调用它时，还要记下“这次给它什么输入、这次调用是什么身份、结果暂存在哪里”。这份具体调用记录叫 **task（任务）**，源码里的完整类型名是 `PregelExecutableTask`。
 
@@ -88,7 +119,7 @@ graph：CompiledStateGraph 对象
 
 后文的 `task.input` 就是这一次调用收到的输入；`task.writes` 是这次调用已经产生、等待框架处理的更新。这里的 task 既不等于线程，也不要求你使用 `@task` 装饰器。普通 StateGraph 节点运行时就会产生任务记录；装饰器是另一种编程入口，在第 10 篇介绍。
 
-## 四、Loop 和 Runner 为什么分开
+## 五、Loop 和 Runner 为什么分开
 
 一个节点时，直接调用函数很容易。节点多起来，框架还要决定：哪些节点现在可以运行，能否同时运行，什么时候让后面的节点读到合并结果。
 
@@ -142,7 +173,7 @@ while loop.tick():
 
 </details>
 
-## 五、Channel 与 attach_node 怎样接到这个例子上
+## 六、Channel 与 attach_node 怎样接到这个例子上
 
 框架要保存 count，还要知道以后收到 `{"count": 1}` 应该覆盖旧值还是与旧值合并。负责“保存一个值并处理更新”的对象叫 **Channel（通道）**。在这里，先把它理解成带更新规则的存储位置，不要代入网络连接或消息队列。
 
@@ -182,7 +213,7 @@ return compiled.validate()
 
 </details>
 
-## 六、thread、恢复和流式输出接在哪个位置
+## 七、thread、恢复和流式输出接在哪个位置
 
 上面的 graph 没有配置保存器，每次调用都用传入的 count 开始。要让一次工作跨多次调用延续，需要 checkpointer（保存执行现场的组件）和 thread（关联这组执行历史的身份）。`thread_id` 是选择这份历史的配置键，与执行节点的操作系统线程无关。
 
@@ -198,7 +229,11 @@ return compiled.validate()
 
 这些特性共用前面的任务、通道和轮次机制。理解“count 的返回值先暂存，再合并”，就能继续区分任务结果、图状态和已保存历史；三者在失败或暂停时尤其不能混为一谈。
 
-## 七、接下来按问题读，不必一次记住所有类名
+回到材料整理流程：left 已完成、right 失败时，当前轮次还没有正常汇合；保存器中却可能已有 left 的成功写入。恢复要找回这份结果，再继续 right，而不是把“没有整轮成功”理解成“两项都没做过”。完整时间线见 [03 的结果提交图](./03-pregel-supersteps-and-scheduling.md#result-timeline)，保存条件见 [06](./06-checkpoints-store-and-recovery.md)。
+
+模型生成的 token、工具进度、节点返回、轮次合并与检查点落盘分别处于不同位置。阅读后续篇章时，始终问“这段代码改变的是哪一份数据”，比仅记住 Loop、Runner、Channel 的名字更有用。
+
+## 八、接下来按问题读，不必一次记住所有类名
 
 如果现在能解释“定义节点 → 编译出 graph → 为某次调用准备 task → 执行 → 合并更新”，就可以继续阅读。后面的类名会在各自负责的问题里出现。
 

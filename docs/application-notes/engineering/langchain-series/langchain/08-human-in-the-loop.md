@@ -6,7 +6,7 @@ description: 拆解 HumanInTheLoopMiddleware 的审批协议：如何筛选工�
 
 # LangChain 源码解析 08：人在环路——HITL 审批协议
 
-## 一、源码定位
+**源码定位**
 
 > **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
 > 路径相对 LangChain 仓库根目录；版本说明见 [系列导读](index.md)。 `langgraph/types.py` 相对 LangGraph 依赖包目录。
@@ -15,7 +15,7 @@ description: 拆解 HumanInTheLoopMiddleware 的审批协议：如何筛选工�
 > - 后继路由：`libs/langchain_v1/langchain/agents/factory.py` → _make_model_to_tools_edge()、_add_middleware_edge()。
 > - 依赖包内路径：`langgraph/types.py` → interrupt()、Command（恢复语义对照 LangGraph 1.2.10）。
 
-## 二、从工具请求到人工决策的完整链路
+## 一、从工具请求到人工决策的完整链路
 
 HITL（Human in the loop，人在环路）不是在工具函数里弹出一个确认框，而是一条完整的图执行协议：
 
@@ -30,7 +30,7 @@ HITL（Human in the loop，人在环路）不是在工具函数里弹出一个�
 
 `HumanInTheLoopMiddleware` 选择 `after_model`，因为这时模型已经给出了工具名和参数，但工具节点还没有执行副作用。
 
-## 三、审批请求不是原始 ToolCall
+## 二、审批请求不是原始 ToolCall
 
 源码把“模型要执行什么”和“人类可以做什么”拆成两套结构：
 
@@ -96,7 +96,7 @@ class HITLResponse(TypedDict):
 
 一次 `HITLRequest` 可以包含多个工具调用。人工返回的 `decisions` 必须与被中断工具调用一一对应，顺序也必须保持一致。
 
-## 四、`interrupt_on`：默认放行，显式收紧
+## 三、`interrupt_on`：默认放行，显式收紧
 
 构造函数会把 `interrupt_on` 里的配置归一化：
 
@@ -181,7 +181,7 @@ def _should_interrupt(
 
 `when` 应该只做判断。它位于 `interrupt()` 之前，不能在里面写数据库、发送消息或执行工具，否则恢复时可能重复产生副作用。
 
-## 五、`after_model` 如何组织一次审批
+## 四、`after_model` 如何组织一次审批
 
 `after_model` 首先找到最后一条 `AIMessage`，再只收集命中 `interrupt_on` 且通过 `when` 判断的工具调用。未命中的调用保留原样，但同一 after_model 节点发生中断时，整批调用都还未进入后续工具节点；它们要等审批恢复后才继续。
 
@@ -282,7 +282,7 @@ return {"messages": [last_ai_msg, *artificial_tool_messages]}
 
 这里没有直接调用工具。Hook 返回的是新的消息状态，后续是否进入工具节点由 Agent 图的条件边判断。
 
-## 六、四种决策怎样改变执行
+## 五、四种决策怎样改变执行
 
 核心逻辑在 `_process_decision()`：
 
@@ -350,8 +350,8 @@ def _process_decision(
 
 | 决策 | `revised_tool_call` | `ToolMessage` | 工具是否执行 |
 | --- | --- | --- | --- |
-| `approve` | 保留原调用 | 无 | 是 |
-| `edit` | 新建调用，保留原 `id` | 无 | 是 |
+| `approve` | 保留原调用 | 无 | 继续等待路由派发 |
+| `edit` | 新建调用，保留原 `id` | 无 | 编辑后继续等待路由派发 |
 | `reject` | 保留原调用 | `status="error"` | 否 |
 | `respond` | 保留原调用 | `status="success"` | 否 |
 
@@ -361,7 +361,7 @@ def _process_decision(
 
 如果决策类型没有出现在 allowed_decisions 中，源码直接抛出 ValueError。它只校验决策种类，不验证提交人的身份。edit 分支还能修改工具名，且这里不会按新工具重新运行 interrupt_on 或 when；编辑后的工具是否允许执行，仍需在接收审批或工具执行边界核验。
 
-## 七、为什么中断放在 `after_model`
+## 六、为什么中断放在 `after_model`
 
 LangChain Agent 的相关图路径是：
 
@@ -388,7 +388,7 @@ model
 
 放在 after_model 可以一次聚合整批待审动作。工具包装器也能在调用 handler 之前实现中断，但要自行处理单调用的中断、并行与恢复；不能从内置方案的选择推出包装器天生无法审批。
 
-## 八、与 `interrupt_before=["tools"]` 的区别
+## 七、与 `interrupt_before=["tools"]` 的区别
 
 两者都能在工具执行前暂停，但控制粒度不同：
 
@@ -400,6 +400,31 @@ model
 需要对所有工具统一停一次，可以使用图级中断；需要按工具配置 `approve/edit/reject/respond`，使用中间件。
 
 两者也可以组合，但要明确暂停职责。若同一批工具调用同时触发两套中断，恢复流程会变成两阶段，调用方必须保存并匹配两次恢复状态。
+
+## 八、回到退货申请：审批改变的是哪条消息
+
+沿用 [05 的消息推进表](05-state-graph-runtime.md#message-request-state)，`c_return` 是模型提出的 `submit_return` 调用 ID。应用应向审核人展示订单、动作参数与依据；同意或拒绝将决定这条待执行调用如何继续。
+
+| 人工决定 | 消息变化 | 对退货申请的影响 |
+| --- | --- | --- |
+| approve | 保留 c_return，尚无配对结果 | 路由仍可派发工具；是否提交成功取决于后续执行 |
+| edit | 保留 c_return，替换动作名或参数 | 后续执行编辑后的动作，执行端仍需校验权限和参数 |
+| reject | 原调用保留，补 c_return 的错误 ToolMessage | 本次 submit_return 不被派发，模型可以解释拒绝原因 |
+| respond | 原调用保留，补 c_return 的成功 ToolMessage | 用人工输入代替工具结果，不证明外部系统已创建申请 |
+
+此表是源码行为在教学场景中的映射，并非真实订单日志。人工拒绝后的最终输出应表达“未提交”，而不是因为消息配对完成就标成业务成功。批准也只表示允许继续，不能提前填写申请编号。
+
+仓库的 `test_human_in_the_loop_middleware_default_rejection_message` 用 mock 替代 `interrupt`，直接调用 `after_model`。以下摘录其中的断言，省略测试设置和拒绝文本断言：
+
+```python
+assert len(result["messages"]) == 2
+# 拒绝结果保留原工具名与调用 ID，用错误状态反馈给模型。
+assert tool_message.status == "error"
+assert tool_message.name == "test_tool"
+assert tool_message.tool_call_id == "1"
+```
+
+源码位置：`libs/langchain_v1/tests/unit_tests/agents/middleware/implementations/test_human_in_the_loop.py`。该测试验证 hook 的消息更新，不是跨进程暂停、保存与恢复的端到端测试；本次只阅读了设置和断言，未执行。持久化恢复的依赖版本边界见[源码基线](source-baseline.md)。
 
 ## 九、工程判断
 

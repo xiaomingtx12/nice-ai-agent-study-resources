@@ -6,30 +6,39 @@ description: 从 LCEL 构造、顺序执行、并行分支和流式传递追踪 
 
 # LangChain 源码解析 01：Runnable 抽象与 LCEL 表达式
 
-## 一、源码定位
+> 固定提交与已阅读测试见[源码基线](source-baseline.md)。
+
+本篇沿组件路线解释一次调用怎样组合。若要先看订单查询、审批和提交的完整流程，可从 [00](00-project-overview-and-repository-structure.md) 进入 [03](03-create-agent-assembly.md)，遇到组件接口时再回来查阅。
+
+**源码定位**
 
 > **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
 > 源码路径相对 LangChain 仓库根目录；版本与阅读路线见 [系列导读](index.md)。
 >
 > **本篇范围**：聚焦 Runnable 基类的统一执行协议（`invoke`/`batch`/`stream`/`transform`）和 LCEL 管道语法（`|`、`RunnableSequence`、`RunnableParallel`、`RunnableBranch`）。`libs/langchain_v1/langchain/` 下的 `create_agent()`、Middleware 和 LangGraph 图装配不在本文分析范围内；它们只在结尾用于说明 LCEL 与 Agent Runtime 的边界。
 >
+<details>
+<summary>按需查阅：核心文件与类型入口</summary>
+
 > **核心包与路径**：
 >
-> 1. `langchain_core.runnables.base`：`libs/core/langchain_core/runnables/base.py`
+> - `langchain_core.runnables.base`：`libs/core/langchain_core/runnables/base.py`
 >    - **主线文件**：`Runnable` 基类定义统一执行协议；`__or__()` 实现管道语法；`coerce_to_runnable()` 作为构造期适配器。
 >    - `Runnable`：抽象方法 `invoke()` 是唯一必须实现的同步入口；`ainvoke()`、`batch()`、`stream()`、`transform()` 提供默认降级实现。
 >    - `__or__()` + `coerce_to_runnable()`：把函数、字典、Runnable 统一适配后组成 `RunnableSequence`。
 >    - `RunnableSequence`：保存 `first`/`middle`/`last`，按顺序传递数据流。
 >    - `RunnableParallel`：固定 key 的并行扇出，输出为字典。
 >    - `RunnableLambda`：把 Python callable 接入 Runnable 体系。
-> 2. `langchain_core.runnables.passthrough`：`libs/core/langchain_core/runnables/passthrough.py`
+> - `langchain_core.runnables.passthrough`：`libs/core/langchain_core/runnables/passthrough.py`
 >    - `RunnablePassthrough`：身份传递，输入即输出。
 >    - `RunnablePassthrough.assign()` / `RunnableAssign._invoke()`：构造字段映射，再保留原字典并合并新字段。
-> 3. `langchain_core.runnables.branch`：`libs/core/langchain_core/runnables/branch.py`
+> - `langchain_core.runnables.branch`：`libs/core/langchain_core/runnables/branch.py`
 >    - `RunnableBranch`：按注册顺序执行条件，取首个真值分支。
-> 4. `langchain_core.runnables.config`：`libs/core/langchain_core/runnables/config.py`
+> - `langchain_core.runnables.config`：`libs/core/langchain_core/runnables/config.py`
 >    - `RunnableConfig`：定义运行配置类型（`tags`/`metadata`/`callbacks`/`recursion_limit` 等）。
 >    - `ensure_config()`、`patch_config()`：配置补齐与子运行派生。
+
+</details>
 
 下面的代码块保留真实源码的函数边界和关键调用；为了突出实现机制，省略了类型重载、异常收尾和无关字段。源码里的英文文档字符串会翻译成中文，新增的行内注释用于标出数据流和配置传播位置。
 
@@ -42,7 +51,7 @@ description: 从 LCEL 构造、顺序执行、并行分支和流式传递追踪 
 
 很多"为什么函数没有立即执行""为什么流式输出被卡住"的问题，分别发生在构造期适配和运行期调度，不能混在一起理解。
 
-## 二、从一条检索链区分构造、执行与调度
+## 一、从一条检索链区分构造、执行与调度
 
 Runnable 是“给一个输入，按统一接口取得输出”的执行协议。模型、工具、检索器等对象实现它，LCEL（LangChain Expression Language，链表达式语言）则用 `|` 和字典等写法组合这些对象。
 
@@ -50,11 +59,11 @@ Runnable 是“给一个输入，按统一接口取得输出”的执行协议�
 
 Agent 可以在工具内部复用这样的链。模型与工具循环的节点、条件边、检查点由 LangGraph 管理；Middleware 的 hook 接收状态或请求对象，Reducer 是合并更新的函数，它们不能一概当成 Runnable。
 
-## 三、`Runnable` 基类：Agent 的统一执行协议
+## 二、`Runnable` 基类：Agent 的统一执行协议
 
 聊天模型通过 `invoke(messages, config)` 返回消息，工具通过 `invoke(tool_call, config)` 执行一次调用。它们共享 Runnable 的调用面；中间件包装器则通过 request 和 handler 介入这些调用，接口在第 04 篇展开。
 
-### 1. `invoke()` 是唯一必须实现的同步入口
+### 1、`invoke()` 是唯一必须实现的同步入口
 
 `Runnable` 通过抽象方法 `invoke()` 要求每个子类回答一个核心问题：一个输入如何变成一个输出。
 
@@ -72,7 +81,7 @@ def invoke(
 
 `Runnable` 不要求所有组件都继承某种业务基类，但要求它们暴露同一个调用形状。Prompt、Chat Model、Tool、Parser 和 Retriever 才能因此被放进同一条 LCEL 链。
 
-### 2. 异步和批处理默认是降级实现
+### 2、异步和批处理默认是降级实现
 
 `ainvoke()` 和 `batch()` 在基类中提供了降级实现：没有原生异步的组件自动走线程池，没有批量能力的组件自动走多次 `invoke()`。
 
@@ -114,7 +123,7 @@ def batch(
 
 所以，调用 `batch()` 只能说明组件支持批量调用面，不能直接推出 provider 收到了一次批量 API 请求。
 
-### 3. `transform()` 决定输入流能否被增量处理
+### 3、`transform()` 决定输入流能否被增量处理
 
 `transform()` 是流式链的核心：它接收上游的 chunk 迭代器，返回输出迭代器。基类的默认实现是先把所有 chunk 合并成一个完整输入，再调用 `stream()`。
 
@@ -146,7 +155,7 @@ def transform(
 
 这就是流式链的核心约束：组合器可以传递 chunk，但具体节点如果没有覆盖 `transform()`，就会成为阻塞点。`RunnableGenerator` 适合增量处理，`RunnableLambda` 默认先收完输入。
 
-### 4. `RunnableConfig` 沿组合树向下传播
+### 4、`RunnableConfig` 沿组合树向下传播
 
 `RunnableConfig` 是一个 `TypedDict`，定义了当前运行和所有子运行共享的字段——tags、metadata、callbacks、递归上限、并发上限、可配置参数等。
 
@@ -184,9 +193,9 @@ if recursion_limit is not None:
 
 Sequence、Parallel 和 Branch 都会派生子运行配置，并通过执行上下文传播配置。ensure_config 也会读取当前上下文中的配置，不能把这条传播链简化成只有显式参数传递；回调的父子关系由各组合器共同维护。
 
-## 四、表达式构造入口：`|`、`__or__()` 与适配
+## 三、表达式构造入口：`|`、`__or__()` 与适配
 
-### 1. `|` 最终得到什么
+### 1、`|` 最终得到什么
 
 下面这段业务代码：
 
@@ -206,7 +215,7 @@ RunnableSequence(prompt, model).__or__(parser)
 
 业务代码里通常看不到 `RunnableSequence`，但它就是 `|` 背后的实际对象。真正执行仍然要等到 `chain.invoke(...)`、`chain.batch(...)` 或 `chain.stream(...)`；这些方法分别选择单输入、批量或流式执行。
 
-### 2. `__or__()` 先适配右侧对象，再构造 Sequence
+### 2、`__or__()` 先适配右侧对象，再构造 Sequence
 
 `Runnable.__or__()` 是 LCEL 管道表达式的实际入口。不论右侧是 Runnable、函数还是字典，它都不会立即执行，而是先交给 `coerce_to_runnable()`，再构造 `RunnableSequence`。
 
@@ -225,7 +234,7 @@ def __or__(
     return RunnableSequence(self, coerce_to_runnable(other))
 ```
 
-### 3. `coerce_to_runnable()` 决定表达式节点类型
+### 3、`coerce_to_runnable()` 决定表达式节点类型
 
 `coerce_to_runnable()` 是构造期的类型适配器，决定了 `|` 右侧对象的最终形态：
 
@@ -259,9 +268,9 @@ def coerce_to_runnable(thing: RunnableLike[Input, Output]) -> Runnable[Input, An
 
 所以，LCEL 的 `|` 是构造期语法，不是立即调用；它把表达式编译成之后由 Runnable 调用面执行的组合对象。
 
-## 五、`RunnableSequence`：顺序数据流
+## 四、`RunnableSequence`：顺序数据流
 
-### 1. `__init__()` 构造时如何保存步骤
+### 1、`__init__()` 构造时如何保存步骤
 
 `RunnableSequence` 保存 `first`、`middle`、`last` 三部分。这个拆分主要是为了让泛型能够表达"第一步接收什么、最后一步返回什么"；对外通过 `steps` 属性重新还原完整顺序。
 
@@ -333,7 +342,7 @@ input
 
 `_RUNNABLE_SEQUENCE_MIN_STEPS` 在该文件中为 2，少于两个步骤会在构造期报错。每一步的输出必须能被下一步接收；LCEL 不会在构造时证明业务类型完全匹配，很多类型或字段错误要运行到对应步骤才暴露。
 
-### 2. `batch()` 是逐步骤传递
+### 2、`batch()` 是逐步骤传递
 
 `Runnable` 的默认 `batch()` 是并发多次 `invoke()`；`RunnableSequence.batch()` 则按 steps 顺序调用每个组件的 `batch()`，把当前批次结果交给下一步。
 
@@ -366,7 +375,7 @@ for stepidx, step in enumerate(self.steps):
 
 这里的性能机会来自组件自身的 `batch()` 实现。若模型组件支持远端批量 API，它可以在这一层合并请求；若没有覆盖，仍然会退化为线程池并发。
 
-### 3. 流式执行逐层连接迭代器
+### 3、流式执行逐层连接迭代器
 
 `RunnableSequence._transform()` 没有逐步调用 invoke，而是让下一个步骤接住前一步的输出流。下面保留主体，省略函数签名：
 
@@ -388,7 +397,7 @@ yield from final_pipeline
 
 例如模型逐段输出文本，后面接一个必须读取全文的格式转换函数，链的最终消费者就要等模型结束。模型之前的普通字段提取若只处理一份字典，不会仅因使用 RunnableLambda 就吞掉后续模型的 token 流。判断阻塞点要看它接收的是完整值还是正在生成的增量。
 
-## 六、RunnableParallel：同一输入的命名扇出
+## 五、RunnableParallel：同一输入的命名扇出
 
 RunnableParallel 将同一输入交给多个命名分支，最终按 key 合并结果。分支配置预先确定，但每个分支仍可包含条件选择。它适合同时取两类检索结果，或者从同一输入计算多个字段。
 
@@ -396,7 +405,7 @@ RunnableParallel 将同一输入交给多个命名分支，最终按 key 合并�
 
 Agent 的工具批次由工具调用 ID、ToolNode 和图路由管理。可以在一个工具内部使用 RunnableParallel 完成固定扇出；若希望图层单独观察、恢复或审批每项业务动作，就应将这些动作暴露为独立工具或节点。
 
-## 七、`RunnablePassthrough` 与 `assign`
+## 六、`RunnablePassthrough` 与 `assign`
 
 `RunnablePassthrough` 的核心是身份传递——输入即输出，可附带副作用函数。`assign()` 则是它的实用扩展：保留原字典，合并新计算的字段。典型的 RAG 链形状：
 
@@ -411,7 +420,7 @@ Agent 的工具批次由工具调用 ID、ToolNode 和图路由管理。可以�
 
 > **Agent 视角**：`assign()` 在固定 RAG 链中有用（检索结果补字段进 prompt 字典）。但在 Agent 里，State 更新走 LangGraph 的 reducer，不需要手写这套合并逻辑。
 
-## 八、`RunnableLambda`：接入小段确定逻辑
+## 七、`RunnableLambda`：接入小段确定逻辑
 
 `RunnableLambda` 把 Python callable（可调用对象）接入 Runnable 体系，并自动获得 tracing（追踪）、异步调用和组合能力。
 
@@ -514,13 +523,13 @@ class RunnableLambda(Runnable[Input, Output]):
 
 Lambda 返回另一个 Runnable 时，会用原输入继续调用它，并将传入配置中的 recursion_limit 减 1。这是嵌套 Runnable 求值的保护，不是模型调用次数计数。图调度虽然也读取同名配置，其步数语义由 LangGraph 定义；遇到上限错误时，应先区分 RecursionError 与 GraphRecursionError，再检查循环来源。
 
-## 九、RunnableBranch：运行时选择首个匹配分支
+## 八、RunnableBranch：运行时选择首个匹配分支
 
 RunnableBranch 保存一组“条件 Runnable、目标 Runnable”和一个默认分支。每次 invoke 时按顺序计算条件，命中第一个真值就执行对应分支；全部不命中时执行默认分支。条件值来自当前输入，因此路由结果是运行时确定的。
 
 例如输入带 language 字段，可以选择中文或英文检索链。条件甚至可以调用模型，但会增加时延与费用，并可能失败。它可以出现在 Agent 工具内部；区别在于 Branch 自身不提供图检查点、中断恢复或跨轮 State 合并。普通 if/else 更清楚时也无需额外包装。
 
-## 十、Runnable 在 Agent 中的实际位置
+## 九、Runnable 在 Agent 中的实际位置
 
 | 对象 | 主要调用契约 | 谁负责后续流程 |
 | --- | --- | --- |
@@ -535,7 +544,7 @@ RunnableBranch 保存一组“条件 Runnable、目标 Runnable”和一个默�
 
 继续阅读 [02：聊天模型、消息与工具](02-core-abstractions.md) 可看到这些组件具体交接什么值；[03：create_agent 装配](03-create-agent-assembly.md) 则说明工厂怎样把组件接进循环。
 
-## 十一、工程判断（Agent 视角）
+## 十、工程判断（Agent 视角）
 
 选接口时先确定需要的是一个值、一批值，还是增量流。batch 默认并发多次调用，不保证供应商批量请求；stream 暴露迭代器，也不保证每个步骤都增量处理。
 

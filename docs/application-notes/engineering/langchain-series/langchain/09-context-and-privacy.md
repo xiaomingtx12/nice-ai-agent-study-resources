@@ -6,7 +6,9 @@ description: 对照摘要、上下文编辑和 PII 脱敏的源码实现，区�
 
 # LangChain 源码解析 09：上下文与隐私治理——摘要、历史编辑与 PII
 
-## 一、源码定位
+> 固定提交与已阅读测试见[源码基线](source-baseline.md)。
+
+**源码定位**
 
 > **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
 > 路径相对 LangChain 仓库根目录；版本说明见 [系列导读](index.md)。
@@ -16,7 +18,7 @@ description: 对照摘要、上下文编辑和 PII 脱敏的源码实现，区�
 > - 状态与流事件脱敏：`libs/langchain_v1/langchain/agents/middleware/pii.py` → PIIMiddleware.before_model()、after_model()、_PIIStreamTransformer.process()。
 > - 检测与替换策略：`libs/langchain_v1/langchain/agents/middleware/_redaction.py` → RedactionRule、apply_strategy()、PIIDetectionError。
 
-## 二、先区分 State、请求和事件三个数据位置
+## 一、先区分 State、请求和事件三个数据位置
 
 这三个中间件都在控制“模型或调用方能看到什么”，但修改位置不同：
 
@@ -28,7 +30,7 @@ description: 对照摘要、上下文编辑和 PII 脱敏的源码实现，区�
 
 不要把“减少 token”和“隐私脱敏”归为同一种消息处理。前者改变模型上下文，后者控制敏感值在哪些边界被释放。
 
-## 三、摘要：重建历史，而不是删除几条消息
+## 二、摘要：重建历史，而不是删除几条消息
 
 `SummarizationMiddleware` 在 `before_model` 判断是否达到摘要条件。触发条件支持三种基本单位：
 
@@ -90,7 +92,7 @@ def __init__(
 
 fraction 使用中间件 self.model 的 profile["max_input_tokens"]，这里是传入的摘要模型，不会自动读取主 Agent 本轮切换后的模型窗口。若两者不同，应显式选择适合主请求的阈值。缺少所需 profile 信息时构造期报错。默认近似计数主要观察 messages，并不因此覆盖全部系统提示词、工具 schema 与输出预留。
 
-### 1. 触发后如何替换消息
+### 1、触发后如何替换消息
 
 核心逻辑在 `before_model`：
 
@@ -151,7 +153,7 @@ def _build_new_messages(summary: str) -> list[HumanMessage]:
 
 摘要 Prompt 要求模型输出会话意图、重要上下文、产物和下一步。它不是无损压缩，摘要模型的判断会决定哪些信息继续存在。
 
-### 2. 截断不能拆开 AI 和 Tool 消息对
+### 2、截断不能拆开 AI 和 Tool 消息对
 
 cutoff_index 把列表分为 messages[:cutoff_index]（待摘要）和 messages[cutoff_index:]（保留）。若切点落在 ToolMessage 上，源码向前找配对的 AIMessage，将切点移到它的位置，使调用与结果一起留在保留区：
 
@@ -191,7 +193,7 @@ def _find_safe_cutoff_point(
 
 例如原序列为用户消息、AI 调用、工具结果、AI 回答，目标切点位于工具结果时，会前移到 AI 调用，后面三条一起保留。因此 keep 的消息数量不是严格的最终条数上限。这个算法处理切点附近的配对，不会修复整段历史中所有缺失或重复的工具消息。
 
-### 3. 摘要本身会再调用一次模型
+### 3、摘要本身会再调用一次模型
 
 源码通过独立模型生成摘要，并给这次调用加上 `lc_source="summarization"` 元数据：
 
@@ -220,7 +222,7 @@ def _create_summary(self, messages_to_summarize: list[AnyMessage]) -> str:
 
 因此摘要会增加模型调用、延迟和费用。失败分支返回的错误文本仍会作为 summary 进入前面的 RemoveMessage 更新，旧历史不会因摘要失败而自动保留。要改变这一行为，需要让失败跳过替换、停止运行或从可信归档恢复。当前中间件也不负责删除已经存在的旧检查点。
 
-## 四、上下文编辑：只改模型请求副本
+## 三、上下文编辑：只改模型请求副本
 
 `ContextEditingMiddleware` 的默认策略是 `ClearToolUsesEdit`：
 
@@ -239,7 +241,7 @@ class ClearToolUsesEdit(ContextEdit):
 
 它与摘要的差别是：不生成新摘要，只清理旧工具结果的内容。
 
-### 1. 清理保留了消息协议
+### 1、清理保留了消息协议
 
 源码：`context_editing.py:79-155`
 
@@ -332,7 +334,7 @@ def apply(
 
 `clear_tool_inputs=True` 时，源码还会把对应 `AIMessage` 中该工具调用的 `args` 替换为空字典。默认值是 `False`，因为工具参数可能仍是后续推理所需的上下文。
 
-### 2. 为什么它不直接改 State
+### 2、为什么它不直接改 State
 
 中间件在 `wrap_model_call` 中先深复制消息，再把编辑后的消息放进新的 `ModelRequest`：
 
@@ -373,7 +375,7 @@ def wrap_model_call(
 
 approximate 分支按传入消息估算；model 分支把 system_message 与 request.tools 一并交给当前模型的统计方法。后者是否准确、是否需要远端调用，取决于模型适配器。ClearToolUsesEdit 仅在超过 trigger 时尝试清理候选，受 keep、exclude_tools 和可配对结果数量限制，不保证处理后一定低于 trigger。
 
-## 五、PII：状态 Hook 与流式 Transformer 两条路径
+## 四、PII：状态 Hook 与流式 Transformer 两条路径
 
 PII（Personally Identifiable Information，个人身份信息）中间件先解析一条脱敏规则：
 
@@ -413,7 +415,7 @@ def apply_strategy(
 | `mask` | 保留部分字符 | 需要人工识别部分内容 |
 | `hash` | 使用确定性哈希替换 | 需要关联分析但不暴露原文 |
 
-### 1. State 路径的覆盖范围不是“所有消息”
+### 1、State 路径的覆盖范围不是“所有消息”
 
 构造参数决定三类 State Hook：
 
@@ -504,7 +506,7 @@ State Hook 不检查全部历史，也不改 AIMessage.tool_calls 参数。上�
 
 事件 Transformer 可以处理它所消费的工具参数展示，但这不会修改实际派发工具的参数。若敏感值不得发送给外部工具，应在工具执行边界另行检查。
 
-### 2. 流式路径使用滑动缓冲
+### 2、流式路径使用滑动缓冲
 
 当 `apply_to_output` 或 `apply_to_tool_results` 为真时，构造函数注册 `_PIIStreamTransformer`：
 
@@ -588,7 +590,7 @@ def _mutate_tool_output_delta(
 
 `values` 事件的处理会生成脱敏后的新结构，原始 State 仍留给 State Hook 在下一轮独立处理。流式 Transformer 保护的是事件消费者，不是自动修改图内状态。
 
-## 六、三种治理策略如何组合
+## 五、三种治理策略如何组合
 
 可以用三个问题区分它们：
 
@@ -625,7 +627,7 @@ PIIMiddleware 的 Stream Transformer
   → 只改变调用方看到的事件视图
 ```
 
-## 七、工程判断
+## 六、工程判断
 
 用同一段工具结果可以看出三条路径的差别：摘要可能将它归纳后从当前 messages 移除；上下文编辑把本次请求中的正文换成占位符；PII 处理则只针对检测规则覆盖的内容。三者的产物、可恢复细节和存储残留都不同。
 

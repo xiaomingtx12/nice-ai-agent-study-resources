@@ -6,7 +6,9 @@ description: 沿工具注册、参数注入、并行调用和返回值处理解�
 
 # LangGraph 源码 11：ToolNode 如何执行工具与注入上下文
 
-## 源码定位
+**源码定位**
+
+> 快照身份与验证范围见[源码基线](./source-baseline.md)。源码节选以该快照为准，文中的应用示例不等于框架实现。
 
 > **源码基线**：langgraph-prebuilt 1.1.0、langgraph 1.2.10。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >
@@ -72,7 +74,7 @@ assert len(result["messages"]) == 2
 
 ToolMessage 自身的消息 ID 用于消息列表归并，tool_call_id 用于请求与响应配对，二者不是同一个用途。图里最终保留请求和响应两条消息，不是把原 AIMessage 改成字符串 5。
 
-### 注册时建立名称表和注入表
+### 1、注册时建立名称表和注入表
 
 构造器接受 `BaseTool` 或可转换为工具的 callable。普通函数经 `create_tool()` 转换，再按工具名保存；同时解析哪些参数应由运行时注入：
 

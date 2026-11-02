@@ -531,4 +531,4 @@ return create_agent(
 
 **上层：方法论与案例**
 
-- [应用案例 01：OpenWiki 02 Agent 装配](../../deepagents应用案例解析/openwiki/02-agent-assembly.md)——业务侧怎样复用这套装配入口
+- [应用案例：OpenWiki 03 规划器与页面 worker 的装配](../../deepagents应用案例解析/openwiki/03-agents-and-tools.md)——业务侧怎样复用这套装配入口

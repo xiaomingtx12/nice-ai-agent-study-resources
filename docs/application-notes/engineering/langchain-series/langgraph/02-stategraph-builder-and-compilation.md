@@ -6,7 +6,9 @@ description: 从两节点图的 compile 与 invoke 出发，解释节点如何�
 
 # LangGraph 源码 02：compile 究竟给节点和边做了什么
 
-## 源码定位
+**源码定位**
+
+> 快照身份与验证范围见[源码基线](./source-baseline.md)。源码节选以该快照为准，文中的应用示例不等于框架实现。
 
 > **源码基线**：langgraph 1.2.10。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >
@@ -21,6 +23,8 @@ description: 从两节点图的 compile 与 invoke 出发，解释节点如何�
 因为一个函数能被调用，还不足以说明它在图里该怎样运行。框架还需要知道：这次输入从哪里取，什么条件下调用它，返回结果怎样更新状态，又怎样让下一个节点开始工作。**`compile()` 把节点和边的声明装配成这些执行规则。业务函数要等到 `invoke()` 等执行入口中才会运行。**
 
 下面用一张“加一，再生成结果说明”的图，跟踪这些规则如何产生。读完应当能解释两个现象：为什么下游收到的是合并后的状态，以及为什么两条普通边不能替代“等待两个上游”的关系。
+
+本文先用 increment → report 的小图研究编译结果，再进入贯穿案例中的 left/right → merge 屏障。普通串行路径与多分支细节分开阅读；输入、函数、writers、触发器是两部分共同使用的装配对象。
 
 ## 一、从一段会写的代码开始
 
@@ -66,7 +70,7 @@ result = graph.invoke({"count": 0, "message": ""})
 
 ## 二、从“记下函数”到“装配可执行图”
 
-### add_node 先保存节点描述
+### 1、add_node 先保存节点描述
 
 `add_node("increment", increment)` 会把节点名、函数、输入结构及执行配置保存在 `builder.nodes` 中。每个条目的类型叫 `StateNodeSpec`，它是“这个节点由哪个函数实现、采用哪些配置”的记录。
 
@@ -74,7 +78,7 @@ result = graph.invoke({"count": 0, "message": ""})
 
 节点从哪些字段取输入，也在这个阶段确定。显式传入 `input_schema` 时采用它；没有显式配置时，框架尝试从函数参数标注推断，再回退到整图状态结构。示例中的两个函数都声明了 `state: State`，所以都会读取 count 和 message。
 
-### compile 将这些描述装进另一个对象
+### 2、compile 将这些描述装进另一个对象
 
 `compile()` 创建的对象叫 `CompiledStateGraph`，也就是返回给我们的 graph。它继承 `Pregel`；Pregel 在这里是提供 `invoke()`、`stream()` 等图执行逻辑的基类。编译器把字段通道、节点配置和触发关系交给这套运行时，运行时再按这些配置准备任务、执行函数和合并结果。
 
@@ -155,7 +159,7 @@ self.nodes[key] = PregelNode(
 
 `ChannelWrite` 是 writer 的具体实现。它根据 `write_entries` 中的转换规则提取返回值，把更新交给执行阶段，而不会在编译时修改 count。
 
-### 隐藏 START 把外部输入接进同一套写入流程
+### 1、隐藏 START 把外部输入接进同一套写入流程
 
 `compile()` 先创建名为 START 的临时输入通道，并把 `input_channels` 指向它。`attach_node(START, None)` 再为这个通道安装一个隐藏节点：
 
@@ -174,7 +178,7 @@ if key == START:
 
 这个节点没有用户业务函数。它把输入交给 writer，按输入结构提取 count、message 更新；`START → increment` 普通边还会给它追加触发 increment 的写入。输入处理完成并合并后，increment 才能从状态通道读取到 count=0、message 为空字符串。入口处理和业务节点由此共用字段更新与边触发机制。
 
-### 返回字典如何变成字段更新
+### 2、返回字典如何变成字段更新
 
 increment 返回 `{"count": 1}` 后，`_get_updates()` 会从中提取已登记字段。这个辅助函数定义在 `attach_node()` 内部，并被配置到 writer 中。
 
@@ -199,7 +203,7 @@ def _get_updates(
 
 另一个边界藏在 `if k in output_keys` 中：未知字段会被过滤。把 count 拼成 cuont，可能看不到状态变化，也未必得到拼写错误提示。节点的输入结构只限定它读到哪些字段；这里仍按图登记的可写字段提取更新，不能把 `input_schema` 当作写权限限制。
 
-### writer 如何把更新交给当前任务
+### 3、writer 如何把更新交给当前任务
 
 `ChannelWriteTupleEntry` 是一条“用转换函数提取多组通道更新”的规则；这里将 `_get_updates` 设为它的 `mapper`。`ChannelWrite` 运行时把节点返回值填入规则，`_assemble_writes()` 再调用 mapper，将结果整理成 `(通道名, 值)` 列表。
 
@@ -245,7 +249,7 @@ def node(self) -> Runnable[Any, Any] | None:
 
 编译器为每个普通节点准备一个触发通道。report 对应的名字是 `branch:to:report`，可以读成“有执行路径指向 report”。它保存的是触发标记；count、message 通道保存的才是业务数据。
 
-### 临时信号为什么使用 EphemeralValue
+### 1、临时信号为什么使用 EphemeralValue
 
 `EphemeralValue` 是一个收到空更新时清除旧值的临时通道。它用于保存随执行轮次变化的触发标记；没有新写入时清除旧信号，而业务字段通常需要继续保留旧值。
 
@@ -264,7 +268,7 @@ self.channels[branch_channel] = (
 
 `guard=False` 允许一轮收到多份触发写入；`Any` 是值类型标注。普通边写入的值为 `None`：这里的 None 仍然表示一个已经到达的信号，与“没有收到写入”不同。临时通道的具体更新规则见[第 01 篇](./01-state-schema-channels-and-reducers.md)。
 
-### 普通边给上游追加一个触发下游的 writer
+### 2、普通边给上游追加一个触发下游的 writer
 
 `add_edge("increment", "report")` 会让 `attach_edge()` 在 increment 的结果处理过程中追加一个动作：向 report 的触发通道写信号。
 
@@ -306,6 +310,11 @@ def attach_edge(self, starts: str | Sequence[str], end: str) -> None:
 表格把 START 的内部输入处理合在第一行。正常图执行会等当前一轮任务收束后合并更新，再准备下一轮；它不会在 increment 刚返回时，就把返回字典直接塞给 report。
 
 这条过程也说明了为什么“字段变化”与“节点运行”要分开配置：report 读取 count，但只有触发关系使它进入待执行范围。仅有一个节点更新 count，不会自动调用所有读取 count 的节点。触发版本检查和轮次提交见[第 03 篇](./03-pregel-supersteps-and-scheduling.md)。
+
+<details>
+<summary>进阶阅读：并行汇合和条件路由怎样编译</summary>
+
+下面两节处理多分支。初读可以先看完前面的串行主线，再跳到文末“compile 成功，究竟保证了什么”；需要解释材料流程为什么等待两项结果时，再回到这里。
 
 ## 六、两个上游都连过来，是否就会等待它们
 
@@ -428,7 +437,7 @@ if fresh:
 
 对本例，原值 count=0 加上当前更新 count=1，使 route 读到 1。其他并行节点的更新没有混入当前任务的更新列表，因此不能把这个局部读取当成“全图所有并行工作都已完成”。
 
-### 路由返回的名字如何触发下游
+### 1、路由返回的名字如何触发下游
 
 `BranchSpec._route()` 用 reader 得到状态，再调用包装后的 route。`_finish()` 将返回值统一成目标列表：没有配置 `path_map` 时，字符串直接表示节点名；有映射时，先将业务标签换成节点名。例如 `path_map={"ready": "report", "done": END}` 允许 route 返回 ready，而不必直接返回 report。
 
@@ -437,6 +446,8 @@ if fresh:
 所以本例的整条链是：increment 返回 count=1 → 字段 writer 暂存 count 更新 → reader 在通道副本上应用它 → route 读到 1 并返回 report → 分支 writer 暂存 report 的触发信号 → 整轮提交 → report 从新状态读取输入。局部读取解释了路由何以立即判断，轮次提交解释了下游何以拿到已合并状态。
 
 这个实现还有两个使用后果。其一，路由读取副本时也会应用字段的更新规则，所以 reducer 可能再次被调用；不要让 reducer 发请求或写数据库。其二，条件路由与已有普通边各自生成触发写入；如果没有移除原来的 `increment → report` 普通边，即使 route 返回 END，普通边仍可能触发 report。互斥选择应只保留表达这项选择的路由关系。
+
+</details>
 
 ## 八、compile 成功，究竟保证了什么
 

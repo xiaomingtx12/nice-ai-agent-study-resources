@@ -6,7 +6,9 @@ description: 沿 Document 切分、向量写入、查询编码和 Retriever 分�
 
 # LangChain 源码解析 12：RAG 组件与检索链路
 
-## 一、源码定位
+> 固定提交与已阅读测试见[源码基线](source-baseline.md)。
+
+**源码定位**
 
 > **阅读基线**：langchain 1.3.7、langchain-core 1.4.6、langchain-text-splitters 1.1.2、langchain-classic 1.0.8；仓库快照 `76c32db9b38dfc287c958dc2a914d4834f022c1c`。路径均相对 LangChain 仓库根目录。
 >
@@ -20,7 +22,7 @@ description: 沿 Document 切分、向量写入、查询编码和 Retriever 分�
 > - Runnable 检索入口：`libs/core/langchain_core/retrievers.py` → BaseRetriever.invoke。
 > - Classic 向量缓存：`libs/langchain/langchain_classic/embeddings/cache.py` → CacheBackedEmbeddings.embed_documents、embed_query、from_bytes_store。
 
-## 二、用一条资料和一个问题区分索引与查询
+## 一、用一条资料和一个问题区分索引与查询
 
 RAG（检索增强生成）先找出能支持回答的资料，再将资料交给模型。以 policy.md 中的退货说明为例，系统需要保存条款正文、来源和版本；用户问“收货多久以后还能申请”时，再用问题检索对应条款。
 
@@ -33,7 +35,7 @@ RAG（检索增强生成）先找出能支持回答的资料，再将资料交�
 
 Document 是正文与元数据容器；Embeddings 负责把文本编码为向量；VectorStore 存取向量及相关文档；Retriever 将查询封装成返回文档列表的调用接口。检索完成还没有生成答案，也没有自动核实引用是否支持答案。
 
-## 三、Loader 交付 Document，不负责检索
+## 二、Loader 交付 Document，不负责检索
 
 BaseLoader 建议子类实现 lazy_load，逐份产生 Document。load 与 aload 都会把结果收集为列表，下面是省略文档字符串后的实际方法：
 
@@ -51,7 +53,7 @@ Document 的 page_content 保存文本，metadata 保存来源、章节、租户
 
 load_and_split 仍保留在基类中，文档字符串明确建议视为弃用；未指定切分器时会创建 RecursiveCharacterTextSplitter。显式分开加载与切分，可以检查解析文本并记录切分配置，避免把解析错误误当成检索问题。
 
-## 四、Splitter 怎样保留来源并生成切片
+## 三、Splitter 怎样保留来源并生成切片
 
 TextSplitter.split_documents 只提取原文与 metadata，再交给 create_documents：
 
@@ -83,7 +85,7 @@ RecursiveCharacterTextSplitter 默认尝试段落、换行、空格和字符级�
 
 _merge_splits 输出一块后移除旧片段，使后续块保留一定重叠。重叠受片段边界影响，不承诺相邻块精确重复 chunk_overlap 个字符。自定义分隔符若无法继续拆分，也可能保留超长块；表格、代码与标题层级需要按文档类型评估。
 
-## 五、文档写入与问题检索分别编码
+## 四、文档写入与问题检索分别编码
 
 Embeddings 定义 embed_documents 和 embed_query，两者允许采用不同的任务编码方式。它本身不继承 Runnable；Retriever 才负责把检索暴露为 Runnable 调用。
 
@@ -120,7 +122,7 @@ top_k_idx = similarity.argsort()[::-1][:k]
 
 文档与查询应使用兼容的向量空间。更换模型、维度或预处理后，需要重新构建对应索引；即使维度相同，也不能据此判断两个模型的向量可混用。
 
-## 六、Retriever 把搜索方式变成统一调用
+## 五、Retriever 把搜索方式变成统一调用
 
 VectorStore.as_retriever 返回持有该向量库的 VectorStoreRetriever，不复制数据或建立新索引。它的 _get_relevant_documents 按 search_type 分派，以下摘录主体：
 
@@ -144,6 +146,33 @@ return docs
 调用参数覆盖同名 search_kwargs。声明支持某个 search_type 不等于每个 VectorStore 都实现了对应方法，例如相关性分数转换或 MMR 仍可能由具体实现抛出未实现错误。
 
 BaseRetriever.invoke 处理配置、回调和调用生命周期，再交给 _get_relevant_documents。结果是 list[Document]，可进入 LCEL 或包装成工具；关键词检索、SQL 和企业搜索同样能实现这个协议，并不要求底层一定有 Embeddings。
+
+## 六、检索器怎样接进订单 Agent 的工具循环
+
+`create_retriever_tool` 把返回文档列表的 Retriever 包装成 `StructuredTool`，即带名称、参数结构和执行函数的工具对象。教学场景中的 `search_return_policy` 可以采用这个入口：模型提供 query，检索器取回退货条款，再把正文作为工具结果交回模型。
+
+源码为 `libs/core/langchain_core/tools/retriever.py`。下面保留其中同步闭包的完整执行逻辑，省略外层参数、异步闭包和工具对象构造：
+
+```python
+def func(
+    query: str, callbacks: Callbacks = None
+) -> str | tuple[str, list[Document]]:
+    # 检索器返回原始 Document 列表，并向下传递回调。
+    docs = retriever.invoke(query, config={"callbacks": callbacks})
+    content = document_separator.join(
+        format_document(doc, document_prompt_) for doc in docs
+    )
+    if response_format == "content_and_artifact":
+        # 正文供模型阅读；原始文档另存为工具产物。
+        return (content, docs)
+    return content
+```
+
+外层默认文档模板只有 `{page_content}`，不会自动把 metadata 中的来源、条款版本和引用编号拼进正文。若希望模型引用政策版本，应用需要配置包含对应字段的 document_prompt，并确保每份文档都具备这些字段。
+
+在 Agent 工具调用路径中，`BaseTool` 根据 `c_policy` 这样的 tool_call_id 将返回值包装成 ToolMessage；下一轮模型读取其 content。使用 `content_and_artifact` 时，原始 Documents 进入 artifact，便于应用继续做来源展示与核验；artifact 不默认发送给模型，但仍可能随消息进入状态或追踪，并非保密存储。
+
+这里的 `response_format` 只决定工具返回值如何拆成 content 与 artifact。[14](14-structured-output-and-repair.md) 的 Agent response_format 则控制最终结构化结果，两处同名参数不能互相替代。检索到正确条款后，还需要结合 `lookup_order` 的订单事实判断条件；检索器不会自动批准 `submit_return`。
 
 ## 七、向量缓存缓存的是编码结果
 

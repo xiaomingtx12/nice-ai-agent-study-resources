@@ -6,7 +6,9 @@ description: 沿 Runner、执行器、重试与超时追踪任务生命周期，
 
 # LangGraph 源码 04：任务如何并发执行、重试和取消
 
-## 源码定位
+**源码定位**
+
+> 快照身份与验证范围见[源码基线](./source-baseline.md)。源码节选以该快照为准，文中的应用示例不等于框架实现。
 
 > **源码基线**：langgraph 1.2.10。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >
@@ -71,7 +73,7 @@ assert attempts == [0, 0]
 
 `attempts` 的变化不会被图回滚；这正好说明框架清理写入的范围。若把同样的位置换成发邮件，邮件也不会随重试自动撤销。
 
-### 并发任务如何交给执行器
+### 1、并发任务如何交给执行器
 
 主循环跳过已有结果的任务，将剩余任务交给 `runner.tick()`。
 
@@ -101,7 +103,7 @@ Runner 可以在一个任务完成时记录它的结果并输出事件，但不�
 
 ## 二、重试清理暂存写入，不回滚外部副作用
 
-### 1. 异常策略决定当前任务是否再试
+### 1、异常策略决定当前任务是否再试
 
 `run_with_retry()` 是带重试策略的任务调用函数。下段代码里的 `task.proc` 是包装后的节点执行对象，`task.input` 是这次调用的输入，`task.writes` 暂存这次尝试产生的更新。套回 increment，就是以同一份输入重新调用它，并清掉上次失败尝试留下的更新。清掉的是框架内的暂存结果，已经发出的 HTTP 请求仍需业务自己处理。
 
@@ -145,7 +147,7 @@ except Exception as exc:
 
 配置节点错误处理器时，Runner 可将失败转交处理器任务；没有处理器或处理仍失败时，运行会退出并尝试取消其余任务。取消不代表已经发出的 HTTP 请求撤销，也不能强制停止任意同步线程。
 
-### 2. 超时先封住旧尝试的写入，再发出取消
+### 2、超时先封住旧尝试的写入，再发出取消
 
 `TimeoutPolicy` 是节点每次尝试的时间限制，`run_timeout` 限制总运行时间，`idle_timeout` 限制无进展时间。默认进展检测可以由模型回调、任务写入等活动刷新；选择 `refresh_on="heartbeat"` 时，需要节点显式调用 `runtime.heartbeat()`。节点没有输出 token，不一定就代表空闲。
 
@@ -189,6 +191,33 @@ return guarded_send
 `NodeTimeoutError` 进入普通错误策略后可能重试；每次重试重新开始一次受限尝试，因此节点超时上限不等于整次 Agent 调用的总耗时上限。调用方主动取消异步执行时，`CancelledError` 则继续传播到资源清理路径，不能当成普通可重试超时处理。
 
 节点的 TimeoutPolicy 在此基线下要求异步执行，同步路径显式拒绝该配置。Runner 的 `step_timeout` 限制的是整轮等待，超时后 `_panic_or_proceed()` 请求取消尚未完成的任务并抛出超时错误。两者都不能强制终止已经运行的同步线程；执行器退出与工具取消的边界在本篇第四节展开。
+
+### 3、重试之后，错误处理器怎样接管
+
+节点重试仍然失败时，Runner 可以把异常交给已配置的 error handler（错误处理节点）。它是一份另行调度的任务，能够生成降级结果或业务控制决定；不是把每个异常自动变成成功。
+
+同步 Runner 单任务快速路径中的关键分支如下。源码为 `libs/langgraph/langgraph/pregel/_runner.py` → `PregelRunner.tick`，第 222–233 行附近；省略后续重抛与常规调度逻辑：
+
+```python
+except Exception as exc:
+    self.commit(t, exc)
+    if (
+        not isinstance(exc, GraphBubbleUp)
+        and self._should_route_to_error_handler(t)
+        and self.schedule_error_handler is not None
+    ):
+        self._handled_exception_ids.add(id(exc))
+        if handler_task := self.schedule_error_handler(t, exc):
+            tasks = (handler_task,)
+            scheduled_error_handler = True
+            # 继续进入常规调度路径执行处理节点。
+```
+
+`GraphBubbleUp` 表示需要向外传递的内部控制异常，这个分支不把它按普通业务失败交给处理器。`_should_route_to_error_handler` 还排除处理器节点自身，避免处理器再次失败时无限套用相同处理逻辑。
+
+仓库 `libs/langgraph/tests/test_retry.py` 的 `test_set_node_defaults_combined_retry_and_error_handler` 断言原节点尝试两次后，处理器返回 handled。`test_error_handler_resumes_after_crash` 进一步断言：处理器自己失败后恢复，原节点调用次数仍为 1，处理器从 1 次增为 2。它说明恢复需要识别失败处理任务的身份，不能一律理解成重跑最初业务节点。本次只阅读这些断言。
+
+材料 B 无法解析时，应用可以让处理器生成“该材料缺失”的明确结果，是否允许继续汇总由业务决定。如果没有处理器或处理仍失败，异常仍可能使运行退出；不能仅因配置了处理器就把报告标为完整。
 
 ## 三、commit 按任务身份记录结果
 
@@ -245,3 +274,19 @@ if tasks:
 完整检查点属于图的轮次，任务级恢复依赖独立身份及 `put_writes()`。`ToolNode` 是把一批工具调用封装为节点执行的组件：一个 ToolNode 内部并行十个工具时，图只看到一个任务；用十个 `Send` 派发时，图才能分别记录十个任务的结果。工具内部调用的实现见[第 11 篇](./11-prebuilt-tool-layer.md)。
 
 需要独立恢复的操作适合拆成独立任务，但拆分增加调度和保存开销。无论怎样拆分，外部请求成功与成功写入保存之间仍有故障窗口，扣费、发信等操作需要稳定的业务幂等键。持久化模式和历史重放的区别见[第 06 篇](./06-checkpoints-store-and-recovery.md)。
+
+## 六、用测试核对超时后的迟到写入
+
+`libs/langgraph/tests/test_retry.py` 的 `test_arun_with_retry_timeout_discards_stale_executor_writes` 专门构造第一轮尝试超时、旧线程稍后才写结果的情况：第一轮在线程里等待，第二轮释放它并写入 fresh。
+
+最终检查的是真实任务写入队列，而不只是第二轮函数返回成功。以下节选测试尾部，省略前面的任务构造与重试策略：
+
+```python
+assert await arun_with_retry(task, retry_policy=None) == "ok"
+await asyncio.sleep(0.05)
+assert task.writes == deque([("value", "fresh")])
+```
+
+仓库断言要求旧尝试的 stale 写入没有混入结果。本次只阅读了这个测试，没有执行它；测试也没有证明第一轮线程中的任意数据库操作都会撤销，它约束的是运行时提供的写入入口。
+
+对应材料流程，right 超时后重新尝试，旧尝试晚到的框架写入不应污染新结果。left 是否需要重跑则属于另一件事：要回到 [06](./06-checkpoints-store-and-recovery.md) 检查其成功写入是否已保存。

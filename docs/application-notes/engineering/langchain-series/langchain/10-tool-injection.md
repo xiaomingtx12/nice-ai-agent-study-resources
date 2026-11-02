@@ -6,7 +6,9 @@ description: 对照 Todo、Shell 和文件搜索中间件的源码，拆开工�
 
 # LangChain 源码解析 10：工具注入面——Todo、Shell 与文件搜索
 
-## 一、源码定位
+> 固定提交与已阅读测试见[源码基线](source-baseline.md)。
+
+**源码定位**
 
 > **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
 > 路径相对 LangChain 仓库根目录；版本说明见 [系列导读](index.md)。
@@ -18,7 +20,7 @@ description: 对照 Todo、Shell 和文件搜索中间件的源码，拆开工�
 > - 可见性标记：`libs/langchain_v1/langchain/agents/middleware/types.py` → PrivateStateAttr、OmitFromInput。
 > - 匹配记录：`libs/langchain_v1/langchain/agents/middleware/_redaction.py` → PIIMatch、ResolvedRedactionRule。
 
-## 二、工具声明之外，还需要哪些运行条件
+## 一、工具声明之外，还需要哪些运行条件
 
 “给 Agent 加一个工具”至少包含四个问题：
 
@@ -37,11 +39,11 @@ description: 对照 Todo、Shell 和文件搜索中间件的源码，拆开工�
 
 所以，工具注入不是把函数追加到 `tools` 数组就结束。工具还可能需要状态字段、生命周期 Hook、运行时上下文和执行策略。
 
-## 三、Todo：工具、规划 State 和使用提示
+## 二、Todo：工具、规划 State 和使用提示
 
 `TodoListMiddleware` 是最容易看懂的一种工具注入：它添加一个 `write_todos` 工具，同时把 Todo 列表挂进 Agent State。
 
-### 1. todos 的输入可见性与模型可见性
+### 1、todos 的输入可见性与模型可见性
 
 源码先定义 Todo 条目和规划 State：
 
@@ -73,7 +75,7 @@ OmitFromInput 使该声明不进入图的输入 Schema，含义不是“输入�
 - 模型通过 write_todos 的结果消息知道清单已更新；仅保存 todos 字段并不会自动注入每轮提示词。
 - 工具执行时仍然可以通过 `Command` 更新它。
 
-### 2. 工具调用同时更新 State 和消息历史
+### 2、工具调用同时更新 State 和消息历史
 
 预注册工具的实际函数是 `_write_todos`：
 
@@ -106,7 +108,7 @@ def _write_todos(
 
 因此，`Command` 不是“工具返回一段文本”的另一种写法，而是工具节点向图运行时提交 State 更新的载体。
 
-### 3. 工具描述本身参与模型决策
+### 3、工具描述本身参与模型决策
 
 构造函数把自定义描述放进 `StructuredTool`：
 
@@ -144,7 +146,7 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
 
 但只靠描述不能保证约束。模型仍可能在同一轮并行调用两次 `write_todos`。
 
-### 4. `wrap_model_call` 注入额外提示，`after_model` 做硬校验
+### 4、`wrap_model_call` 注入额外提示，`after_model` 做硬校验
 
 Todo 提示通过 `request.override()` 追加到系统消息：
 
@@ -222,7 +224,7 @@ Todo 的整张清单是替换式更新。并行调用没有天然的合并顺序
 
 这个检查发生在模型输出后、工具执行前。一次生成两条 write_todos 时，两条都得到错误消息，图不再派发这两项；它不会任选一条执行。该限制只覆盖当前模型消息，不能用来协调两个独立任务对同一计划的更新。清单状态 completed 也只是提交值，不会触发真实产物校验。
 
-## 四、Shell：工具只是入口，会话资源才是主体
+## 三、Shell：工具只是入口，会话资源才是主体
 
 `ShellToolMiddleware` 的核心不是 `shell(command)` 这个函数，而是围绕它管理的一组资源：
 
@@ -233,7 +235,7 @@ Todo 的整张清单是替换式更新。并行调用没有天然的合并顺序
 - 超时、输出上限和进程终止策略；
 - 输出脱敏规则。
 
-### 1. 会话资源是内部 State
+### 1、会话资源是内部 State
 
 源码把会话资源标记为 `UntrackedValue` 和 `PrivateStateAttr`：
 
@@ -271,7 +273,7 @@ PrivateStateAttr 将该字段从普通输入、输出 Schema 中省略，不是�
 
 这不是“把进程对象序列化进检查点”。源码通过 State 在一次运行中复用资源，并用 `weakref.finalize`（弱引用终结器）兜底清理进程和临时目录。涉及跨进程恢复时，不能假设这个 Python 对象可以直接持久化。
 
-### 2. 工具通过 `ToolRuntime` 取得 State 和调用 ID
+### 2、工具通过 `ToolRuntime` 取得 State 和调用 ID
 
 Shell 工具在构造函数中注册为一个闭包：
 
@@ -337,7 +339,7 @@ class ShellToolMiddleware(AgentMiddleware[ShellToolState[ResponseT], ContextT, R
 
 这就是工具访问内部状态的正式入口，不需要把 `shell_session_resources` 做成模型可填写的参数。
 
-### 3. 生命周期 Hook 管理资源创建和回收
+### 3、生命周期 Hook 管理资源创建和回收
 
 常规路径在 before_agent 创建会话，在 after_agent 关闭。结束 hook 不是异常清理的通用保证，源码还为资源对象配置终结器：
 
@@ -425,7 +427,7 @@ def _create_resources(self) -> _SessionResources:
 
 启动命令失败时，源码尝试停止会话并清理临时目录，然后抛出异常。资源清理不等于回滚命令已经改动的外部文件或服务。进程强制终止时也不能保证 Python 终结器执行；临时目录中的交付文件应在资源回收前移到应用管理的存储。
 
-### 4. 执行策略决定安全边界
+### 4、执行策略决定安全边界
 
 `BaseExecutionPolicy` 只定义公共配置和 `spawn()` 接口：
 
@@ -466,7 +468,7 @@ class BaseExecutionPolicy(abc.ABC):
 
 源码默认使用 `HostExecutionPolicy`。因此，配置 `redaction_rules` 只能清理返回内容，不能阻止命令本身读取或外传敏感数据。源码文档也明确警告：脱敏发生在执行之后。
 
-### 5. 输出处理同时覆盖超时、截断和脱敏
+### 5、输出处理同时覆盖超时、截断和脱敏
 
 工具执行后，源码先处理超时，再处理 PII（Personally Identifiable Information，个人身份信息）规则，最后把截断信息和退出码写进结果：
 
@@ -547,14 +549,14 @@ return self._format_tool_message(
 
 **工程判断**：Shell 工具的安全等级由 `execution_policy` 决定，`RedactionRule` 只负责结果清洗，不能替代沙箱、权限控制和网络策略。
 
-## 五、文件搜索：工具自包含，但路径约束不能省
+## 四、文件搜索：工具自包含，但路径约束不能省
 
 `FilesystemFileSearchMiddleware` 不扩展 State，也不创建持久进程。它在构造函数中用闭包捕获根目录，注入两个工具：
 
 - `glob_search`：按文件名模式查找；
 - `grep_search`：按正则表达式搜索内容。
 
-### 1. 工具闭包固定搜索根目录
+### 1、工具闭包固定搜索根目录
 
 源码：`file_search.py:112-175`
 
@@ -603,7 +605,7 @@ def __init__(
 
 这里的 `path` 是虚拟路径，不是让模型直接提交任意本机绝对路径。工具返回的也是 `/src/app.py` 这类相对根目录的路径，降低了工具接口和宿主机目录结构的耦合。
 
-### 2. 路径校验先于搜索
+### 2、路径校验先于搜索
 
 源码把路径校验集中在 `_validate_and_resolve_path()`：
 
@@ -637,7 +639,7 @@ def _validate_and_resolve_path(self, path: str) -> Path:
 
 这个函数校验的是搜索起点 path：先 resolve，再验证起点位于 root_path 内。不能把它扩大为对每个命中文件的真实目标都已检查。glob 的 pattern 另行传给 Path.glob；Python 搜索遍历出的文件也未逐个 resolve 后重新校验归属。特别是目录内指向外部的文件符号链接，读取路径需要另行检查。若根目录承担隔离职责，应同时处理模式、候选文件目标与文件系统访问权限。
 
-### 3. ripgrep 只是加速后端，不是功能依赖
+### 3、ripgrep 只是加速后端，不是功能依赖
 
 `grep_search` 先尝试 ripgrep，失败后回退到 Python 搜索：
 
@@ -677,7 +679,7 @@ Python 路径跳过超过 max_file_size_bytes 的文件，并跳过解码失败�
 
 此外，_ripgrep_search 使用 check=False，不会因非零退出码自动抛 CalledProcessError；无可解析结果时可能直接返回空字典。外层只有 results is None 才回退，因此不能把任何 ripgrep 失败都解释成必定执行 Python 搜索。
 
-## 六、三种注入重量如何选择
+## 五、三种注入重量如何选择
 
 | 问题 | 适合的扩展点 |
 | --- | --- |
@@ -695,7 +697,7 @@ Python 路径跳过超过 max_file_size_bytes 的文件，并跳过解码失败�
 3. 如果有外部资源，定义创建、复用、失败回滚和销毁；
 4. 最后补超时、输出上限、路径和隐私边界。
 
-## 七、工程判断
+## 六、工程判断
 
 这三种工具分别改变不同对象。write_todos 提交图状态，Shell 操作运行中的进程和外部资源，文件搜索读取目录并返回文本。选择扩展方式时应先确定对象的生命周期，再决定需要哪些 hook。
 

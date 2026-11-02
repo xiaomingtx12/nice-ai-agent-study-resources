@@ -6,13 +6,17 @@ description: 沿状态更新、控制写入和 TASKS 通道追踪动态派发，
 
 # LangGraph 源码 05：Send 和 Command 如何产生下一步任务
 
-## 源码定位
+**源码定位**
+
+> 快照身份与验证范围见[源码基线](./source-baseline.md)。源码节选以该快照为准，文中的应用示例不等于框架实现。
 
 > **源码基线**：langgraph 1.2.10。以下路径相对于 LangGraph 源码仓库根目录，供查阅原实现。
 >
 > - 控制对象：`libs/langgraph/langgraph/types.py` → `Send`、`Command`。
 > - 返回值拆解：`libs/langgraph/langgraph/graph/state.py` → `attach_node()`、`attach_branch()`、`_control_branch()`。
 > - 派发任务：`libs/langgraph/langgraph/pregel/_algo.py` → `prepare_next_tasks()`、`prepare_push_task_send()`。
+
+总览用 left、right 表达固定两份材料。本篇把材料数量改成运行时输入的 topics，以同一个 summarize 节点处理每一项；这是贯穿流程的动态派发变体。
 
 固定边可以表达“处理完就进入下一步”。如果待处理的主题数量到运行时才知道，想让同一个 worker 分别处理每个主题，就需要为每次调用提供不同输入。本篇从这个问题解释 `Send` 和 `Command`。
 
@@ -74,11 +78,11 @@ assert empty["report"] == "没有主题"
 
 如果 topics 为空，路由直接触发 collect。仅返回空 Send 列表不会让 summarize 执行，也不会自动触发它后面的 collect。
 
-### 同时更新状态与选择下一步时，用 Command
+### 1、同时更新状态与选择下一步时，用 Command
 
 示例中路由只选择目标，所以直接返回 Send。若一个业务节点还要写入审核结果，再决定去哪，就可以返回 Command；下面沿源码看它如何拆开处理。
 
-### Command 的返回值被拆成两组写入
+### 2、Command 的返回值被拆成两组写入
 
 `Command` 的 `update` 携带状态更新，`goto` 携带目标节点名或 `Send`。例如一次审核返回 `Command(update={"approved": True}, goto="publish")` 时，运行时分别提取 `approved` 字段写入和 `branch:to:publish` 触发信号。
 
