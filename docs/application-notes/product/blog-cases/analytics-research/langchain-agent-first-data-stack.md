@@ -296,4 +296,3 @@ flowchart TB
 当这条链稳定后，Agent 才有可能从“会查数”变成组织里可靠的分析入口。
 
 > 相关材料：[LangChain 数据团队原文](https://www.langchain.com/blog/agent-data-stack)；[广告投放运营 Agent](../sales-marketing/langchain-paid-media-metric-to-write.md)。原文复核日期：2026 年 9 月 26 日。
-
