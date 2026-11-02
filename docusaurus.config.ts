@@ -6,6 +6,7 @@ import {
   SITE_THEME_STORAGE_KEY,
 } from './src/lib/siteTheme';
 import siteStatsPlugin from './src/plugins/siteStats';
+import {octopSidebarItemsGenerator} from './src/lib/octopSidebar';
 
 // 首次 HTML、代码容器与 token 都使用同一套 CSS 变量，不注入旧配色。
 const niceCodeTheme: PrismTheme = {
@@ -88,6 +89,7 @@ const config: Config = {
           path: 'docs',
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
+          sidebarItemsGenerator: octopSidebarItemsGenerator,
           editUrl:
             'https://github.com/xiaomingtx12/nice-ai-agent-study-resources/edit/main/',
           showLastUpdateAuthor: true,
