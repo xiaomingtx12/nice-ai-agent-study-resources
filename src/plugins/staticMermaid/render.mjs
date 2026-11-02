@@ -45,7 +45,9 @@ export async function closeRenderer() {
 async function getRenderer() {
   if (browser?.connected) return browser;
   const {default: puppeteer} = await import('puppeteer');
-  browser = await puppeteer.launch({headless: true});
+  // GitHub-hosted Linux runners may disable unprivileged user namespaces; only CI needs the fallback flags.
+  const args = process.env.CI ? ['--no-sandbox', '--disable-setuid-sandbox'] : [];
+  browser = await puppeteer.launch({headless: true, args});
   return browser;
 }
 
