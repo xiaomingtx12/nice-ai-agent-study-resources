@@ -36,8 +36,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install diagram renderer browser dependencies
-        run: npx puppeteer browsers install chrome --install-deps
+      - name: Install diagram renderer browser
+        run: npx puppeteer browsers install chrome
 
       - name: Cache pre-rendered diagrams
         uses: actions/cache@v4
