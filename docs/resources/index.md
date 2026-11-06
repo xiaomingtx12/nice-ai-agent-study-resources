@@ -28,7 +28,7 @@ description: 站内资源不是书单而是学习地图，按"拿它干什么"�
 | --- | --- | --- |
 | 通用 Agent 系统教程 | 通读一本，建立 Agent 全貌 | `AgentBook（新开源）` `HelloAgents` `AI Agents From Zero` |
 | 模式与生产参考 | 模式总结、选型框架和作者的踩坑记录 | `Agentic Design Patterns（中文翻译）` `Agent 设计模式之美（ADPS）` `AI Agent Book` |
-| AI 编程上手 | 教你用 AI工具  | `Easy-Vibe` `CodexGuide` |
+| AI 编程上手 | 教你用 AI工具  | `Easy-Vibe` `CodexGuide` `agent-qa 编码后验证` |
 | Coding Agent 机制拆解 | 看 coding agent 怎么造出来 | `Learn Claude Code` `Claude Certified Architect · 认证自测题库（社区非官方）` `CCB` `Pi Book` |
 | 真实系统源码 | 读完整系统的真实源码 | `OpenClaw 源码解析` `DeerFlow 二次开发` |
 | Harness Agent 框架 | 查框架怎样组织 Agent harness | `LangChain 官方文档与中文资料` `LangChain 官方文档中文走读` |
@@ -41,6 +41,7 @@ flowchart LR
   Z["AI Agents From Zero<br/>开始做项目"]
   E["Easy-Vibe<br/>从 AI 编程入口切入"]
   G["CodexGuide<br/>学 Codex 实战"]
+  Q["agent-qa<br/>验证应用改动"]
   AB["AgentBook<br/>从应用打到模型层"]
   L["Learn Claude Code<br/>拆 harness"]
   CA["Claude Certified Architect<br/>认证自测题库（社区非官方）"]
@@ -57,6 +58,7 @@ flowchart LR
   E --> Z
   H --> G
   E --> G
+  G --> Q
   H --> AB
   Z --> AB
   AB --> B
@@ -87,6 +89,7 @@ flowchart LR
 | 我想从 AI 编程入口真正做出东西         | [Easy-Vibe](https://datawhalechina.github.io/easy-vibe/zh-cn/) | 因为它在设计“怎么把人带进来”，不是先拆底层系统 |
 | 我想要一条从应用打到模型层的系统主线      | [AgentBook](https://agentbook.minims.cn/#/) | 因为它跨到了继续预训练这类模型层话题，不像其他教学资源大多停在应用和框架层 |
 | 我想先学怎么把 Codex 用进真实工作流    | [CodexGuide](https://codexguide.ai/) | 因为它更像从上手到落地的路线图，不像单纯的命令速查表 |
+| 我想验证 AI 编程产出的应用改动 | [agent-qa 编码后验证](./coding/agent-qa-workflow/) | 提供执行测试、检查证据、修复与复验的具体流程 |
 | 我想知道 coding agent 是怎么工作   | [Learn Claude Code](https://learn.shareai.run/zh/s01/) | 因为它先拆 harness，不像 `CCB` 那样先给你白皮书式结构 |
 | 我想把 harness 知识串成体系 + 场景自测 | [Claude Certified Architect · 认证自测题库（社区非官方）](https://github.com/paullarionov/claude-certified-architect) | 因为它做的是知识体系梳理和题库自测，不像 `Learn Claude Code` 那样讲新机制 |
 | 我想系统补 Agent 设计模式和模式语言      | [Agentic Design Patterns（中文翻译）](https://adp.xindoo.xyz/) | 因为它是同名书的中文翻译，把模式系统整理成册，不像项目教程那样负责带你从零跑通 |
@@ -213,6 +216,18 @@ flowchart LR
 | 建议进入方式 | 先看学习路线和入口地图，再补配置专题和实践方法 |
 
 入口：[资源页](./coding/codex-guide/) · [官方入口](https://codexguide.ai/) · [GitHub 仓库](https://github.com/freestylefly/CodexGuide)
+
+#### agent-qa 编码后验证
+
+| 槽位 | 内容 |
+| --- | --- |
+| 一句定位 | 编码智能体改动后的应用验证流程 |
+| 最适合现在的谁 | 已经用 AI 改应用，准备补上可检查的验收证据的人 |
+| 如果你只想拿走 1 个东西 | 把执行判定、失败证据、修复和复验接成一轮可追踪的工作流 |
+| 最容易读错的地方 | 把工具返回成功或测试未执行当成应用行为已经正确 |
+| 建议进入方式 | 配好模型和应用后，选一个小改动，完整走一次验证流程 |
+
+入口：[资源页](./coding/agent-qa-workflow/) · [官方指南](https://vostride.com/docs/agent-qa/guides/coding-agent-workflow)
 
 ### Coding Agent 机制拆解
 
