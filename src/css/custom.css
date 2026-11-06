@@ -1,172 +1,4 @@
 :root {
-  --site-bg: #f1e8d2;
-  --site-surface: #faf5e6;
-  --site-surface-strong: #eadfcc;
-  --site-text: #2c1810;
-  --site-text-muted: #5a4530;
-  --site-border: #cdbfa2;
-  --site-border-strong: #b3a07c;
-  --site-accent: #b8924a;
-  --site-accent-soft: #d3b57c;
-  --site-accent-strong: #7a5c28;
-  --site-code-bg: #eadfcc;
-}
-
-html[data-site-theme='editorial'] {
-  --site-bg: #f1e8d2;
-  --site-surface: #faf5e6;
-  --site-surface-strong: #eadfcc;
-  --site-text: #2c1810;
-  --site-text-muted: #5a4530;
-  --site-border: #cdbfa2;
-  --site-border-strong: #b3a07c;
-  --site-accent: #b8924a;
-  --site-accent-soft: #d3b57c;
-  --site-accent-strong: #7a5c28;
-  --site-code-bg: #eadfcc;
-}
-
-html[data-site-theme='ivory'] {
-  --site-bg: #faf6ee;
-  --site-surface: #fdfbf7;
-  --site-surface-strong: #f1ebdb;
-  --site-text: #2c1810;
-  --site-text-muted: #5a4530;
-  --site-border: #d9cfb8;
-  --site-border-strong: #b3a07c;
-  --site-accent: #b8924a;
-  --site-accent-soft: #d3b57c;
-  --site-accent-strong: #7a5c28;
-  --site-code-bg: #f1ebdb;
-}
-
-html[data-site-theme='signal'] {
-  --site-bg: #eef5fb;
-  --site-surface: #f9fcfe;
-  --site-surface-strong: #dceaf3;
-  --site-text: #20303a;
-  --site-text-muted: #58717f;
-  --site-border: #c2d7e5;
-  --site-border-strong: #98b8cb;
-  --site-accent: #1b6e94;
-  --site-accent-soft: #4e90b1;
-  --site-accent-strong: #145777;
-  --site-code-bg: #e4f0f7;
-}
-
-html[data-site-theme='archive'] {
-  --site-bg: #f2f0eb;
-  --site-surface: #fbfaf7;
-  --site-surface-strong: #e6e2d8;
-  --site-text: #2c2a26;
-  --site-text-muted: #636058;
-  --site-border: #ccc6b8;
-  --site-border-strong: #ada492;
-  --site-accent: #5e6c57;
-  --site-accent-soft: #7b8975;
-  --site-accent-strong: #4a5643;
-  --site-code-bg: #ebe7de;
-}
-
-html[data-site-theme='classic'] {
-  --site-bg: #ffffff;
-  --site-surface: #f8f8fa;
-  --site-surface-strong: #f0f0f2;
-  --site-text: #1c1e21;
-  --site-text-muted: #717172;
-  --site-border: #e0e0e2;
-  --site-border-strong: #c8c8ca;
-  --site-accent: #16735b;
-  --site-accent-soft: #4dd4b8;
-  --site-accent-strong: #0f5946;
-  --site-code-bg: #f0f0f2;
-}
-
-html[data-theme='dark'] {
-  --site-bg: #10161d;
-  --site-surface: #161f28;
-  --site-surface-strong: #1d2934;
-  --site-text: #e5ebf2;
-  --site-text-muted: #a3b0bc;
-  --site-border: #334150;
-  --site-border-strong: #445466;
-  --site-accent: #7fb0c7;
-  --site-accent-soft: #9fc4d6;
-  --site-accent-strong: #6597ae;
-  --site-code-bg: #18222c;
-}
-
-html[data-site-theme='editorial'][data-theme='dark'] {
-  --site-bg: #181310;
-  --site-surface: #221b17;
-  --site-surface-strong: #2b221d;
-  --site-text: #f1e6da;
-  --site-text-muted: #c4b2a2;
-  --site-border: #5a4738;
-  --site-border-strong: #745a45;
-  --site-accent: #c9a35c;
-  --site-accent-soft: #ddbc7e;
-  --site-accent-strong: #a8843f;
-  --site-code-bg: #261e19;
-}
-
-html[data-site-theme='ivory'][data-theme='dark'] {
-  --site-bg: #171410;
-  --site-surface: #201c16;
-  --site-surface-strong: #2a251d;
-  --site-text: #f2ece2;
-  --site-text-muted: #c8bcaa;
-  --site-border: #54483a;
-  --site-border-strong: #6e5f4c;
-  --site-accent: #c9a35c;
-  --site-accent-soft: #ddbc7e;
-  --site-accent-strong: #b08a45;
-  --site-code-bg: #241f18;
-}
-
-html[data-site-theme='signal'][data-theme='dark'] {
-  --site-bg: #0f1821;
-  --site-surface: #16222d;
-  --site-surface-strong: #1d2c39;
-  --site-text: #e3edf4;
-  --site-text-muted: #a7bbc9;
-  --site-border: #355061;
-  --site-border-strong: #49697d;
-  --site-accent: #75b6d8;
-  --site-accent-soft: #97cae5;
-  --site-accent-strong: #579bbc;
-  --site-code-bg: #16242f;
-}
-
-html[data-site-theme='archive'][data-theme='dark'] {
-  --site-bg: #141815;
-  --site-surface: #1b221d;
-  --site-surface-strong: #232c26;
-  --site-text: #e7ece3;
-  --site-text-muted: #b0bbad;
-  --site-border: #495649;
-  --site-border-strong: #5f6f5f;
-  --site-accent: #8ca786;
-  --site-accent-soft: #aac0a4;
-  --site-accent-strong: #789272;
-  --site-code-bg: #1b231d;
-}
-
-html[data-site-theme='classic'][data-theme='dark'] {
-  --site-bg: #1b1b1d;
-  --site-surface: #232326;
-  --site-surface-strong: #2c2c2f;
-  --site-text: #e3e3e5;
-  --site-text-muted: #a6a6a8;
-  --site-border: #3a3a3d;
-  --site-border-strong: #4a4a4d;
-  --site-accent: #2dd4ad;
-  --site-accent-soft: #5ee0c0;
-  --site-accent-strong: #1ab592;
-  --site-code-bg: #2c2c2f;
-}
-
-:root {
   --ifm-background-color: var(--site-bg);
   --ifm-background-surface-color: var(--site-surface);
   --ifm-font-color-base: var(--site-text);
@@ -243,7 +75,7 @@ body {
 }
 
 @media (min-width: 997px) {
-  html[class~='docs-doc-id-index'] main[class*='docMainContainer'],
+  html:has(.knowledge-home) main[class*='docMainContainer'],
   html[class~='docs-doc-id-about/index'] main[class*='docMainContainer'],
   html[class~='docs-doc-id-ai-relay/index'] main[class*='docMainContainer'] {
     width: calc(100% - var(--doc-sidebar-width));
@@ -253,7 +85,7 @@ body {
   }
 }
 
-html[class~='docs-doc-id-index'] article,
+html:has(.knowledge-home) article,
 html[class~='docs-doc-id-about/index'] article,
 html[class~='docs-doc-id-ai-relay/index'] article {
   max-width: 56rem;
@@ -266,7 +98,7 @@ html[class~='docs-doc-id-about/index'] article > h1 {
   letter-spacing: -0.03em;
 }
 
-html[class~='docs-doc-id-index'] article > h2 {
+html:has(.knowledge-home) article > h2 {
   margin-top: 3.5rem;
   padding-top: 1.1rem;
   border-top: 1px solid var(--ifm-color-emphasis-300);
@@ -293,11 +125,11 @@ html[class~='docs-doc-id-about/index'] article li {
 }
 
 /* 首页首屏：kicker + 衬线大标题 + 编辑注记栏 */
-html[class~='docs-doc-id-index'] .home-hero {
+html:has(.knowledge-home) .home-hero {
   margin-bottom: 1rem;
 }
 
-html[class~='docs-doc-id-index'] .home-hero-kicker {
+html:has(.knowledge-home) .home-hero-kicker {
   margin: 0 0 1.4rem;
   color: var(--site-accent);
   font-family: var(--site-font-mono);
@@ -305,7 +137,7 @@ html[class~='docs-doc-id-index'] .home-hero-kicker {
   letter-spacing: 0.18em;
 }
 
-html[class~='docs-doc-id-index'] .home-hero h1 {
+html:has(.knowledge-home) .home-hero h1 {
   margin: 0 0 1.4rem;
   font-size: clamp(2.1rem, 4vw, 2.9rem);
   font-weight: 600;
@@ -313,7 +145,7 @@ html[class~='docs-doc-id-index'] .home-hero h1 {
   line-height: 1.35;
 }
 
-html[class~='docs-doc-id-index'] .home-hero-lead {
+html:has(.knowledge-home) .home-hero-lead {
   max-width: 40rem;
   margin: 0 0 1.6rem;
   color: var(--ifm-color-emphasis-700);
@@ -321,7 +153,7 @@ html[class~='docs-doc-id-index'] .home-hero-lead {
   line-height: 1.85;
 }
 
-html[class~='docs-doc-id-index'] .home-hero-meta {
+html:has(.knowledge-home) .home-hero-meta {
   margin: 0;
   color: var(--site-accent);
   font-family: var(--site-font-mono);
@@ -329,7 +161,7 @@ html[class~='docs-doc-id-index'] .home-hero-meta {
 }
 
 /* 三栏流程带：定位 + 入口 + 关系 */
-html[class~='docs-doc-id-index'] .home-flow {
+html:has(.knowledge-home) .home-flow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 1.4rem;
@@ -337,7 +169,7 @@ html[class~='docs-doc-id-index'] .home-flow {
   margin: 1.75rem 0 1.5rem;
 }
 
-html[class~='docs-doc-id-index'] .home-flow-node h3 {
+html:has(.knowledge-home) .home-flow-node h3 {
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -345,47 +177,47 @@ html[class~='docs-doc-id-index'] .home-flow-node h3 {
   font-size: 1.15rem;
 }
 
-html[class~='docs-doc-id-index'] .home-flow-no {
+html:has(.knowledge-home) .home-flow-no {
   color: var(--site-accent);
   font-family: var(--site-font-mono);
   font-size: 1.05rem;
   font-weight: 500;
 }
 
-html[class~='docs-doc-id-index'] .home-flow-node p {
+html:has(.knowledge-home) .home-flow-node p {
   margin: 0;
   color: var(--ifm-color-emphasis-700);
   font-size: 0.88rem;
   line-height: 1.75;
 }
 
-html[class~='docs-doc-id-index'] .home-flow-meta {
+html:has(.knowledge-home) .home-flow-meta {
   margin-top: 0.7rem !important;
   font-family: var(--site-font-mono);
   font-size: 0.8rem !important;
 }
 
-html[class~='docs-doc-id-index'] .home-flow-meta a {
+html:has(.knowledge-home) .home-flow-meta a {
   color: var(--site-accent);
   font-weight: 500;
 }
 
-html[class~='docs-doc-id-index'] .home-flow-tag {
+html:has(.knowledge-home) .home-flow-tag {
   margin-top: 0.35rem !important;
   color: var(--site-text-muted);
   font-family: var(--site-font-mono);
   font-size: 0.72rem !important;
 }
 
-html[class~='docs-doc-id-index'] .home-flow-tag-pending {
+html:has(.knowledge-home) .home-flow-tag-pending {
   color: #7b1f2a;
 }
 
-html[data-theme='dark'][class~='docs-doc-id-index'] .home-flow-tag-pending {
+html[data-theme='dark']:has(.knowledge-home) .home-flow-tag-pending {
   color: #d98a92;
 }
 
-html[class~='docs-doc-id-index'] .home-flow-arrow {
+html:has(.knowledge-home) .home-flow-arrow {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -396,7 +228,7 @@ html[class~='docs-doc-id-index'] .home-flow-arrow {
   font-size: 0.8rem;
 }
 
-html[class~='docs-doc-id-index'] .home-flow-arrow em {
+html:has(.knowledge-home) .home-flow-arrow em {
   color: var(--site-text-muted);
   font-family: var(--site-font-sans);
   font-size: 0.68rem;
@@ -405,7 +237,7 @@ html[class~='docs-doc-id-index'] .home-flow-arrow em {
   text-align: center;
 }
 
-html[class~='docs-doc-id-index'] .home-flow-note {
+html:has(.knowledge-home) .home-flow-note {
   max-width: 46rem;
   color: var(--ifm-color-emphasis-700);
   font-size: 0.95rem;
@@ -413,31 +245,31 @@ html[class~='docs-doc-id-index'] .home-flow-note {
 }
 
 /* 写作原则：¶ 段符 */
-html[class~='docs-doc-id-index'] .home-principles ul {
+html:has(.knowledge-home) .home-principles ul {
   margin: 0.8rem 0 0;
   padding-left: 1.2rem;
 }
 
-html[class~='docs-doc-id-index'] .home-principles li + li {
+html:has(.knowledge-home) .home-principles li + li {
   margin-top: 0.45rem;
 }
 
-html[class~='docs-doc-id-index'] .home-principles li::marker {
+html:has(.knowledge-home) .home-principles li::marker {
   content: '¶  ';
   color: var(--site-accent);
   font-weight: 700;
 }
 
 @media (max-width: 996px) {
-  html[class~='docs-doc-id-index'] .home-hero h1 {
+  html:has(.knowledge-home) .home-hero h1 {
     font-size: 2.1rem;
   }
 
-  html[class~='docs-doc-id-index'] .home-flow {
+  html:has(.knowledge-home) .home-flow {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  html[class~='docs-doc-id-index'] .home-flow-arrow span {
+  html:has(.knowledge-home) .home-flow-arrow span {
     display: none;
   }
 
@@ -445,7 +277,7 @@ html[class~='docs-doc-id-index'] .home-principles li::marker {
     font-size: 2.05rem;
   }
 
-  html[class~='docs-doc-id-index'] article > h2,
+  html:has(.knowledge-home) article > h2,
   html[class~='docs-doc-id-about/index'] article > h2 {
     margin-top: 2.75rem;
   }
@@ -555,25 +387,13 @@ a,
   line-height: 1.15;
 }
 
-.navbar__title::after {
-  content: 'STUDY ARCHIVE';
-  margin-top: 2px;
-  color: var(--site-accent);
-  font-family: var(--site-font-mono);
-  font-size: 0.55rem;
-  font-weight: 400;
-  letter-spacing: 0.24em;
-}
-
 /* 文档区收进 1240 网格：侧栏不贴视口边 */
 :root {
   --doc-sidebar-width: 260px;
 }
 
 @media (min-width: 997px) {
-  html[class*='docs-doc-id-notes'] div[class*='docRoot_'],
-  html[class*='docs-doc-id-resources'] div[class*='docRoot_'],
-  html[class*='docs-doc-id-application-notes'] div[class*='docRoot_'] {
+  div[class*='docRoot_']:has(> .theme-doc-sidebar-container) {
     max-width: min(1536px, calc(100vw - 64px));
     margin-inline: auto;
   }
@@ -735,44 +555,20 @@ code {
   border-radius: 2px;
 }
 
-/* 长文导航性能：屏外的重块不做渲染工作，浏览器需要时再展开 */
-@media (min-width: 997px) {
-  .theme-doc-markdown .theme-code-block,
-  .theme-doc-markdown > table,
-  .theme-doc-markdown > figure {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 240px;
-  }
-}
 
 hr {
   border: none;
   border-top: 1px solid var(--site-border);
 }
 
-/* editorial 浅色下的深色胡桃页脚 */
-html[data-site-theme='editorial']:not([data-theme='dark']) .footer,
-html:not([data-site-theme]):not([data-theme='dark']) .footer {
-  --ifm-footer-background-color: #2c1810;
-  --ifm-footer-color: #d8cdb5;
-  --ifm-footer-link-color: #d8cdb5;
-  background: #2c1810;
-  color: #d8cdb5;
-}
-
-html[data-site-theme='editorial']:not([data-theme='dark']) .footer .footer__copyright,
-html:not([data-site-theme]):not([data-theme='dark']) .footer .footer__copyright {
-  color: #8a7a66;
-}
-
 /* 首页与关于页：版心 1120，衬线标题气质 */
-html[class~='docs-doc-id-index'] article,
+html:has(.knowledge-home) article,
 html[class~='docs-doc-id-about/index'] article,
 html[class~='docs-doc-id-ai-relay/index'] article {
   max-width: 70rem;
 }
 
-html[class~='docs-doc-id-index'] article > h1,
+html:has(.knowledge-home) article > h1,
 html[class~='docs-doc-id-about/index'] article > h1 {
   letter-spacing: 0.01em;
   font-weight: 600;

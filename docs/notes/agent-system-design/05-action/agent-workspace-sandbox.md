@@ -128,6 +128,25 @@ concurrency_limit
 
 导出的产物至少要记录任务 ID、路径或对象 ID、版本、生成动作和校验结果。临时文件、缓存和凭据不应随着产物一起导出。
 
+## 真实项目：交付文件时检查目标版本
+
+本地 `my-dify` 源码提交 `4e21eae6006c719a560a0b2f1af0aeba58d9b9ed` 将本轮工作副本与已保存的用户文件分开。Agent 明确调用 `deliver_file` 才会交付指定文件；未加载的目标按版本 `0` 尝试新增，已加载目标使用加载时的版本写入。源码：`internal/core/agent_v2/execution/workspace_delivery.py` → `deliver_file()`（第 70–92 行，节选）。
+
+```python
+# 未加载的目标仅允许新增；已加载目标使用其真实版本防止并发覆盖。
+revision = self._store.save_file(
+    target, content, expected_revision=self._versions.get((source, target), 0),
+)
+self._versions[(source, target)] = revision
+return {
+    "path": target, "revision": revision, "size": len(content),
+    "sha256": sha256(content).hexdigest(), "status": "saved",
+    "message": "文件已保存，可通过平台文件预览和下载入口访问",
+}
+```
+
+底层仓储比较预期与实际版本，冲突时转成“加载最新文件后重新编辑或另存”的业务错误（`internal/repository/workspace_file_repository.py` 第 217–227 行；`internal/repository/agent_workspace_store.py` 第 51–68 行）。这避免旧工作副本静默覆盖他人的新文件，但不能保证生成的内容符合用户要求；交付完成还要检查文件内容、可预览性和接收方权限。
+
 ## 空间生命周期
 
 ```text

@@ -6,8 +6,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import {useSiteTheme} from '@site/src/components/SiteThemeProvider';
-import {SITE_THEME_PRESETS, type SiteThemeId} from '@site/src/lib/siteTheme';
+import {useSiteTheme} from '../SiteThemeProvider';
+import {SITE_THEME_PRESETS, type SiteThemeId} from '../../lib/siteTheme';
 import styles from './styles.module.css';
 
 type ThemePresetToggleProps = {
@@ -25,11 +25,12 @@ export default function ThemePresetToggle({
   const [isOpen, setIsOpen] = useState(false);
   const panelId = useId();
   const desktopRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const currentPreset =
     SITE_THEME_PRESETS.find((preset) => preset.id === theme) ?? SITE_THEME_PRESETS[0];
 
   useEffect(() => {
-    if (mobile || !isOpen) {
+    if (!isOpen) {
       return undefined;
     }
 
@@ -46,6 +47,7 @@ export default function ThemePresetToggle({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setIsOpen(false);
+        triggerRef.current?.focus();
       }
     }
 
@@ -61,6 +63,7 @@ export default function ThemePresetToggle({
   function handleSelect(nextTheme: SiteThemeId) {
     setTheme(nextTheme);
     setIsOpen(false);
+    triggerRef.current?.focus();
     onClick?.();
   }
 
@@ -91,7 +94,13 @@ export default function ThemePresetToggle({
               <span className={styles.previewSwatch} />
               <span className={styles.previewSwatch} />
             </span>
-            <span className={styles.optionLabel}>{preset.label}</span>
+            <span className={styles.optionCopy}>
+              <span className={styles.optionLabel}>{preset.label}</span>
+              <span className={styles.optionDescription}>{preset.description}</span>
+            </span>
+            <span className={styles.selectedMark} aria-hidden="true">
+              {isActive ? '✓' : ''}
+            </span>
           </button>
         );
       })}
@@ -103,6 +112,7 @@ export default function ThemePresetToggle({
       <li className={clsx('menu__list-item', className)}>
         <div className={styles.mobilePanel}>
           <button
+            ref={triggerRef}
             type="button"
             className={styles.mobileTrigger}
             aria-label={`切换主题，当前为${currentPreset.label}`}
@@ -133,8 +143,16 @@ export default function ThemePresetToggle({
   }
 
   return (
-    <div ref={desktopRef} className={clsx(styles.desktopItem, className)}>
+    <div
+      ref={desktopRef}
+      className={clsx(styles.desktopItem, className)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setIsOpen(false);
+        }
+      }}>
       <button
+        ref={triggerRef}
         type="button"
         className={styles.desktopTrigger}
         aria-label={`切换主题，当前为${currentPreset.label}`}
@@ -149,10 +167,11 @@ export default function ThemePresetToggle({
           <span className={styles.previewSwatch} />
           <span className={styles.previewSwatch} />
         </span>
+        <span className={styles.triggerLabel}>主题</span>
       </button>
       {isOpen ? (
         <div id={panelId} className={styles.desktopPopover}>
-          <p className={styles.panelTitle}>主题样式</p>
+          <p className={styles.panelTitle}>选择阅读风格</p>
           {controls}
         </div>
       ) : null}

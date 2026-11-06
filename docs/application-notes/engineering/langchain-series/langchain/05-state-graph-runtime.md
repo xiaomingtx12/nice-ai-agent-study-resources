@@ -6,7 +6,7 @@ description: 沿 Agent State 穿过输入、内部执行和输出三道边界，
 
 # LangChain 源码解析 05：State、Graph 与运行时边界
 
-## 一、源码定位
+**源码定位**
 
 > **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。LangGraph 作为 `langchain` 的依赖包使用。
 > 源码路径相对 LangChain 仓库根目录；版本与阅读路线见 [系列导读](index.md)。
@@ -31,6 +31,45 @@ description: 沿 Agent State 穿过输入、内部执行和输出三道边界，
 > 4. LangGraph Checkpoint 依赖包：`langgraph-checkpoint`
 >    - **作用**：通过 `checkpointer` 参数提供状态持久化和恢复能力。
 >    - **阅读方式**：只看 LangChain 如何传入它，不展开 Saver 的具体实现。
+
+## 一、一次订单请求怎样改变消息与待办
+
+沿总览的说明性场景，用户希望先判断能否退货，再决定是否提交申请。本节假定使用工具策略生成最终结构化结果，且提交工具需要审批。下面的调用 ID 用于解释消息配对，不是真实运行日志。
+
+`HumanMessage` 表示用户输入；`AIMessage` 是模型响应，可包含工具调用；`ToolMessage` 携带某次调用的结果，通过 `tool_call_id` 指回请求。消息自身的 id 用于消息合并，工具调用 id 用于请求与结果配对，两者不要混淆。
+
+| 阶段 | 新增或修订的消息 | 尚待执行的业务调用 | 下一步 |
+| --- | --- | --- | --- |
+| 用户输入 | HumanMessage：查询订单并判断能否退货 | 无 | 创建本轮 ModelRequest |
+| 第一次模型返回 | AIMessage：`c_order` 查订单，`c_policy` 查政策 | 两项 | 路由按调用派发工具 |
+| 查询结果返回 | 两条 ToolMessage，分别配对 `c_order`、`c_policy` | 无 | 模型读取订单与证据 |
+| 模型提出提交 | AIMessage：`c_return` 调用提交工具 | 一项 | after_model 审批 hook 暂停 |
+| 人工批准 | 保留调用；编辑时更新其参数 | `c_return` | 执行真实提交工具 |
+| 人工拒绝，作为另一分支 | 增加拒绝的 ToolMessage，配对 `c_return` | 无 | 跳过该次提交，回模型解释 |
+| 批准分支提交完成 | ToolMessage 配对 `c_return`，携带服务结果 | 无 | 模型整理处理状态 |
+| 模型按工具策略输出结果 | 特殊结构化工具调用 `c_result` | 不属于普通业务待办 | 工厂解析字段并产生配对消息 |
+| 解析成功 | messages 更新，`structured_response` 写入 | 无 | 按对应结束条件返回 |
+
+批准和拒绝是两个互斥分支，不是同一次请求先批准后拒绝。查询结果只说明查到了信息，提交工具结果才涉及申请是否建立；结构化输出还可能在后续解析时失败。
+
+### 1、State 里有的内容，不一定全部原样送给模型 {#message-request-state}
+
+模型节点从 State 取 messages，连同系统提示、工具和设置构造 ModelRequest。请求包装器可以为本轮裁剪工具、编辑上下文或换模型；只有相应节点显式提交状态更新时，这些变化才按状态协议进入后续图执行。
+
+| 同一时点 | State 中的记录 | 本轮模型请求 | 外部系统 |
+| --- | --- | --- | --- |
+| 查询前 | 用户需求 | 系统提示、用户消息、可用工具 | 订单仍在原服务中 |
+| 查询后 | 工具结果消息 | 选择后的历史与工具结果 | 查询通常不产生申请 |
+| 拒绝后 | 原调用和配对拒绝消息 | 模型可解释未执行原因 | 该次提交工具没有执行 |
+| 提交后 | 带申请编号或错误的结果消息 | 模型根据结果生成答复 | 服务可能已经产生写入 |
+
+“临时请求改写”描述的是框架预期接口，不应被理解为任意可变 Python 对象都有深拷贝隔离。中间件应通过支持的请求覆盖与状态返回协议操作，避免无意原地修改共享消息。
+
+### 2、审批拒绝为什么仍然保留工具请求
+
+`factory.py` 的路由取出最近模型消息及相关工具消息，再按 `tool_call_id` 判断哪些调用已经得到结果。拒绝分支保留原调用，同时补一条配对结果，后续模型能够读到“提出过什么、为何没有执行”。
+
+这条协议不会查询业务数据库。若工具已提交申请、还没有可靠保存 ToolMessage 就失败，消息记录仍可能不足以确认真实结果。业务幂等与结果查询见文末，底层持久化见 LangGraph 系列的对应版本说明。
 
 ## 二、先画出 State 的边界
 
@@ -86,7 +125,7 @@ class _OutputAgentState(TypedDict, Generic[ResponseT]):
 | `jump_to` | Middleware 请求有限路由 | 内部字段 |
 | `structured_response` | 保存结构化输出 | 不作为输入，作为输出 |
 
-### 1. `messages` 是协议字段
+### 1、`messages` 是协议字段
 
 `messages` 使用 `add_messages` 作为字段元数据。对 LangChain 侧来说，重要结论是：
 
@@ -97,7 +136,7 @@ class _OutputAgentState(TypedDict, Generic[ResponseT]):
 
 消息具体如何合并由 LangGraph 依赖包提供的 `add_messages` 处理。本文只关注 LangChain 为什么把它声明在 `AgentState` 上。
 
-### 2. `jump_to` 是控制字段，不是业务状态
+### 2、`jump_to` 是控制字段，不是业务状态
 
 `jump_to` 同时携带：
 
@@ -114,7 +153,7 @@ PrivateStateAttr
 
 jump_to 的 Hook 使用方式和目的地声明见 [04](04-middleware-control-plane.md)；can_jump_to 是装配信息，不是业务权限白名单。
 
-### 3. `structured_response` 是输出字段
+### 3、`structured_response` 是输出字段
 
 结构化结果需要在图内部暂存，但调用方通常只希望从输出中读取它。因此它使用 `OmitFromInput`：
 
@@ -165,6 +204,11 @@ flowchart TD
 ```
 
 内部 State 的同名字段采用后遍历的定义。输入、输出 Schema 则各自边遍历边过滤，并非对最终内部 Schema 做一次筛选；后面的省略标记不会删除已收录的同名字段。下一节用实际分支解释这个区别。
+
+<details>
+<summary>进阶阅读：同名字段与输入输出可见性如何合并</summary>
+
+下面两节解释 Schema 的逐声明合并，适合排查私有字段和同名覆盖。初读可先跳到“节点如何更新 State”，需要自定义状态时再回来核对。
 
 ## 五、Schema 的合并顺序
 
@@ -256,33 +300,24 @@ PrivateStateAttr = OmitFromSchema(input=True, output=True)
 
 这些标记控制普通输入与输出通道，不是数据保密机制。内部字段仍可能出现在检查点、调试读取、节点更新事件或应用日志中。涉及保密要求时，还应检查实际存储与输出接口，不能只验证 invoke 的返回字典。
 
+</details>
+
 ## 七、节点如何更新 State
 
-### 1. 节点返回的是局部更新
+### 1、节点返回的是局部更新
 
 边界确定后，节点只需要返回本次执行产生的局部更新：
 
-```python
-def before_model(self, state, runtime):
-    # 只返回本次 Hook 改变的字段，未返回的字段继续保留。
-    return {
-        "model_calls": state.get("model_calls", 0) + 1,
-    }
-```
-
-下面两种写法的语义不同：
+`model_call_limit.py` 的 `ModelCallLimitMiddleware.after_model` 只提交计数字段。下面是该方法的真实返回语句，省略签名与文档字符串：
 
 ```python
-# 推荐：只声明本次节点要改变的字段。
-return {"model_calls": next_count}
-
-# 不推荐：节点不应该复制和重建整个 Agent State。
 return {
-    "messages": state["messages"],
-    "model_calls": next_count,
-    "jump_to": state.get("jump_to"),
+    "thread_model_call_count": state.get("thread_model_call_count", 0) + 1,
+    "run_model_call_count": state.get("run_model_call_count", 0) + 1,
 }
 ```
+
+已有消息交给图状态协议保留，无需为了保留它们而把旧 messages 再提交一次。
 
 返回完整 State 不是框架绝对禁止的操作，但会把所有字段再次作为写入提交，副作用更难判断：
 
@@ -290,7 +325,7 @@ return {
 - 普通字段会再次按其 Channel 或 Reducer 规则写入；并行步骤中，无 Reducer 字段的多次写入还可能产生冲突；
 - 读代码的人很难判断哪些字段是这次节点真正修改的。
 
-### 2. 三类节点返回形态
+### 2、三类节点返回形态
 
 LangChain Agent 中常见的节点返回形态可以这样看：
 
@@ -331,7 +366,7 @@ AIMessage / ModelResponse
   → 交给图执行层合并
 ```
 
-### 3. “更新”不等于“覆盖”
+### 3、“更新”不等于“覆盖”
 
 节点返回 `{"messages": [new_message]}` 时，LangChain 只声明了消息字段的局部更新。`messages` 字段上的 `add_messages` 元数据会告诉 LangGraph 依赖包如何合并它：
 
@@ -341,7 +376,7 @@ AIMessage / ModelResponse
 
 对于自定义字段，是否追加、覆盖或使用 Reducer，取决于字段 Schema 的声明。文章在 LangChain 侧只关注“Reducer 元数据如何被声明”，不追踪依赖包内部的合并实现。
 
-### 4. State 更新如何进入下一节点
+### 4、State 更新如何进入下一节点
 
 一次节点执行可以画成：
 
@@ -360,44 +395,19 @@ Middleware 的 `before_model` 能更新计数，模型节点能追加消息，�
 
 局部更新遵守同一套字段规则，自定义状态也应按归属放到合适的位置。有两种扩展 Agent State 的方式：
 
-### 1. 由 Middleware 携带状态
+### 1、由 Middleware 携带状态
 
-```python
-class LimitState(AgentState):
-    # 计数属于 Agent 执行期间的共享状态，不应塞进 messages。
-    model_calls: int
-    tool_calls: int
-
-
-class CallLimitMiddleware(AgentMiddleware):
-    # Middleware 可以携带自己的状态 Schema，并由工厂统一合并。
-    state_schema = LimitState
-
-    def before_model(self, state, runtime):
-        # 每次模型调用前更新计数，是否终止由 Middleware 的生命周期 Hook 决定。
-        return {"model_calls": state.get("model_calls", 0) + 1}
-```
+内置 `ModelCallLimitMiddleware` 将 `state_schema` 指向 `ModelCallLimitState`，由该类型声明 thread 和 run 两个计数字段；`after_model` 读取旧值并返回更新。字段、私有可见性和更新逻辑因此归在同一个中间件中，完整源码见 [07](07-call-governance.md)。
 
 这种方式把状态字段和使用它的 Hook 放在一起，适合可复用能力。
 
-### 2. 由调用方传入 `state_schema`
+### 2、由调用方传入 `state_schema`
 
-```python
-class ApplicationState(AgentState):
-    # 应用必须拥有的字段直接扩展 AgentState。
-    request_id: str
-    risk_level: str
-
-
-agent = create_agent(
-    model=model,
-    state_schema=ApplicationState,
-)
-```
+应用可以扩展 `AgentState` 声明需要跨节点共享的业务字段，再通过 `create_agent(state_schema=...)` 传入该类型。例如订单任务中的 request_id 可以用于关联业务记录；字段声明本身不会执行身份鉴别或数据库查询。
 
 这种方式适合应用层必须拥有的字段，但要注意它会覆盖同名 Middleware 字段的定义。
 
-### 3. 状态字段的选择原则
+### 3、状态字段的选择原则
 
 - 节点之间需要共享、并且属于本次 Agent 执行的数据，放 State；
 - 只属于一个包装器内部的临时变量，放 Request 或局部变量；
@@ -406,52 +416,13 @@ agent = create_agent(
 
 不要为了方便把所有数据都塞进 `messages`。消息字段承载的是对话和工具协议，不是通用的状态字典。
 
-## 九、StateGraph 在 LangChain 工厂中的位置
+## 九、State Schema 交给图以后，由谁负责执行
 
-Schema 已经生成后，工厂才把合并结果交给从 LangGraph 依赖包导入的 `StateGraph`：
+工厂将内部、输入、输出和 context Schema 交给 `StateGraph`，再把 model、tools 与中间件 hook 注册为节点。这里的职责是定义可用字段和节点返回协议；字段怎样变成通道、什么时候提交一轮更新，是 LangGraph 的运行时职责。
 
-```python
-# LangChain 只把合并后的 Schema 和 Context 交给 LangGraph 建图。
-graph = StateGraph(
-    state_schema=resolved_state_schema,
-    input_schema=input_schema,
-    output_schema=output_schema,
-    context_schema=context_schema,
-)
-```
+不要把两个仓库的相似源码片段当成同一版本。当前 LangChain 锁文件使用 LangGraph `1.2.4`，相邻 LangGraph 系列使用 `1.2.10`；本篇只据 LangChain 源码确认调用和参数，内部机制的跨版本判断见[源码基线](./source-baseline.md)。
 
-随后按实际配置注册节点：
-
-```text
-model
-tools
-Middleware.before_agent
-Middleware.before_model
-Middleware.after_model
-Middleware.after_agent
-```
-
-常见的控制流可以概括为：
-
-```text
-START
-  → before_agent 链（存在时）
-  → before_model 链（存在时）/ model
-  → after_model 链（存在时）
-  → tools 或退出
-  → after_agent 链（存在时）
-  → END
-```
-
-这不是每个 Agent 都完全相同的静态图。是否存在 `tools` 节点、各类 Middleware 节点、结构化输出重试边和返回模型的边，都取决于传入的工具、响应格式和 Middleware。这里的阅读重点是 LangChain 工厂如何决定：
-
-- 哪些节点存在；
-- 哪个节点是一次性入口；
-- 哪个节点是循环入口；
-- 哪些条件边可能指向 `model`、`tools` 或结束；
-- 哪套 Schema 被传入建图 API。
-
-图构建器和执行器的内部实现属于 LangGraph 包本身，不在本系列中继续下钻。
+工厂装配和拓扑细节回看 [03](./03-create-agent-assembly.md)。下面继续沿运行中的 messages 判断下一步，而不重复编译调用。
 
 ## 十、模型—工具循环如何读 State
 
@@ -475,11 +446,11 @@ if last_ai_message is None:
     # 没有模型消息时无法继续工具循环，结束。
     return end_destination
 
+tool_message_ids = [m.tool_call_id for m in tool_messages]
+
 if len(last_ai_message.tool_calls) == 0:
     # 模型没有请求工具，结束本轮循环。
     return end_destination
-
-tool_message_ids = [message.tool_call_id for message in tool_messages]
 
 # 3. 只把尚未由 ToolMessage 配对完成、且不是结构化输出工具的调用派发到 tools。
 pending_tool_calls = [
@@ -530,87 +501,25 @@ if any(t.name in structured_output_tools for t in tool_messages):
 return model_destination
 ```
 
-也就是说，工具节点完成后只有两类明确的直接退出条件：当前轮的客户端工具调用全部标记为 `return_direct=True`，或执行到了结构化输出工具。其他情况回到循环入口，由 `before_model` 链或 `model` 继续处理结果。模型—工具循环之所以能够继续，不是因为节点里保留了一个 Python 列表，而是因为模型消息和工具消息共同形成了可判断的状态协议。
+也就是说，工具节点完成后只有两类明确的直接退出条件：当前轮的客户端工具调用全部标记为 `return_direct=True`，或本轮工具消息中出现结构化输出工具名。后一个条件检查消息，不表示结构化工具由 ToolNode 执行；这类结果由工厂解析分支生成。其他情况回到循环入口，由 `before_model` 链或 `model` 继续处理结果。模型—工具循环之所以能够继续，不是因为节点里保留了一个 Python 列表，而是因为模型消息和工具消息共同形成了可判断的状态协议。
 
-## 十一、建图与编译参数的职责边界
+## 十一、运行服务与流式事件怎样接到状态旁边
 
-State、输入、输出和 Context 的归属在建图时就已经确定。`context_schema` 属于 `StateGraph(...)` 的构造参数，和 `state_schema`、`input_schema`、`output_schema` 一起定义图的类型边界；它不传给 `graph.compile()`。
+`create_agent()` 把 checkpointer、Store、缓存和中断等配置交给编译图。它们有不同的数据职责，完整装配代码见 [03](./03-create-agent-assembly.md)。
 
-图节点和边装配完成后，`create_agent()` 才把运行参数交给 `graph.compile()`：
-
-```python
-# 先收集 Middleware 声明的流事件 Transformer。
-middleware_transformers = [
-    transformer
-    for middleware_item in middleware
-    for transformer in getattr(middleware_item, "transformers", ())
-]
-
-return graph.compile(
-    checkpointer=checkpointer,
-    store=store,
-    interrupt_before=interrupt_before,
-    interrupt_after=interrupt_after,
-    debug=debug,
-    name=name,
-    cache=cache,
-    transformers=[
-        ToolCallTransformer,
-        SubagentTransformer,
-        *middleware_transformers,
-        *(transformers or ()),
-    ],
-).with_config(config)
-```
-
-LangChain 侧需要区分这些参数的用途和作用域：
-
-| 参数 | LangChain 侧语义 | 不应误解为 |
+| 能力 | 与当前请求的关系 | 不自动提供什么 |
 | --- | --- | --- |
-| `checkpointer` | 交给图执行层保存和恢复执行状态 | 自动形成长期记忆 |
-| `store` | 提供跨 thread 的共享数据入口 | 自动注入模型上下文 |
-| `cache` | 交给图执行层的缓存后端或配置 | Checkpoint 的替代品，或“所有 Agent 节点都会自动缓存” |
-| `interrupt_before` / `interrupt_after` | 指定节点级暂停位置 | 任意业务行级断点 |
-| `context_schema` | `StateGraph(...)` 的构造参数，描述运行时上下文类型 | `graph.compile()` 参数，或会自动持久化到 State 的数据 |
-| `transformers` | 注册额外的流式事件处理扩展 | 直接修改 State、Reducer 或图节点 |
+| checkpointer | 保存可恢复的图执行记录 | 外部申请与状态保存的联合事务 |
+| Store | 节点主动读取跨会话资料 | 自动放进模型消息的长期记忆 |
+| cache | 提供图缓存后端 | 所有 Agent 节点自动缓存，或业务写入去重 |
+| context | 传递本次用户身份、依赖等 | 自动写入状态检查点 |
+| transformers | 处理支持该扩展的对外事件流 | 自动改写 State 或路由 |
 
-如果应用需要从 Store 读取用户偏好，仍然需要在 Middleware 中主动读取，再写入 State 或 `ModelRequest`。配置 `store=` 本身不会让模型自动看到数据。
-
-编译前，工厂还会给图默认配置 `recursion_limit=9_999`，并写入 LangSmith 追踪元数据。它们通过 `.with_config(config)` 挂到已编译的图上，不属于 `StateGraph` 的状态字段。
-
-### 1. Transformer 不属于 State 更新链
-
-这里的 `transformers` 容易和 State 的“转换”混在一起。它处理的是运行期间产生的流式事件，作用对象是调用方通过 `stream()` 或 `astream_events()` 看到的输出面。编译后的顺序固定为：`ToolCallTransformer`、`SubagentTransformer`、Middleware 声明的 Transformer、调用方传入的 Transformer。
-
-```text
-图节点执行
-  → 产生 State 更新、模型消息块、工具事件等运行事件
-  → Transformer 读取或改写流式事件
-  → 调用方收到处理后的流
-```
-
-它和 State 更新不是同一条路径：
-
-```text
-节点返回 dict / Command
-  → State reducer
-  → 下一节点读取更新后的 State
-
-Transformer 处理事件
-  → 只影响流式输出
-  → 不负责决定下一条图边
-```
-
-例如 PII 脱敏需要分别考虑两种数据面：
-
-- `before_model` / `after_model` 处理最终写入 State 的消息；
-- `transformers` 处理已经开始向外发送的流式事件。
-
-如果只改 State，已经发给用户的流式片段不会自动被追回；如果只改流，也不代表 Checkpoint 中的 State 已经脱敏。具体的 `PIIMiddleware` 装配位置放在 06 篇说明。
+事件是第三个观察位置。订单结果可能已经出现在流中，而对应持久记录尚未完成保存；只对事件脱敏，也不代表状态里的原文已删除。State、ModelRequest 与流事件的治理细节集中在 [09](./09-context-and-privacy.md)。
 
 ## 十二、几个容易混淆的边界
 
-### 1. State 与 `ModelRequest`
+### 1、State 与 `ModelRequest`
 
 State 是节点之间共享的图数据；`ModelRequest` 是一次模型调用的输入快照。
 
@@ -625,15 +534,15 @@ ModelRequest
 
 不要把一次请求的临时改写直接写回长期 State。
 
-### 2. State 与 Context
+### 2、State 与 Context
 
 State 适合会被节点更新、合并和判断的数据。Context 适合调用开始时提供的运行时依赖，例如用户身份、租户配置或外部客户端。
 
-### 3. State 与 Store
+### 3、State 与 Store
 
 State 属于图状态，配置 Checkpointer 后可以沿同一 thread 跨多次调用保存；Store 提供应用主动访问的跨 thread 数据入口。需要跨对话共享的偏好适合 Store，需要恢复当前任务进度的数据适合 State；两者都不会仅因存在就自动进入模型请求。
 
-### 4. `jump_to` 与图 API
+### 4、`jump_to` 与图 API
 
 Middleware 通过 `jump_to` 请求 `create_agent()` 约定的有限路由，取值是 `"model"`、`"tools"` 或 `"end"`。节点型 Hook 还应通过 `can_jump_to` 声明工厂需要为该节点装配哪些条件边。
 

@@ -39,7 +39,6 @@ if (existsSync(lightboxComponentPath)) {
   const lightboxComponent = readFileSync(lightboxComponentPath, 'utf8');
   const requiredMarkers = [
     '.docusaurus-mermaid-container svg',
-    'article img',
     'Escape',
     'dialog',
     'cloneNode(true)',
@@ -54,7 +53,7 @@ if (existsSync(lightboxComponentPath)) {
 
 if (existsSync(lightboxStylesPath)) {
   const lightboxStyles = readFileSync(lightboxStylesPath, 'utf8');
-  const requiredMarkers = ['overlay', 'contentImage', 'contentMermaid', 'cursor: zoom-in'];
+  const requiredMarkers = ['overlay', 'contentMermaid', 'cursor: zoom-in'];
 
   for (const marker of requiredMarkers) {
     if (!lightboxStyles.includes(marker)) {

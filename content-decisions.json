@@ -1,0 +1,338 @@
+{
+  "https://github.com/langchain-ai/langchain": {
+    "status": "update",
+    "reason": "优化 LangChain 源码解析系列：用订单查询、政策检索、审批与结果交付贯穿 00、03、05、07、08、12；收拢工厂装配，新增 14 结构化输出与修复专题，区分图循环修复、包装重试、Schema 校验和业务验收；导读拆分 Agent 与组件路线，折叠参数和类型参考，统一标题编号。新增源码基线与测试证据，固定提交 76c32db9b38dfc287c958dc2a914d4834f022c1c，明确锁定 LangGraph 1.2.4 与相邻系列 1.2.10 的版本边界。完成 17 页 YAML/MDX、124 处系列内出站链接、49 处站内入站链接、30 处固定源码路径、4 张 Mermaid、13 段核心源码及 8 个测试名称的静态核验；测试设置与断言只阅读，未执行构建、框架测试或模型调用。",
+    "reviewedAt": "2026-10-03",
+    "targets": [
+      "docs/application-notes/engineering/langchain-series/langchain/00-project-overview-and-repository-structure.md",
+      "docs/application-notes/engineering/langchain-series/langchain/01-runnable-and-lcel.md",
+      "docs/application-notes/engineering/langchain-series/langchain/02-core-abstractions.md",
+      "docs/application-notes/engineering/langchain-series/langchain/03-create-agent-assembly.md",
+      "docs/application-notes/engineering/langchain-series/langchain/04-middleware-control-plane.md",
+      "docs/application-notes/engineering/langchain-series/langchain/05-state-graph-runtime.md",
+      "docs/application-notes/engineering/langchain-series/langchain/06-middleware-overview.md",
+      "docs/application-notes/engineering/langchain-series/langchain/07-call-governance.md",
+      "docs/application-notes/engineering/langchain-series/langchain/08-human-in-the-loop.md",
+      "docs/application-notes/engineering/langchain-series/langchain/09-context-and-privacy.md",
+      "docs/application-notes/engineering/langchain-series/langchain/10-tool-injection.md",
+      "docs/application-notes/engineering/langchain-series/langchain/11-tool-dynamics.md",
+      "docs/application-notes/engineering/langchain-series/langchain/12-rag-components-and-retrieval.md",
+      "docs/application-notes/engineering/langchain-series/langchain/13-advanced-retrieval-techniques.md",
+      "docs/application-notes/engineering/langchain-series/langchain/index.md",
+      "docs/application-notes/engineering/langchain-series/langchain/14-structured-output-and-repair.md",
+      "docs/application-notes/engineering/langchain-series/langchain/source-baseline.md"
+    ]
+  },
+  "https://github.com/langchain-ai/langgraph": {
+    "status": "update",
+    "reason": "优化 LangGraph 源码解析现有十二篇与导读：增加并行材料处理、失败恢复、审批交付的贯穿阅读线及结果提交时序图；补充 State/Runtime context/config/Store、节点缓存与恢复复用、重试后错误处理器；通过仓库测试断言解释部分成功恢复与超时迟到写入，收拢停止取消讨论并统一标题编号。新增源码基线页，固定无 Git 元数据快照的包版本及 25 个文件 SHA-256，明确源码推导、测试断言与未执行实验的边界。完成 14 页 MDX、93 处站内链接、2 张 Mermaid 和 7 段新增或调整源码静态核对，未执行构建或框架测试。",
+    "reviewedAt": "2026-10-03",
+    "targets": [
+      "docs/application-notes/engineering/langchain-series/langgraph/index.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/00-project-overview-and-repository-structure.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/01-state-schema-channels-and-reducers.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/02-stategraph-builder-and-compilation.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/03-pregel-supersteps-and-scheduling.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/04-pregel-task-execution.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/05-dynamic-routing-and-send.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/06-checkpoints-store-and-recovery.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/07-interrupts-and-command.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/08-subgraphs-and-cross-graph-control.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/09-stream-system.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/10-func-api-entrypoint-and-task.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/11-prebuilt-tool-layer.md",
+      "docs/application-notes/engineering/langchain-series/langgraph/source-baseline.md"
+    ]
+  },
+  "https://github.com/langchain-ai/openwiki": {
+    "status": "update",
+    "reason": "基于本地 OpenWiki 0.7.0、提交 c0173dca928862d0bd7991f134b5dfd615975e7c 与锁定 deepagents 1.13.2，将旧四篇案例重写为六篇业务到源码的系列。补全原生 CLI 与宿主 Agent 的分工、页面规划、受限 worker 与应用并发、持久页面队列和逐页基线、Claims 证据核对、只读全文检索与关联工作区；区分个人来源采集、仓库生成和知识消费，明确提示词要求、源码约束与本站判断，保留客户部署案例的证据边界。完成 MDX、链接、标题编号、16 段源码和 2 张 Mermaid 静态检查，未执行构建或模型生成。",
+    "reviewedAt": "2026-10-03",
+    "targets": [
+      "docs/application-notes/engineering/deepagents应用案例解析/openwiki/index.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/openwiki/00-project-overview.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/openwiki/01-connectors-and-ingestion.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/openwiki/02-agent-assembly.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/openwiki/03-wiki-maintenance.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/openwiki/04-claims-and-evidence.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/openwiki/05-retrieval-and-workspaces.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/index.md"
+    ]
+  },
+  "https://github.com/langchain-ai/open-swe": {
+    "status": "update",
+    "reason": "按工程层次重排为00—12共13篇，新增状态持久化、人工评审与合并，重核机器Reviewer并移除失效Analyzer主线。源码基线区分0942b41561df与dirty工作树。调整索引、交叉链接与单篇职责，修正框架中间件合并、模型回退、后台通知重复窗口、worker结果回传和PR登记失败的描述。03、04、07、09、11、12已按当前源码完成本轮专题重核；00、01、05、06、08保留已有正文并做局部修订。未执行构建、测试或模型评测。",
+    "reviewedAt": "2026-10-13",
+    "targets": [
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/index.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/source-baseline.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/00-overview/00-project-and-frameworks.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/01-coding-agent/01-input-thread-and-workspace.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/02-runtime-support/08-state-and-persistence.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/01-coding-agent/02-deep-agent-assembly.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/01-coding-agent/03-middleware.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/01-coding-agent/05-sandbox-lifecycle.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/01-coding-agent/04-context-skills-and-offloading.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/01-coding-agent/06-delegation-and-continuation.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/01-coding-agent/07-pull-request-and-approval.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/03-review-and-merge/11-reviewer.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/03-review-and-merge/12-human-review-and-merge.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/02-runtime-support/09-observability-and-validation.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/open-swe/02-runtime-support/10-testing-and-evaluation.md",
+      "docs/application-notes/engineering/deepagents应用案例解析/index.md",
+      "docs/application-notes/engineering/index.md"
+    ]
+  },
+  "https://www.langchain.com/blog/building-prod-with-jev-and-langgraph": {
+    "status": "new",
+    "reason": "解读文档分类、脱敏与人工审核工作流，按 Gist 修订 9bd06dc6 核验相关性阈值、置信度分支、人工恢复和检查点数据范围；区分合成示例、作者性能报告与生产验收缺口。",
+    "reviewedAt": "2026-10-03",
+    "targets": [
+      "docs/application-notes/product/blog-cases/document-processing/jev-document-review-workflow.md",
+      "docs/application-notes/product/blog-cases/index.md"
+    ]
+  },
+  "https://www.langchain.com/blog/how-to-build-a-model-router-in-the-harness": {
+    "status": "new",
+    "reason": "解读 Open SWE 任务画像、模型分档及 973 线程实验；按提交 8e0e13e3 核验用户请求提取、档位状态和 Jev 失败回退，区分实验版本、当前源码行为与统计证据边界。",
+    "reviewedAt": "2026-10-03",
+    "targets": [
+      "docs/application-notes/product/blog-cases/development-operations/open-swe-model-routing.md",
+      "docs/application-notes/product/blog-cases/index.md"
+    ]
+  },
+  "https://www.langchain.com/blog/building-agent-environments-and-tasks": {
+    "status": "new",
+    "reason": "完整解读共享 World Spec、单题 Task Spec、Spec2Task 与人工难度校准，补足站内评测方法中用例生产过程。",
+    "reviewedAt": "2026-09-24",
+    "targets": ["docs/notes/agent-system-design/06-observation/agent-eval-environment-design.md"]
+  },
+  "https://www.langchain.com/blog/agent-data-stack": {
+    "status": "update",
+    "reason": "解读内部数据 Agent 的 dbt 定义、语义指标、工作区指南和可信标记，区分请求量自述与任务正确率。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/analytics-research/langchain-agent-first-data-stack.md"
+    ]
+  },
+  "https://fin.ai/pricing": {
+    "status": "new",
+    "reason": "官方定价页给出 Fin 按 outcome 收费的公开起价，用作收费证据与客户部署案例的对照；不据此推断收入。",
+    "reviewedAt": "2026-09-24",
+    "targets": ["docs/notes/market-observation/2026-agent-commercialization-cases-and-writing-method.md"]
+  },
+  "https://www.langchain.com/blog/customers-vodafone-italy": {
+    "status": "skip",
+    "reason": "文章发布于 2025-12-16；产品案例栏目按本轮要求仅保留 2026 年以来发表的博客案例，原站内文章已删除。",
+    "reviewedAt": "2026-09-24",
+    "targets": []
+  },
+  "https://www.langchain.com/blog/customers-rexera": {
+    "status": "skip",
+    "reason": "文章发布于 2024-10-09；产品案例栏目按本轮要求仅保留 2026 年以来发表的博客案例，原站内文章已删除。",
+    "reviewedAt": "2026-09-24",
+    "targets": []
+  },
+  "https://www.langchain.com/blog/lyft-built-a-self-serve-ai-agent-platform-for-customer-support-with-langgraph-and-langsmith": {
+    "status": "update",
+    "reason": "业务专家配置客服 Agent 后的提示词检查、小流量发布和线上评测，补足站内产品案例。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/customer-service/lyft-support-agent-platform.md"
+    ]
+  },
+  "https://www.langchain.com/blog/credit-genie-insights-agent-financial-assistant": {
+    "status": "update",
+    "reason": "并行意图分类暴露理财助手中的账户事务需求，与现有 OpenWiki 工程案例不是同一问题。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/analytics-research/credit-genie-conversation-feedback.md"
+    ]
+  },
+  "https://www.langchain.com/blog/building-monday-com-sidekick-why-capable-agents-need-more-than-just-tools": {
+    "status": "update",
+    "reason": "跨工作空间任务的可见范围、受限工具和隔离执行空间，适合产品业务栏目；未把设计叙述当作生产源码。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/knowledge-collaboration/monday-sidekick-workspace-boundaries.md"
+    ]
+  },
+  "https://www.langchain.com/blog/how-we-built-langchains-gtm-agent": {
+    "status": "update",
+    "reason": "销售草稿的 48 小时自动发送例外与人工审批原则形成可研究的业务授权问题。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/sales-marketing/langchain-gtm-approval-timeout.md"
+    ]
+  },
+  "https://claude.com/customers/block": {
+    "status": "new",
+    "reason": "企业内 goose 的数据查询和内部工具任务，补充模型接入、员工数据访问及写入权限的区别；不推断内部源码。",
+    "reviewedAt": "2026-09-23",
+    "targets": ["docs/application-notes/product/block-goose-enterprise-data-access.md"]
+  },
+  "https://github.com/aaif-goose/goose": {
+    "status": "new",
+    "reason": "用于交叉核验 goose 为公开框架，明确公开仓库不证明 Block 企业内的数据与工具权限实现。",
+    "reviewedAt": "2026-09-23",
+    "targets": ["docs/application-notes/product/block-goose-enterprise-data-access.md"]
+  },
+  "https://www.langchain.com/blog/how-included-health-built-federated-agents-for-healthcare-navigation-with-deep-agents-and-langgraph": {
+    "status": "update",
+    "reason": "医疗导航跨团队交接、Skill 适用条件与临床复核；未把客户叙述当作生产源码。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/customer-service/included-health-dot-care-navigation.md"
+    ]
+  },
+  "https://www.langchain.com/blog/paid-media-agent": {
+    "status": "update",
+    "reason": "重读完整原文，先讲清业务任务、工作环境、上下文、架构演变、六条工程经验和结果，再核验公开源码中的提案与执行边界。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/sales-marketing/langchain-paid-media-metric-to-write.md"
+    ]
+  },
+  "https://github.com/langchain-ai/paid-media-agent": {
+    "status": "update",
+    "reason": "按 0cc8109a 追踪托管入口、运行时配置、目录授权、平台读取、确定性报告、提案修订、审批中断、写入门禁与回读；明确公开示例和博客内部部署的差异。",
+    "reviewedAt": "2026-09-24",
+    "targets": ["docs/application-notes/product/blog-cases/sales-marketing/langchain-paid-media-metric-to-write.md"]
+  },
+  "https://www.langchain.com/blog/how-toyota-north-america-put-enterprise-ai-on-the-balance-sheet-with-deep-agents-and-langsmith": {
+    "status": "update",
+    "reason": "产线诊断和维修知识案例，分清诊断时长自述与节省预测。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/knowledge-collaboration/toyota-gearpal-repair-knowledge.md"
+    ]
+  },
+  "https://www.langchain.com/blog/how-stripe-built-their-knowledge-ai-platform-on-deep-agents": {
+    "status": "update",
+    "reason": "千级 Skill 与工具动态加载、沙箱文件同步；将工具暴露与数据授权分开。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/knowledge-collaboration/stripe-kai-skills-and-tools.md"
+    ]
+  },
+  "https://www.langchain.com/blog/how-we-build-an-autonomous-sre-agent-for-kubernetes-deployments": {
+    "status": "update",
+    "reason": "运维诊断与人工改集群，结合公开仓库核验审批入口和集群权限边界。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/development-operations/langchain-sre-agent-approval-boundary.md"
+    ]
+  },
+  "https://github.com/langchain-samples/sre-agent": {
+    "status": "new",
+    "reason": "核对 eee1cf02 的审批中断、未鉴权 HTTP 入口和集群级写权限。",
+    "reviewedAt": "2026-09-24",
+    "targets": ["docs/application-notes/product/blog-cases/development-operations/langchain-sre-agent-approval-boundary.md"]
+  },
+  "https://www.langchain.com/blog/how-apollo-rebuilt-its-ai-assistant-on-deep-agents-to-power-the-full-gtm-loop": {
+    "status": "update",
+    "reason": "从固定主管/子 Agent 转向目标驱动 Skill 的销售任务，公开资料未提供写入授权实现。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/sales-marketing/apollo-assistant-skill-routing.md"
+    ]
+  },
+  "https://www.langchain.com/blog/customer-experience-cx-agents-in-production-lessons-from-lyft-vodafone-and-latam-airlines": {
+    "status": "update",
+    "reason": "LATAM 面向乘客的生产 Agent 案例补足对外商业服务样本；聚焦超范围问题的回看与服务扩展，不推断未公布的收入或源码。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/customer-service/latam-concierge-passenger-intent.md"
+    ]
+  },
+  "https://www.langchain.com/blog/how-harmonic-rebuilt-scout-on-deep-agents-and-4xd-retention-with-langsmith": {
+    "status": "update",
+    "reason": "原文发布于 2026-06-03；讲清投资研究业务、机构上下文、可回读产物、生产迭代和留存口径，另查 2026 年官方产品说明补充计费证据。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/analytics-research/harmonic-scout-investment-research.md"
+    ]
+  },
+  "https://harmonic.ai/blog/how-harmonic-serves-venture-capital-firms": {
+    "status": "new",
+    "reason": "2026-05-06 官方文章，补充创投机构发现公司、团队背景研究、联系人及 CRM 业务上下文，不将市场宣传写成 Agent 投资收益。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/analytics-research/harmonic-scout-investment-research.md"
+    ]
+  },
+  "https://support.harmonic.ai/en/articles/11047921-scout-your-ai-research-agent": {
+    "status": "new",
+    "reason": "官方说明页标注 2026-07-08；补充 Scout 入口、研究报告分享、保存与许可证额度和超额用量计费，并保留不同来源数据规模差异。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/analytics-research/harmonic-scout-investment-research.md"
+    ]
+  },
+  "https://www.langchain.com/blog/customers-kensho": {
+    "status": "update",
+    "reason": "原文发布于 2026-03-26；完整解释 LNG 研究例子、领域 DRA 分工、协议及路由评测，区分专业数据产品、Agent 部署与收入。 本轮补充预设流程、模型决策和程序执行约束的分工，说明架构判断依据及未披露的控制细节。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/analytics-research/kensho-grounding-financial-research.md"
+    ]
+  },
+  "https://www.harvey.ai/blog/rebuilding-playbook-review-as-a-multi-agent-system": {
+    "status": "new",
+    "reason": "原文发布于 2026-09-02；讲清企业合同规则、旧流程缺陷、规则分支合并、评测和生产限制，原始架构图本地保存；非 LangChain 来源单列在产品业务目录。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/harvey-playbook-contract-review.md"
+    ]
+  },
+  "https://www.harvey.ai/blog/introducing-contract-intelligence": {
+    "status": "new",
+    "reason": "2026-05-21 官方公告，补充合同业务背景与设计伙伴共建阶段；页面当时提供候补登记，不能写成产品已全面开放。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/harvey-playbook-contract-review.md"
+    ]
+  },
+  "https://www.langchain.com/blog/customers-podium": {
+    "status": "skip",
+    "reason": "独立客户案例发布于 2024-08-15，不符合本轮仅采用 2026 年原文的要求；2026 年综述中的简短介绍不扩写为独立深度案例。",
+    "reviewedAt": "2026-09-26",
+    "targets": []
+  },
+  "https://www.langchain.com/blog/customers-chrobinson": {
+    "status": "skip",
+    "reason": "客户案例发布于 2025-03-10，不符合本轮仅采用 2026 年原文的要求。",
+    "reviewedAt": "2026-09-26",
+    "targets": []
+  },
+  "https://www.clay.com/customers/merge": {
+    "status": "skip",
+    "reason": "案例页未确认发表日期；页脚年份不能作为文章发布日期，本轮仅采用 2026 年原文，暂不收录。",
+    "reviewedAt": "2026-09-26",
+    "targets": []
+  },
+  "https://kensho.com/news/sp-global-launches-adaptive-retrieval-and-ai-data-portal-enabling-data-across-ai-agentic-workflows": {
+    "status": "new",
+    "reason": "2026-07-21 官方公告，补充 AI Data Portal 的自适应与确定性检索两种服务及客户产品接入；未披露独立收入或计费单价。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/analytics-research/kensho-grounding-financial-research.md"
+    ]
+  },
+  "https://kensho.com/news/rbc-capital-markets-trusted-ai-bankers-sp-global-kensho": {
+    "status": "new",
+    "reason": "2026-09-10 客户案例，补充银行研究工作的定制部署与会面准备；明确 RBC 使用确定性检索，不把八千名员工覆盖或查询准确率移植到 Grounding 多 Agent 系统。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/analytics-research/kensho-grounding-financial-research.md"
+    ]
+  },
+  "https://docs.langchain.com/oss/python/langgraph/workflows-agents": {
+    "status": "update",
+    "reason": "核对官方对工作流预设路径与 Agent 动态控制的区分，用于案例索引的架构判断口径；不是新增客户案例，未将文档核对日期当作文章发布日期。",
+    "reviewedAt": "2026-09-26",
+    "targets": [
+      "docs/application-notes/product/blog-cases/index.md"
+    ]
+  }
+}

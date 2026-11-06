@@ -7,42 +7,51 @@ description: 对照 LangChain v1 官方文档与 langchain-core 源码，追踪�
 
 # LangChain Core 源码解析 02：聊天模型、消息与工具系统
 
-## 一、源码定位
+> 固定提交与已阅读测试见[源码基线](source-baseline.md)。
+
+本篇跟踪模型、消息和工具交接的值：模型提出查询，工具接收参数，结果带着调用 ID 回到下一轮。Agent 的循环装配见 [03](03-create-agent-assembly.md)，最终结构化答复另见 [14](14-structured-output-and-repair.md)。
+
+**源码定位**
 
 > **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
 > 源码路径相对 LangChain 仓库根目录；版本与阅读路线见 [系列导读](index.md)。
 >
 > **本篇范围**：聚焦聊天模型（`BaseChatModel`）、消息类型（`BaseMessage`/`AIMessage`/`ToolMessage`）和工具系统（`BaseTool`/`StructuredTool`）的协议边界。`libs/langchain_v1/langchain/` 下的 `create_agent()`、Agent 循环和 LangGraph 图装配属于 03、04、05 的范围，此处只在边界说明中出现。
 >
+<details>
+<summary>按需查阅：核心文件与类型入口</summary>
+
 > **核心包与路径**：
 >
-> 1. `langchain_core.language_models.chat_models`：`libs/core/langchain_core/language_models/chat_models.py`
+> - `langchain_core.language_models.chat_models`：`libs/core/langchain_core/language_models/chat_models.py`
 >    - **主线文件**：`BaseChatModel` 规定模型适配协议，提供统一的 `invoke()`/`stream()`/`batch()` 调用面。
 >    - `_convert_input()`：把字符串、消息列表、`PromptValue` 统一归一化为 PromptValue。
 >    - `invoke()` → `generate_prompt()` → `_generate()`：从归一化输入到 provider 调用的完整链路。
 >    - `bind_tools()`、`with_structured_output()`：构造工具绑定或结构化输出 Runnable，构造时不调用模型。
-> 7. 模型初始化：`libs/langchain_v1/langchain/chat_models/base.py` → `init_chat_model()`、`_ConfigurableModel._model_params()`
-> 2. `langchain_core.prompt_values`：`libs/core/langchain_core/prompt_values.py`
+> - 模型初始化：`libs/langchain_v1/langchain/chat_models/base.py` → `init_chat_model()`、`_ConfigurableModel._model_params()`
+> - `langchain_core.prompt_values`：`libs/core/langchain_core/prompt_values.py`
 >    - `PromptValue`、`ChatPromptValue`：Prompt 模板与模型之间的交接协议。
-> 3. `langchain_core.messages`：`libs/core/langchain_core/messages/`
+> - `langchain_core.messages`：`libs/core/langchain_core/messages/`
 >    - `BaseMessage`、`BaseMessageChunk`：消息公共字段和流式合并。
 >    - `SystemMessage`（`system.py`）、`HumanMessage`（`human.py`）：系统指令和用户输入。
 >    - `AIMessage`（`ai.py`）、`AIMessageChunk`：模型输出、工具调用（`tool_calls`）和 token 用量。
 >    - `ToolMessage`（`tool.py`）：工具执行结果与原始调用的配对（`tool_call_id`）。
 >    - `ToolCall`（`content.py`）：工具调用的结构化协议。
-> 4. `langchain_core.tools`：`libs/core/langchain_core/tools/`
+> - `langchain_core.tools`：`libs/core/langchain_core/tools/`
 >    - `tool()`（`convert.py`）：把 Python 函数转成 `BaseTool` 对象。
 >    - `BaseTool`（`base.py`）：工具协议基类，同时是 Runnable；`get_input_schema()`、`tool_call_schema` 区分模型可见 Schema 与本地执行 Schema。
 >    - `invoke()` → `run()` → `_run()`：归一化输入 → 注入运行时上下文 → 执行业务逻辑 → `_format_output()`。
 >    - `Tool`（`simple.py`）、`StructuredTool`（`structured.py`）：字符串工具和结构化参数工具的实现差异。
-> 5. `langchain_core.outputs.chat_generation`：`libs/core/langchain_core/outputs/chat_generation.py`
+> - `langchain_core.outputs.chat_generation`：`libs/core/langchain_core/outputs/chat_generation.py`
 >    - `ChatGeneration`、`ChatGenerationChunk`：provider 结果如何承载消息。
-> 6. `langchain_core.runnables.base`：`libs/core/langchain_core/runnables/base.py`
+> - `langchain_core.runnables.base`：`libs/core/langchain_core/runnables/base.py`
 >    - `Runnable`、`RunnableConfig`：所有执行组件共享的调用协议，仅在边界说明中出现。
+
+</details>
 
 代码块保留真实源码的函数边界和关键调用；为便于阅读，省略无关字段、重载和异常收尾。源码里的英文文档字符串与行内说明会翻译成中文，新增注释只用于标出输入、输出和副作用。
 
-## 二、三种对象如何交接一次工具调用
+## 一、三种对象如何交接一次工具调用
 
 `create_agent()` 的 `model`、`tools` 参数以及运行输入中的 `messages`，以及 Agent 运行时的每一次模型推理、每一次工具执行、每一次消息追加，背后都是这三组类型在交接数据：
 
@@ -54,7 +63,7 @@ description: 对照 LangChain v1 官方文档与 langchain-core 源码，追踪�
 
 全文沿这条数据流展开：**外部输入 → 模型推理 → AIMessage.tool_calls → 工具执行 → ToolMessage → 回到模型**。读完这篇，再读 [03：`create_agent()` 装配主线](./03-create-agent-assembly.md) 时，每条边的输入输出已经清楚了。
 
-## 三、核心调用链
+## 二、核心调用链
 
 一次工具调用要经过模型结果解析和工具执行两条链。下面省略缓存、事件转发和错误处理分支，展示非流式生成路径：
 
@@ -101,9 +110,9 @@ description: 对照 LangChain v1 官方文档与 langchain-core 源码，追踪�
 - **消息边界**：工具调用不是普通文本，而是 `AIMessage.tool_calls` 中的结构化字段。Agent Runtime 据此决定是否进入工具执行，而不是重新解析 `AIMessage.content`。
 - **执行边界**：`BaseTool` 只负责工具协议和本地调用；是否允许调用、调用几次、是否暂停由 Agent Runtime 或 Middleware 决定。
 
-## 四、聊天模型：从输入归一化到 `AIMessage`
+## 三、聊天模型：从输入归一化到 `AIMessage`
 
-### 1. `BaseChatModel` 规定的是模型适配协议
+### 1、`BaseChatModel` 规定的是模型适配协议
 
 源码路径：`libs/core/langchain_core/language_models/chat_models.py`
 
@@ -133,7 +142,7 @@ class BaseChatModel(BaseLanguageModel[AIMessage], ABC):
 
 因此，`langchain-core` 只规定“调用前后应该交接什么对象”；具体模型包负责把这些对象转换成 OpenAI、Anthropic 或其他服务商的请求和响应。
 
-### 2. `_convert_input()` 统一三类模型输入
+### 2、`_convert_input()` 统一三类模型输入
 
 
 ```python
@@ -169,7 +178,7 @@ def _convert_input(self, model_input: LanguageModelInput) -> PromptValue:
   → 原样复用
 ```
 
-### 3. `invoke()` 取出第一条 `ChatGeneration.message`
+### 3、`invoke()` 取出第一条 `ChatGeneration.message`
 
 
 ```python
@@ -202,7 +211,7 @@ def invoke(
 
 这里的 `AIMessage` 不是 provider SDK 的原始响应。它是 LangChain 统一后的对话消息，里面除了文本，还可以携带工具调用、无效工具调用和用量信息。
 
-### 4. `generate_prompt()` 把 PromptValue 转回消息列表
+### 4、`generate_prompt()` 把 PromptValue 转回消息列表
 
 
 ```python
@@ -225,7 +234,7 @@ def generate_prompt(
 
 `PromptValue` 的价值在这里体现出来：Prompt 模板不用知道 provider 的请求格式，模型也不用知道模板变量如何拼接。两者通过 `PromptValue` 和 `BaseMessage` 交接。
 
-### 5. provider 的真正实现落在 `_generate()` 和 `_stream()`
+### 5、provider 的真正实现落在 `_generate()` 和 `_stream()`
 
 
 ```python
@@ -251,7 +260,7 @@ def _stream(
 
 `_generate()` 是必须实现的 provider 边界；`_stream()` 是可选的原生流式边界。基类如果没有原生流式实现，会退回到一次性 `invoke()` 的结果，而不是凭空生成 token 流。
 
-### 6. `init_chat_model()`：多模型的统一入口
+### 6、`init_chat_model()`：多模型的统一入口
 
 `BaseChatModel` 定的是各 provider 必须遵守的协议，但"用户传一个模型名字符串，如何解析为具体的 provider 实例"是另一层问题。这由 `langchain_v1` 提供的 `init_chat_model()` 解决：
 
@@ -278,7 +287,7 @@ model = init_chat_model(
 
 `create_agent()` 同时接受模型标识字符串和 BaseChatModel。统一协议减少了替换客户端的代码，但工具调用、多模态输入、结构化输出及参数支持仍需按集成核对。配置字段 model 用于选择模型，不应与某个客户端构造参数 model_name 混为一谈。
 
-### 7. `bind_tools()` 只是模型层的声明接口
+### 7、`bind_tools()` 只是模型层的声明接口
 
 
 ```python
@@ -295,7 +304,7 @@ def bind_tools(
 
 不要把 `bind_tools()` 理解成“工具已经执行”。它只是返回一个绑定了工具声明的模型 Runnable；真正的工具执行仍由 Agent Runtime 调用 `BaseTool.invoke()` 完成。
 
-### 8. `with_structured_output()` 是另一条声明式输出路径
+### 8、`with_structured_output()` 是另一条声明式输出路径
 
 官方文档把结构化输出作为 Chat Model 的独立能力。它和 `bind_tools()` 都会返回一个新的 Runnable，但目标不同：
 
@@ -321,11 +330,11 @@ else:
 
 Pydantic 类型会进入对应的模型校验；字典 Schema 或 TypedDict 走工具参数解析，不能笼统认为都会得到同强度的本地字段校验。provider 可以覆盖该方法，使用自己的原生响应格式与错误处理。
 
-include_raw=False 时返回模型与解析器组成的链，解析失败会抛出异常；include_raw=True 时保留 raw、parsed 和 parsing_error，解析失败可作为结果字段返回。这个开关不会把网络调用失败也一并变成 parsing_error。Agent 的 response_format 则由工厂另行选择策略，详见 [03](03-create-agent-assembly.md)。
+include_raw=False 时返回模型与解析器组成的链，解析失败会抛出异常；include_raw=True 时保留 raw、parsed 和 parsing_error，解析失败可作为结果字段返回。这个开关不会把网络调用失败也一并变成 parsing_error。Agent 的 response_format 则由工厂另行选择策略，详见 [14：结构化输出与修复](14-structured-output-and-repair.md)。
 
-## 五、消息类型：把对话和工具调用结构化
+## 四、消息类型：把对话和工具调用结构化
 
-### 1. `BaseMessage` 是所有消息的公共数据结构
+### 1、`BaseMessage` 是所有消息的公共数据结构
 
 
 ```python
@@ -348,7 +357,7 @@ class BaseMessage(Serializable):
 
 `BaseMessage` 是数据对象，不是 Runnable。它只保存消息内容和协议字段，不负责调用模型或工具。
 
-### 2. 角色类型是不同的协议语义
+### 2、角色类型是不同的协议语义
 
 | 类型 | `type` | 产生方 | 下游作用 |
 | --- | --- | --- | --- |
@@ -359,7 +368,7 @@ class BaseMessage(Serializable):
 
 `SystemMessage` 和 `HumanMessage` 的具体类主要是固定 `type` 字段；真正影响 Agent 循环的是 `AIMessage` 和 `ToolMessage` 的附加协议。
 
-### 3. `AIMessage` 的工具调用不是文本
+### 3、`AIMessage` 的工具调用不是文本
 
 
 ```python
@@ -399,7 +408,7 @@ class ToolCall(TypedDict):
 
 官方文档中的 `content` 还可以是内容块列表，用于文本、图片、音频、文件和工具调用等结构化内容。工程代码不要只假设 `message.content` 永远是字符串；需要跨 provider 处理多模态或标准化内容时，应优先使用 `message.content_blocks`，同时保留 `tool_calls` 作为兼容 Agent 执行协议的标准字段。
 
-### 4. `ToolMessage` 把执行结果关联回调用
+### 4、`ToolMessage` 把执行结果关联回调用
 
 
 ```python
@@ -430,7 +439,7 @@ AIMessage(
 
 `artifact` 解决的是“工具需要保留完整结果，但不应把完整结果全部塞进模型上下文”的问题；模型只看到 `content`，应用可以继续使用 `artifact`。
 
-### 5. 流式消息使用 `MessageChunk`
+### 5、流式消息使用 `MessageChunk`
 
 
 ```python
@@ -454,9 +463,9 @@ class BaseMessageChunk(BaseMessage):
 
 `AIMessageChunk` 还会保存 tool_call_chunks，并可能从已有参数片段中解析出部分 tool_calls。片段里出现了工具名或部分参数，不代表参数已经完整、合法；标准 Agent 模型节点等待完整回复后才路由工具。聚合仍得到 chunk 类型，转换为完整消息是另一项操作。
 
-## 六、工具系统：从函数、Schema 到本地执行
+## 五、工具系统：从函数、Schema 到本地执行
 
-### 1. `@tool` 做的是对象转换，不是执行
+### 1、`@tool` 做的是对象转换，不是执行
 
 源码包区：`libs/core/langchain_core/tools/convert.py`。
 
@@ -486,7 +495,7 @@ if infer_schema or args_schema is not None:
 
 官方文档建议为工具函数提供类型注解和清晰的描述。类型注解决定 Schema 的字段类型；函数 docstring 或显式 `description` 解释工具用途，二者都会影响模型是否正确选择工具和填充参数。Schema 解决“参数形状是否正确”，不解决“调用是否有权限”。
 
-### 2. `BaseTool` 同时是工具协议和 Runnable
+### 2、`BaseTool` 同时是工具协议和 Runnable
 
 
 ```python
@@ -506,7 +515,7 @@ class BaseTool(RunnableSerializable[str | dict[str, Any] | ToolCall, Any]):
 
 继承 `RunnableSerializable` 意味着工具可以被统一调用、追踪和组合；但它的输入类型比普通 Runnable 更复杂，至少要处理字符串、字典和带 `id` 的 `ToolCall`。
 
-### 3. Tool 与 StructuredTool 由配置选择
+### 3、Tool 与 StructuredTool 由配置选择
 
 默认 infer_schema=True，因此一个只有 query 参数的函数也会构造为 StructuredTool。只有关闭推导且未提供 args_schema，装饰器才进入简单 Tool 分支；判断条件不是参数数量。
 
@@ -514,7 +523,7 @@ StructuredTool 用参数 schema 描述命名字段，并调用保存的 func 或
 
 通常保留默认推导即可。显式 schema 适合参数说明或约束需要独立维护的工具；运行时校验是否执行还取决于 schema 类型。此版本的 Pydantic schema 会在 _parse_input 中校验，字典 JSON Schema 输入分支并不等同于执行一次完整 JSON Schema 校验。
 
-### 4. 模型可见 Schema 与本地执行 Schema 不完全相同
+### 4、模型可见 Schema 与本地执行 Schema 不完全相同
 
 `BaseTool` 有两个相关入口：
 
@@ -559,7 +568,7 @@ def get_input_schema(
 
 模型通常只需要 query、path 等业务参数。注入有不同入口：BaseTool 管理回调与 RunnableConfig；ToolRuntime 等图执行上下文由 ToolNode 准备。仅手动调用一个需要 ToolRuntime 的工具，不会自动产生完整图运行上下文。字典 schema 又绕过上面的类型筛选，调用方应检查实际发给模型的字段。
 
-### 5. `invoke()` 归一化输入，`run()` 负责执行生命周期
+### 5、`invoke()` 归一化输入，`run()` 负责执行生命周期
 
 
 ```python
@@ -617,7 +626,7 @@ ToolCall / dict / str
 
 工具有 Schema 不代表它自动拥有权限、重试、限额和人工确认。这些策略属于 [04：Middleware 控制面](./04-middleware-control-plane.md) 或更上层的 Agent Runtime。
 
-### 6. 工具结果如何变成 `ToolMessage`
+### 6、工具结果如何变成 `ToolMessage`
 
 
 ```python
@@ -658,7 +667,7 @@ def _format_output(
 - Agent 根据 `AIMessage.tool_calls` 调用工具时，通常会把 `ToolCall` 的 ID 带入，结果就会被包装成 `ToolMessage`；
 - `ToolMessage.tool_call_id` 是下一轮模型识别“这条结果对应哪次调用”的关键字段。
 
-## 七、容易混淆的边界
+## 六、容易混淆的边界
 
 以下几条在上面各节已展开，这里压缩成一句话对照：
 
@@ -670,7 +679,7 @@ def _format_output(
 | `message.content` 永远是字符串 | 可以是内容块列表；`tool_calls`/`usage_metadata` 有独立字段 |
 | `langchain-core` 会自动完成 Agent 循环 | 循环和状态由 `create_agent()` 上层装配 |
 
-## 八、工程判断（Agent 视角）
+## 七、工程判断（Agent 视角）
 
 排查工具调用时可以逐项对照：模型回复里是否产生有效的 tool_calls，执行器是否按名称找到工具，参数是否通过实际 schema 分支，函数是否成功执行，返回的 tool_call_id 是否与请求对应。字段结构正确只能证明协议配对，不能证明查询了正确订单或写入已满足业务条件。
 

@@ -149,7 +149,7 @@
 比如你新增：
 
 ```text
-docs/application-notes/engineering/dify/dify-17-deployment-and-release.md
+docs/application-notes/drafts/dify/dify-17-deployment-and-release.md
 ```
 
 frontmatter 里写 `sidebar_position: 17`，构建后自动出现在 Dify 分组里，不需要动 `sidebars.ts`。

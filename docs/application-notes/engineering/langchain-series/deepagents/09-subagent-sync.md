@@ -74,6 +74,14 @@ SubAgent spec
 
 子代理只在当前 `task` 调用期间运行，完成后把一次结果交回父 Agent。它不会自动拿到父 Agent 的完整消息历史，也不会把每个中间工具结果都展开到父 Agent。
 
+### 版本对照：新版本增加上下文模式
+
+上面的输入契约限定于本文的 Deep Agents **0.6.12 源码快照**。LangChain 在 2026 年 9 月 8 日的 [多 Agent 上下文组织说明](https://www.langchain.com/blog/organizing-context-in-a-multi-agent-harness)介绍了后续版本的子代理 `mode` 配置：默认的 `isolated` 延续只接收任务描述、重新开始对话的方式；`fork` 则把父 Agent 当前对话状态交给子代理，移除末尾的委派工具调用，再把任务描述作为新的用户消息。子代理完成后，父 Agent 仍只收到该次工具调用的最终结果。
+
+选择依据是子任务要不要继承父 Agent 已经做过的调查。例如，父 Agent 已定位超时问题后交给修复子代理继续实现，`fork` 可复用前面的文件读取和诊断；让审查子代理独立检查改动时，`isolated` 避免父 Agent 的判断影响审查。继承完整对话也会带入无关历史，不能仅因可能复用提示词缓存就默认选 `fork`。
+
+这段是**新版功能的阅读指引**，不是下文 `_validate_and_prepare_state()` 等 0.6.12 源码片段的实现结论。需要使用 `mode` 时，应以实际安装版本的子代理配置和状态准备代码为准。
+
 ## 二、委派的输入、运行与返回契约
 
 同步子代理被建模成 `task` 工具：装配期把子代理 spec 编译成独立 runnable，运行后把允许传播的状态字段写回父 Agent。消息结果优先取 `structured_response`，否则取最后一条非空 AIMessage 文本，再包装成 ToolMessage。
@@ -800,7 +808,7 @@ _return_command_with_state_update()
 
 **下层：LangChain / LangGraph**
 
-- [LangGraph 05：子图与跨图控制](../langgraph/05-subgraphs-and-cross-graph-control.md)——子图的状态隔离与结果回写
+- [LangGraph 08：子图与跨图控制](../langgraph/08-subgraphs-and-cross-graph-control.md)——子图的状态隔离与结果回写
 
 **本系列**
 

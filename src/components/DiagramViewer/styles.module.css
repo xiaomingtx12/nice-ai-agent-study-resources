@@ -1,0 +1,36 @@
+.viewer {
+  overflow: hidden;
+  width: 100%;
+  border: 1px solid var(--site-border);
+  border-radius: var(--site-panel-radius);
+  background: var(--site-surface);
+  color: var(--site-text);
+  margin-block: 1.75rem;
+  isolation: isolate;
+}
+.toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 4px 8px 4px 16px; border-bottom: 1px solid var(--site-border); gap: 8px; }
+.title { color: var(--site-text-muted); font-size: 12px; letter-spacing: .08em; }
+.tools { display: flex; align-items: center; gap: 4px; }
+.tools button { display: inline-flex; justify-content: center; align-items: center; min-width: 44px; height: 44px; padding: 0 8px; border: 0; border-radius: var(--site-control-radius); background: transparent; color: var(--site-text); font: 12px var(--site-font-sans); cursor: pointer; }
+.tools button:hover:not(:disabled), .tools button[aria-pressed='true'] { background: var(--site-surface-strong); color: var(--site-accent-strong); }
+.tools button:disabled { opacity: .35; cursor: default; }
+.tools button:focus-visible { outline-offset: -3px; }
+.scale { min-width: 40px; text-align: center; font: 11px var(--site-font-mono); color: var(--site-text-muted); font-variant-numeric: tabular-nums; }
+.divider { height: 16px; width: 1px; margin-inline: 4px; background: var(--site-border); }
+.stage { position: relative; height: 360px; overflow: hidden; contain: layout paint; background-image: radial-gradient(var(--site-border) .6px, transparent .6px); background-size: 16px 16px; }
+.canvas.canvas { width: 100%; height: 100%; touch-action: pan-y; cursor: default; }
+.viewer[data-interactive='true'] .canvas { touch-action: none; cursor: grab; }
+.viewer[data-interactive='true'] .canvas:active { cursor: grabbing; }
+.content.content { width: max-content; height: max-content; }
+.markup { padding: 16px; flex: none; }
+.markup > svg { display: block; }
+.caption { min-height: 33px; padding: 8px 16px; border-top: 1px solid var(--site-border); color: var(--site-text-muted); font-size: 11px; line-height: 16px; }
+.viewer:fullscreen { display: flex; flex-direction: column; height: 100%; margin: 0; border: 0; border-radius: 0; }
+.viewer:fullscreen .stage { flex: 1; height: auto; }
+@media (max-width: 576px) {
+  .toolbar { padding-inline: 4px; justify-content: center; }
+  .title, .divider, .scale { display: none; }
+  .tools { gap: 0; }
+  .stage { height: 280px; }
+  .caption { padding-inline: 10px; font-size: 10px; }
+}

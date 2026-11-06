@@ -5,8 +5,8 @@
   "description": "Nice AI 应用开发教程整理与学习总结（Docusaurus）",
   "scripts": {
     "prestart": "node scripts/ensure-dev-search-index.mjs",
-    "start": "docusaurus start",
-    "build": "docusaurus build",
+    "start": "node --max-old-space-size=8192 ./node_modules/@docusaurus/core/bin/docusaurus.mjs start",
+    "build": "node --max-old-space-size=8192 ./node_modules/@docusaurus/core/bin/docusaurus.mjs build",
     "postbuild": "node scripts/sync-dev-search-index.mjs --strict",
     "serve": "docusaurus serve",
     "clear": "docusaurus clear"
@@ -22,17 +22,20 @@
     "clsx": "^2.1.1",
     "prism-react-renderer": "^2.4.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-zoom-pan-pinch": "4.2.0"
   },
   "devDependencies": {
     "@docusaurus/types": "^3.10.2",
+    "@mermaid-js/mermaid-cli": "11.17.0",
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "jsdom": "^29.1.1",
+    "puppeteer": "25.11.0",
     "typescript": "^5.6.3"
   },
   "engines": {
-    "node": ">=18.0"
+    "node": ">=22.12"
   }
 }

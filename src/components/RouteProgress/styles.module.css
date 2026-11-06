@@ -8,7 +8,13 @@
   opacity: 0.85;
   z-index: 9999;
   transform-origin: left center;
-  animation: route-progress 1.2s ease-in-out infinite;
+  /* Quick navigations complete before this becomes visible. */
+  visibility: hidden;
+  animation: show-progress 0s 180ms forwards, route-progress 1.2s 180ms ease-in-out infinite;
+}
+
+@keyframes show-progress {
+  to { visibility: visible; }
 }
 
 @keyframes route-progress {
@@ -31,7 +37,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .bar {
-    animation: none;
+    animation: show-progress 0s 180ms forwards;
     transform: scaleX(0.5);
   }
 }

@@ -1,0 +1,76 @@
+{
+  "sources": [
+    {
+      "id": "langchain-blog",
+      "type": "rss",
+      "url": "https://www.langchain.com/blog/rss.xml"
+    },
+    {
+      "id": "langchain-customers",
+      "type": "page-links",
+      "url": "https://www.langchain.com/customers",
+      "selector": "a.stories_box[href]",
+      "titleSelector": ".stories_top-v-flex .t-heading-6-rg",
+      "pathPrefixes": ["/blog/"]
+    },
+    {
+      "id": "langchain-resources-featured",
+      "type": "page-links",
+      "url": "https://www.langchain.com/resources",
+      "selector": "a.v2-resources_element[href]",
+      "titleSelector": ".resources-content h2",
+      "pathPrefixes": ["/blog/", "/resources/"]
+    },
+    {
+      "id": "langchain-resources-archive",
+      "type": "sitemap",
+      "url": "https://www.langchain.com/sitemap.xml",
+      "pathPrefix": "/resources/"
+    },
+    {
+      "id": "anthropic-engineering-featured",
+      "type": "page-links",
+      "url": "https://www.anthropic.com/engineering",
+      "selector": "a[class*='cardLink'][href]",
+      "titleSelector": "h2,h3",
+      "pathPrefixes": ["/engineering/"]
+    },
+    {
+      "id": "anthropic-engineering-archive",
+      "type": "sitemap",
+      "url": "https://www.anthropic.com/sitemap.xml",
+      "pathPrefix": "/engineering/"
+    },
+    {
+      "id": "openai-engineering",
+      "type": "sitemap",
+      "url": "https://openai.com/sitemap.xml/engineering/",
+      "pathPrefix": "/index/",
+      "pathTerms": ["agent", "codex", "harness", "eval", "tool", "sandbox", "workflow", "responses-api-computer"]
+    },
+    {
+      "id": "openai-internal-use-cases",
+      "type": "sitemap",
+      "url": "https://openai.com/sitemap.xml/learn-openai-on-openai/",
+      "pathPrefix": "/index/"
+    }
+  ],
+  "referenceSources": [
+    {
+      "id": "openai-codex-developer-articles",
+      "url": "https://developers.openai.com/blog/topic/codex"
+    },
+    {
+      "id": "openai-cookbook-agents",
+      "url": "https://developers.openai.com/cookbook/topic/agents"
+    },
+    {
+      "id": "openai-agents-guide",
+      "url": "https://developers.openai.com/api/docs/guides/agents"
+    },
+    {
+      "id": "claude-platform-docs",
+      "url": "https://platform.claude.com/docs/en/build-with-claude/overview"
+    }
+  ]
+}

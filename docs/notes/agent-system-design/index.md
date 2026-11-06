@@ -1,21 +1,37 @@
 ---
 sidebar_position: 0
-description: 围绕模型决策闭环整理 Agent 工程组件，说明每一层解决什么问题、与其他层如何协作，以及应该从哪里继续阅读。
+sidebar_label: 导读与内容地图
+description: 从模块本质与运行原理出发，连接 LangChain、LangGraph、Deep Agents 的配置入口、业务定制方法与验收标准。
 ---
 
 # Agent 工程技巧
 
-这一栏聚焦 Agent 系统无论使用框架还是纯代码都必须解决的工程问题。
+> **工程本质：** 将概率性的模型决策接入有状态、有权限边界、可恢复、可验证的运行时，让开放任务通过受控动作推进，并以真实结果确认完成。
+
+这一栏从模块的本质和原理出发，落到框架中的配置、扩展位置与业务验收。理解状态为什么要独立于上下文之后，还要知道怎样配置检查点、如何设计状态字段，以及恢复时由谁核对已经发生的外部动作。
+
+
+按当前问题选择阅读入口：
+
+| 分类 | 解决什么问题 | 阅读入口 |
+| --- | --- | --- |
+| 模型前置知识 | 模型如何处理输入，工程技巧与模型机制有什么关系 | [理解 Transformer](./00-prerequisites/agent-thinking-transformer-from-prompt.md)、[工程技巧与模型架构](./00-prerequisites/agent-engineering-to-architecture.md) |
+| Task：任务合同 | 用户要完成什么，参数、约束和成功条件如何确定 | [任务合同与输入路由](./01-task/agent-intent-recognition.md) |
+| State：状态与恢复 | 哪些事实需要保存，中断后依据什么继续 | [状态与恢复](./02-state/agent-state-architecture.md) |
+| View：上下文、记忆与知识 | 每轮模型调用需要看到什么，知识与经验如何进入输入 | [上下文装配](./03-view/agent-context-management.md) |
+| Decision：决策与协作 | 哪些步骤由代码固定，模型和多个 Agent 如何推进任务 | [Workflow、Agent Loop 与协作](./04-decision/agent-vs-workflow-architecture.md) |
+| Action：能力、权限与执行空间 | 模型提案如何变成有权限边界、可验收的动作 | [工具执行与副作用](./05-action/agent-tool-calling.md) |
+| Observation：观察与评测 | 如何记录真实结果，发现失败并验证改进 | [证据与反馈](./06-observation/agent-observability.md)、[Agent 评测](./06-observation/agent-evaluation.md) |
+
+整体取舍与跨组件组合归入“设计原则与方案”；单个组件的职责与机制归入对应六组件分类；服务接纳、运行装配、资源承载与任务收尾归入“服务端与运行时”。每篇文章保留一个主要归属，相关主题通过链接连接。例如，自进化工程方案放在“设计原则与方案”，观察与评测部分提供经验回流的阅读入口。
 
 框架可以封装模型调用、工具注册、状态保存、流程编排和多 Agent 调度，减少重复实现；但它不会替系统决定任务边界、上下文来源、权限策略、失败出口和成功标准。纯代码开发需要自己实现这些基础设施，框架开发则需要在框架提供的能力之上补齐这些语义。
 
-因此，这一栏的核心问题是：
-
-> 如何把参与决策的概率性模型，接入一个有状态、有边界、可恢复、可验证的确定性运行时？
+阅读每个模块时，沿着“本质与原理 → 框架接入 → 业务定制 → 验收”推进。框架接入回答能直接使用哪些能力；业务定制回答自己的规则应放在哪里。例如，审批中间件负责暂停与恢复，发布服务仍要确认审批绑定的草稿版本没有变化。
 
 这张内容地图按稳定的问题边界组织 Agent 工程。很多项目使用的名称不同，实际反复遇到的是同一类问题：任务目标没有收敛、模型缺少事实、上下文超限、决策无法终止、工具产生越权副作用、结果无法验证、任务中断后无法恢复。组件用于归类问题，代码目录可以根据项目调整。
 
-## 这一栏的理念
+## 一、这一栏的理念 {/* #这一栏的理念 */}
 
 MVC 主要组织请求、业务调用和展示之间的职责；DDD 主要组织领域语言、业务规则、不变量和状态变更。它们解决的是确定性业务系统如何被正确实现和维护。Agent 系统仍然需要这些传统架构承载业务内核，只是在其上增加了一个模型决策闭环：
 
@@ -41,7 +57,7 @@ Agent 应用则要持续处理模型参与决策带来的不确定性：
 
 Agent 工程技巧覆盖 Prompt 之外的完整运行时。Prompt 影响模型的行为倾向；状态、上下文视图、决策协议、工具治理、恢复机制和验收证据决定这些行为如何进入可控的任务流程。
 
-### Harness：模型决策的运行时控制面
+### 1. Harness：模型决策的运行时控制面 {/* #harness模型决策的运行时控制面 */}
 
 Harness 围绕一个或多个模型组织任务、状态、模型视图、决策、能力和反馈，负责让模型能力持续运行在确定性的约束中。
 
@@ -72,7 +88,7 @@ Harness 围绕一个或多个模型组织任务、状态、模型视图、决策
 
 权限、审计、资源上限和安全规则应保持在受控边界内，策略更新不能绕过这些约束。Harness 的复杂度随着模型可承担的任务范围扩大而增长，核心目标始终是让模型决策可编排、可约束、可验证、可持续运行。
 
-## 模型决策闭环
+## 二、模型决策闭环 {/* #模型决策闭环 */}
 
 本栏按一次任务运行时的主要边界组织内容：
 
@@ -106,9 +122,27 @@ Task → State → View → Decision → Action → Observation
 | 工具越权、写操作不可追踪、结果没有后置验证 | `Action` |
 | 工具返回失败但下一轮仍把它当成功、问题无法回放 | `Observation` |
 
-## 组件总览
+## 三、组件总览 {/* #组件总览 */}
 
-### Task：任务合同与输入路由
+下面按组件介绍职责。需要处理具体故障时，可以直接从对应问题进入：
+
+| 当前问题 | 阅读入口 | 重点核对 |
+| --- | --- | --- |
+| 重启后重复执行，或外部成功但本地无记录 | [状态与恢复](./02-state/agent-state-architecture.md) | 动作登记、未知结果对账、恢复前重新校验 |
+| 新消息已经发送，任务却仍按旧方向执行 | [运行中干预](./04-decision/agent-runtime-intervention.md) | 消息目标、进入调用的边界与取消收尾 |
+| 新事故一直沿着旧事故的根因调查 | [会话续接与分支](./02-state/agent-session-branching.md) | 历史继承范围、任务归属与现场刷新 |
+| 同一种问题已经纠正，新任务仍然再犯 | [项目规则](./03-view/agent-project-rules.md)与[经验提炼](./03-view/agent-skill-design.md#从案例中分离方法与旧答案) | 稳定要求、加载范围与独立任务验证 |
+| 任务反复重排，子任务费用失控 | [Agent Loop](./04-decision/agent-brain.md) | 计划失效范围、真实进度、共享预算和取消收尾 |
+| 参数格式正确，却修改了错误资源 | [工具执行](./05-action/agent-tool-calling.md) | 实体归属、业务前置条件与后置验收 |
+| 已批准的动作在恢复后发生变化 | [人机协作](./04-decision/agent-human-in-the-loop.md) | 动作快照、请求去重、资源版本与审批过期 |
+| 检索遗漏关键限制，旧记忆反复影响决策 | [RAG](./03-view/rag-engineering.md)、[记忆设计](./03-view/agent-memory-design.md) | 约束读取、冲突范围、替代与删除 |
+| 多个 Agent 消息隔离，却覆盖同一份数据 | [多 Agent 协作](./04-decision/agent-multi-agent-orchestration.md) | 资源隔离、单一写入者与版本条件提交 |
+| 请求全部成功，但业务没有完成 | [证据与反馈](./06-observation/agent-observability.md) | 调用结果、业务终态、状态提交分别记录 |
+| 改完策略后不知道是否退化 | [Agent 评测](./06-observation/agent-evaluation.md)与[评测题构造](./06-observation/agent-eval-environment-design.md) | 固定响应测试、事故回放、逐题差异和发布门禁 |
+
+这些入口按同一问题的主要责任归类。方法文章提炼选择依据和验收条件，文中的源码链接用于核对具体框架提供了哪些保证，以及应用仍需补齐什么。
+
+### 1. Task：任务合同与输入路由 {/* #task任务合同与输入路由 */}
 
 Task 把开放输入变成后续组件可以共同消费的任务合同，至少包括目标、参数、约束、风险、成功条件和当前运行模式。
 
@@ -123,7 +157,7 @@ Task 收敛“这次要解决什么、还缺什么、应该进入哪种运行模
 
 文章：[任务合同与输入路由](pathname:///notes/agent-system-design/task/agent-intent-recognition)
 
-### State：贯穿闭环的事实底座
+### 2. State：贯穿闭环的事实底座 {/* #state贯穿闭环的事实底座 */}
 
 State 保存模型无法可靠记住、但系统必须持续信任的内容：任务事实、运行进度、共享变量、状态版本、来源和有效期。
 
@@ -134,13 +168,15 @@ State 保存模型无法可靠记住、但系统必须持续信任的内容：�
 - 面向交互的响应式状态，服务界面和用户反馈；
 - 派生视图与缓存，用于加速读取，不能替代事实来源。
 
-State 负责事实、版本和共享变量；View 负责把这些事实转换成模型可消费的内容；Observation 负责把外部结果归并回 State。
+State 负责事实、版本和共享变量，也保存恢复所需的动作身份、预算和审批现场；View 将有效事实转换成模型输入；Observation 将外部结果归并回 State。恢复时先对账未知动作，再重新检查授权与外部状态，不能只加载旧消息后直接继续执行。
 
 文章：
 
 - [Agent 状态：事实、进度与共享变量](pathname:///notes/agent-system-design/state/agent-state-architecture)
+- [会话续接与分支：让历史经验留在正确的任务里](./02-state/agent-session-branching.md)
+- [长任务的进度与失败经验：怎样保存、恢复和复用](./02-state/agent-progress-and-failure-records.md)
 
-### View：模型上下文与知识视图
+### 3. View：模型上下文与知识视图 {/* #view模型上下文与知识视图 */}
 
 View 决定本轮模型真正看到什么。它根据任务阶段、权限、预算和证据来源构建最小充分上下文，并从原始事实中生成当前调用所需的内容。
 
@@ -156,21 +192,23 @@ View 关注：
 
 View 下的文章按三组组织：
 
-#### 上下文管理
+#### 上下文管理 {/* #上下文管理 */}
 
 处理当前模型调用的输入组成、阶段可见性、预算和缓存。
 
 - [上下文装配](pathname:///notes/agent-system-design/view/agent-context-management)
 - [上下文压缩与外部化](pathname:///notes/agent-system-design/view/agent-context-compression)
+- [证据进入上下文：渐进发现与多模态核验](./03-view/agent-evidence-intake.md)
 
-#### 记忆与程序性经验
+#### 记忆与程序性经验 {/* #记忆与程序性经验 */}
 
 处理跨轮次保留的事实，以及按任务激活的工作方法。
 
 - [记忆设计](pathname:///notes/agent-system-design/view/agent-memory-design)
+- [项目规则：让一次纠正持续影响后续任务](./03-view/agent-project-rules.md)
 - [Skill 激活与经验封装](pathname:///notes/agent-system-design/view/agent-skill-design)
 
-#### 外部知识
+#### 外部知识 {/* #外部知识 */}
 
 处理模型需要的领域证据、结构化关系和可维护知识资产。
 
@@ -189,7 +227,7 @@ View 下的文章按三组组织：
 → 知识编译
 ```
 
-### Decision：控制平面与决策内核
+### 4. Decision：控制平面与决策内核 {/* #decision控制平面与决策内核 */}
 
 Decision 负责推进任务，统一处理确定性流程和模型提案：
 
@@ -207,14 +245,18 @@ Decision 负责推进任务，统一处理确定性流程和模型提案：
 
 思考链或其他 Prompt 技巧只能影响模型如何提出决策，不能替代权限检查、终止条件、状态机和结果验收。
 
+长任务还需要管理计划依赖和局部失效；并发任务需要调用前预留、调用后结算的共享预算。停止循环之后，执行端仍要处理已提交动作与子任务，保留尚未确认的副作用。
+
 文章：
 
 - [控制平面](pathname:///notes/agent-system-design/decision/agent-vs-workflow-architecture)
 - [决策内核](pathname:///notes/agent-system-design/decision/agent-brain)
 - [人机协作：澄清、审批与接管](pathname:///notes/agent-system-design/decision/agent-human-in-the-loop)
+- [运行中干预：排队、转向、中断与停止](./04-decision/agent-runtime-intervention.md)
+- [Agent 推理设计：路由、证据与假设验证](./04-decision/agent-reasoning-budget-and-hypotheses.md)
 - [多 Agent 协作：主控-子 Agent、同步/异步与 Agent Team](pathname:///notes/agent-system-design/decision/agent-multi-agent-orchestration)
 
-### Action：能力、权限与执行空间
+### 5. Action：能力、权限与执行空间 {/* #action能力权限与执行空间 */}
 
 Action 把模型提出的动作变成真实执行，但模型不能直接获得任意副作用。执行前后都需要确定性边界：
 
@@ -232,10 +274,12 @@ Task 决定任务目标，Action 负责“能不能做、在哪里做、怎么�
 - [工具执行](pathname:///notes/agent-system-design/action/agent-tool-calling)
 - [权限、审批与结果验收](pathname:///notes/agent-system-design/action/agent-permission-and-postconditions)
 - [Agent 操作空间：沙箱、工作区与资源边界](pathname:///notes/agent-system-design/action/agent-workspace-sandbox)
+- [计划与工件契约：按依赖执行、在局部恢复](./05-action/agent-plan-contracts.md)
+- [影响范围与渐进授权：限制累计效果，按证据放权](./05-action/agent-risk-budget-and-autonomy.md)
 - [跨进程能力适配：MCP](pathname:///notes/agent-system-design/action/agent-mcp)
 - [能力适配与扩展隔离](pathname:///notes/agent-system-design/action/agent-provider-extension)
 
-### Observation：外部事实与反馈回流
+### 6. Observation：外部事实与反馈回流 {/* #observation外部事实与反馈回流 */}
 
 Observation 汇总动作和外部世界返回的事实，把成功、失败、部分完成、审批结果、用户反馈和外部变化统一成下一轮可以消费的结果或状态更新。
 
@@ -246,13 +290,44 @@ Observation 汇总动作和外部世界返回的事实，把成功、失败、�
 
 没有 Observation，模型只能重复上一轮的假设；没有可回放的 Observation，工程师也无法判断问题发生在上下文、决策、工具还是状态恢复。
 
+观测记录要区分模型提案、真实执行、业务验收和状态持久化，并将子任务费用归集到同一任务。评测则分别检查确定性的运行时边界和真实模型的任务效果；固定旧响应的回放不能替代新策略评估，进程退出成功也不能替代发布质量门禁。
+
 文章：
 
 - [证据与反馈](pathname:///notes/agent-system-design/observation/agent-observability)
 - [Agent 评测](pathname:///notes/agent-system-design/observation/agent-evaluation)
+- [Agent 评审与自愈：绑定版本、独立验收、有界修复](./06-observation/agent-review-repair-loop.md)
+- [评测题构造：共享规格、单题规格与运行校准](./06-observation/agent-eval-environment-design.md)
+- [Web Agent 断线后如何继续：事件序号、持久化与快照](./06-observation/web-agent-event-recovery.md)
 - [知识视图专项：RAG 评测](pathname:///notes/agent-system-design/observation/rag-evaluation)
 
-## 建议阅读顺序
+
+## 四、从模块原理走到框架定制 {/* #从模块原理到框架定制 */}
+
+### 1. 按要控制的行为选择扩展位置 {/* #1-按要控制的行为选择扩展位置 */}
+
+常规的模型与工具循环可以从 LangChain 的 `create_agent()` 开始；必须固定阶段、分支和汇合时，用 LangGraph 的 `StateGraph` 显式组织流程；需要文件工作区、计划与委派能力时，检查 Deep Agents 的 `create_deep_agent()` 已提供哪些组件，再补业务扩展。三者的选择取决于需要控制的行为，不要求每个模块分别实现三遍。
+
+| 模块 | 主要框架入口 | 业务需要补齐的内容 |
+| --- | --- | --- |
+| [状态](./02-state/agent-state-architecture.md#框架接入与状态定制) | State schema、reducer、checkpointer、Store | 状态所有权、执行身份、外部动作对账 |
+| [上下文](./03-view/agent-context-management.md#框架中的上下文装配)与[压缩](./03-view/agent-context-compression.md#框架中的压缩定制) | 动态提示词、模型调用中间件、摘要中间件 | 阶段视图、证据版本、压缩后约束完整性 |
+| [记忆](./03-view/agent-memory-design.md#框架中的记忆接入)与[Skill](./03-view/agent-skill-design.md#框架中的-skill-接入) | Store、Backend 路由、记忆文件和 Skill 来源 | 范围隔离、写入确认、版本发布与撤回 |
+| [RAG](./03-view/rag-engineering.md#框架中的检索接入) | Retriever、检索节点或工具 | 访问过滤、证据覆盖、版本与引用校验 |
+| [循环](./04-decision/agent-brain.md#框架中的循环定制)与[多代理](./04-decision/agent-multi-agent-orchestration.md#框架中的多代理定制) | 调用限次、图节点、子代理配置 | 真实进展、共享预算、交接与失败传播 |
+| [人工介入](./04-decision/agent-human-in-the-loop.md#框架中的审批接入) | 审批中间件、图中断与恢复 | 审批身份、绑定对象、过期与重放保护 |
+| [工具](./05-action/agent-tool-calling.md#框架中的工具定制)与[权限](./05-action/agent-permission-and-postconditions.md#框架中的权限定制) | 工具 schema、运行时注入、执行中间件 | 资源授权、幂等、原子变更和后置条件 |
+| [评测](./06-observation/agent-evaluation.md#框架接入后的评测方法)与[观测](./06-observation/agent-observability.md#框架中的观测接入) | 测试模型、评测报告、事件流和回调 | 业务通过标准、因果关联与发布门禁 |
+
+配置能表达的需求直接配置；跨工具共用的调用治理放进中间件；必经步骤放进图；数据库不变量、资源授权和幂等留在业务服务。以文档发布为例：Skill 描述编辑方法，中间件筛选阶段工具，图要求先检查再审批，发布服务保证同一个动作不会重复创建版本。
+
+### 2. 核对源码基线，再适配自己的项目 {/* #2-核对源码基线再适配自己的项目 */}
+
+框架用法主要依据 LangChain 1.3.7、LangChain Core 1.4.6、LangGraph 1.2.10，以及声明为 Deep Agents 0.6.12 的源码快照。它们是阅读基线，不是一份已验证兼容的安装清单。Deep Agents 快照与同版本分发包可能不同，部分能力还依赖更高版本的下层组件，具体见[源码版本约定](../../application-notes/engineering/langchain-series/deepagents/source-baseline.md)。
+
+文章中的核心片段标明真实文件与函数；测试节选用于说明接口或行为，不冒充完整生产应用。迁移到自己的项目时，核对已安装版本的签名、默认值、中间件顺序和返回结构，并运行对应业务验收用例。
+
+## 五、建议阅读顺序 {/* #建议阅读顺序 */}
 
 按一次任务运行来阅读，比按某个框架的源码目录阅读更容易建立整体判断：
 

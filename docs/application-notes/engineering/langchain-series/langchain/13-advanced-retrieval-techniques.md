@@ -6,7 +6,9 @@ description: 从 MultiQuery、Ensemble、MMR、父子文档与压缩检索器的
 
 # LangChain 源码解析 13：RAG 高级检索技术
 
-## 一、源码定位
+> 固定提交与已阅读测试见[源码基线](source-baseline.md)。
+
+**源码定位**
 
 > **阅读基线**：langchain 1.3.7、langchain-core 1.4.6、langchain-classic 1.0.8、langchain-text-splitters 1.1.2；仓库快照 `76c32db9b38dfc287c958dc2a914d4834f022c1c`。路径均相对 LangChain 仓库根目录。
 >
@@ -19,7 +21,7 @@ description: 从 MultiQuery、Ensemble、MMR、父子文档与压缩检索器的
 > - 子片段命中后回查父文档：`libs/langchain/langchain_classic/retrievers/multi_vector.py` → MultiVectorRetriever._get_relevant_documents。
 > - 查询相关压缩：`libs/langchain/langchain_classic/retrievers/contextual_compression.py` → ContextualCompressionRetriever._get_relevant_documents。
 
-## 二、从失败位置选择检索机制
+## 一、从失败位置选择检索机制
 
 “没找到能回答问题的证据”至少有几种原因：查询表述与资料不同、不同检索方式命中不同材料、候选过于重复、小片段缺少前提，或者相关材料被无关内容淹没。增加同一种检索的 k 不会同时解决这些问题。
 
@@ -33,7 +35,7 @@ description: 从 MultiQuery、Ensemble、MMR、父子文档与压缩检索器的
 | ParentDocument | 小片段检索、大文档返回 | 两个存储之间的一致性 |
 | ContextualCompression | 根据原问题处理候选文档 | 上游完全没有召回的证据 |
 
-## 三、MultiQuery：逐条查询，然后合并文档
+## 二、MultiQuery：逐条查询，然后合并文档
 
 MultiQueryRetriever 先让模型生成多个查询，再分别调用同一个检索器。同步入口的核心如下，省略函数签名：
 
@@ -66,7 +68,7 @@ return [doc for docs in document_lists for doc in docs]
 
 unique_union 根据 Document 对象相等性去重，不是截取正文前 100 个字符；相同文本但 metadata 或 ID 不同的文档可能仍保留。合并保持首次出现顺序，也不是重排。异步并行减少等待，但这段 gather 本身没有设置并发限额，生成查询很多时应控制扇出量。
 
-## 四、Ensemble：按排名融合，按标识去重
+## 三、Ensemble：按排名融合，按标识去重
 
 EnsembleRetriever 将多个检索器的有序结果交给加权倒数排名融合（RRF）。例如关键词通道命中精确型号，向量通道命中语义近似条款，两者的原始分数不必处于相同尺度。
 
@@ -89,7 +91,7 @@ for doc_list, weight in zip(doc_lists, self.weights, strict=False):
 
 默认用完整正文作键，跨来源相同文本会合并；设置 id_key 后从 metadata 取该键，并非自动使用 Document.id。各通道需要使用一致且存在的文档标识。RRF 消除了直接比较原始分数的需要，却仍受权重、候选数和通道质量影响，不能保证融合必然优于任一单通道。
 
-## 五、MMR：先取候选，再贪心选择不重复的证据
+## 四、MMR：先取候选，再贪心选择不重复的证据
 
 MMR（最大边际相关性）在候选池内兼顾问题相关性与已选结果的相似程度。InMemoryVectorStore 先通过普通相似度搜索取 fetch_k 个候选，再调用 maximal_marginal_relevance 选最多 k 项。
 
@@ -111,7 +113,7 @@ InMemoryVectorStore 的初始搜索对通过过滤的全部存储记录计算相
 
 过滤条件与 MMR 是不同职责。当前内存实现的 filter 是接收 Document 的函数，并在相似度计算前应用；不能直接照搬某个外部向量库的字典过滤语法。租户与版本等业务条件还要覆盖后续父文档回查，避免只过滤小片段却返回了不应可见的父正文。
 
-## 六、ParentDocument：子片段进向量库，父文档进文档存储
+## 五、ParentDocument：子片段进向量库，父文档进文档存储
 
 ParentDocumentRetriever 继承 MultiVectorRetriever，用小片段匹配查询，再按父 ID 回查完整上下文。它不要求父子两份内容都进入向量库。
 
@@ -144,7 +146,7 @@ return [d for d in docs if d is not None]
 
 父文档缺失时被过滤，不会自动重建；多个子片段属于同一父文档时只回传一份，所以检索 k 个子片段不等于返回 k 份父文档。回查后的文本可能显著变长，送模型前还要检查证据范围与总长度。
 
-## 七、压缩与重排：把原问题继续传给候选处理器
+## 六、压缩与重排：把原问题继续传给候选处理器
 
 ContextualCompressionRetriever 先调用 base_retriever，再把候选和同一个 query 交给 base_compressor。下面摘录非空结果分支：
 
@@ -163,7 +165,7 @@ return []
 
 这个包装器的重要交接点是 query 没有丢失。只把检索结果列表传给一个固定问题的过滤函数，会让不同用户问题共用错误判据。压缩后还应保留来源和必要前提，避免删除否定词、限制条件或引用信息。
 
-## 八、用证据标识比较每一步的收益
+## 七、用证据标识比较每一步的收益
 
 评估应将原始问题、可接受证据 ID、文档版本与权限范围绑定。改变切分方式后，同一证据可能对应不同 chunk_id，比较前需要明确是按切片、父文档还是原始条款标注。
 

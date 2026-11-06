@@ -18,7 +18,7 @@
 
 环境要求：
 
-- Node.js `18+`，建议使用 `20`
+- Node.js `22.12+`，建议使用 `24`（与部署环境一致）
 
 启动方式：
 
@@ -37,6 +37,12 @@ npm run clear   # 清理 Docusaurus 缓存
 ```
 
 ## 部署说明
+
+Mermaid 图表在 Markdown 编译阶段预渲染成 SVG，读者浏览器只展示和缩放，不再运行布局引擎。文章仍直接编写 Mermaid 代码块，开发预览和发布共用同一流程。
+
+首次安装依赖时 Puppeteer 会下载用于生成图表的 Chrome；若安装时跳过了下载，可运行 `npx puppeteer browsers install chrome`。Linux 环境需要浏览器系统依赖，部署工作流已配置安装。离线环境可通过 `PUPPETEER_EXECUTABLE_PATH` 指定兼容的本地 Chrome。
+
+生成结果缓存在 `node_modules/.cache/mermaid-svg/`，内容、生成逻辑、字体或依赖版本变化后自动重新生成；图表语法错误会在编译时报告文章位置。预渲染使用本地 Noto Sans SC 字体，显示时加载同一字体，保留主题配色及作者指定的语义颜色。
 
 这个站点使用 Docusaurus 构建，并通过 GitHub Actions 部署到 GitHub Pages。
 

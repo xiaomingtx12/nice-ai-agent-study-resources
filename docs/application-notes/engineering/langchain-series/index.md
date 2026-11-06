@@ -12,6 +12,8 @@ description: 自底向上拆解 LangGraph 图状态机、LangChain 最小 Agent 
 本系列不是横向罗列三个框架的功能，而是沿 **LangGraph 运行时 → LangChain 最小 Agent 框架 → Deep Agents Harness 预置套件**，观察工程能力如何逐层封装。
 :::
 
+熟悉 Spring 的读者，可以先读 [写过 Spring，如何理解 LangChain、LangGraph 和 Deep Agents](./ecosystem-through-spring.md)：从已有退货服务怎样供 Agent 使用讲起，借助接口、组件组合和拦截器经验理解 LangChain，再通过审批恢复与材料整理需求理解 LangGraph 和 Deep Agents。
+
 ## 一、为什么从底层向上读源码
 
 手写一个“模型调用工具再继续推理”的循环并不难。复杂 Agent 的成本主要来自循环之外：状态如何合并、工具如何授权、上下文如何装配、长历史如何压缩、外部能力如何接入、子 Agent 如何隔离。
@@ -30,17 +32,18 @@ description: 自底向上拆解 LangGraph 图状态机、LangChain 最小 Agent 
 
 **目标：理解图 API 的用法和内部运行机制。**
 
-1. [项目总览与仓库结构](./langgraph/00-project-overview-and-repository-structure.md)：先分清 core Runtime、checkpoint、prebuilt、SDK 与 CLI 的包边界，再固定 `StateGraph → Pregel` 主调用链。
-2. [State Schema、Channel 与 Reducer](./langgraph/01-state-schema-channels-and-reducers.md)：状态字段如何定义更新协议；并行节点更新同字段时为何合并或报错。
-3. [StateGraph Builder 与编译](./langgraph/02-stategraph-builder-and-compilation.md)：Builder 怎样收集节点和边，编译图怎样降低为 PregelNode、Channel、writer 与 barrier。
-4. [Pregel 调度与执行轮次](./langgraph/03-pregel-supersteps-and-scheduling.md)：task 怎样按 step 调度、并发运行与统一提交；同时区分图 task、ToolNode 与工具内部的三层并行。
-5. [Send 与 Command：动态派发与控制信号](./langgraph/04-dynamic-routing-and-send.md)：Send 与 Command 如何更新状态、动态派发任务和跨图返回控制。
-6. [子图：流程复用与状态边界](./langgraph/05-subgraphs-and-cross-graph-control.md)：编译后的子图如何接入父图，父子状态边界与事件命名空间如何划分。
-7. [执行历史：保存、恢复与分叉](./langgraph/06-checkpoints-store-and-recovery.md)：thread、checkpoint、Store 的责任边界，以及 resume、replay、fork 的恢复路径。
-8. [暂停、恢复与 interrupt](./langgraph/07-interrupts-and-command.md)：人工输入如何暂停和续跑，恢复值如何交还给正确任务。
-9. [流式输出与事件系统](./langgraph/08-stream-system.md)：七种 StreamMode 如何把状态、消息和自定义事件逐层流出。
-10. [Prebuilt 工具执行层](./langgraph/09-prebuilt-tool-layer.md)：ToolNode、注入机制与 tools_condition 如何建立在 core Runtime 之上。
-11. [Func API 函数式工作流](./langgraph/10-func-api-entrypoint-and-task.md)：@entrypoint 与 @task 如何用函数语法替代显式 StateGraph。
+1. [00 项目总览与执行主线](./langgraph/00-project-overview-and-repository-structure.md)：先看输入、图编译、节点执行和轮次提交如何串成一次调用。
+2. [01 状态、通道与归并](./langgraph/01-state-schema-channels-and-reducers.md)：字段如何选择更新规则，并行写入为何合并或报错。
+3. [02 节点与边的编译](./langgraph/02-stategraph-builder-and-compilation.md)：节点声明怎样转换为输入、写入器和触发关系。
+4. [03 执行循环与轮次提交](./langgraph/03-pregel-supersteps-and-scheduling.md)：下一轮运行哪些任务，状态何时可见，协作式停止如何收尾。
+5. [04 任务执行、重试与取消](./langgraph/04-pregel-task-execution.md)：Runner 怎样并发执行任务、处理超时重试并清理取消。
+6. [05 Send 与动态控制流](./langgraph/05-dynamic-routing-and-send.md)：动态派发如何创建独立输入的任务，并将结果归入共享状态。
+7. [06 Thread、检查点与恢复](./langgraph/06-checkpoints-store-and-recovery.md)：thread 如何关联多次调用并隔离状态，检查点怎样支持继续、恢复与分叉。
+8. [07 中断与恢复协议](./langgraph/07-interrupts-and-command.md)：人工输入如何暂停执行，恢复值怎样交还给正确任务。
+9. [08 子图与跨图控制](./langgraph/08-subgraphs-and-cross-graph-control.md)：父子图怎样划分状态、恢复现场和控制传播边界。
+10. [09 流式输出与事件](./langgraph/09-stream-system.md)：状态、消息和自定义事件怎样流出，事件消费如何影响执行生命周期。
+11. [10 扩展：函数式工作流](./langgraph/10-func-api-entrypoint-and-task.md)：`@entrypoint` 与 `@task` 如何接入 Pregel 的任务执行和恢复机制。
+12. [11 扩展：工具执行与参数注入](./langgraph/11-prebuilt-tool-layer.md)：ToolNode 如何注入可信参数、调用工具并返回消息或控制对象。
 
 工程定位：LangGraph 位于最底层，抽象最浅、灵活性最高；Agent loop、工具权限、上下文治理和多 Agent 策略通常仍需自行装配。
 

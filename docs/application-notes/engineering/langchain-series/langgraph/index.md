@@ -6,84 +6,97 @@ description: 沿状态声明、图编译、任务调度、持久化和事件输�
 
 # LangGraph 源码解析：从字段更新到可恢复执行
 
-LangGraph 将节点输出转换成写入，在轮次边界合并状态，再根据触发通道准备下一批任务。检查点保存轮次现场，任务写入记录保存已完成工作，二者共同支持暂停、失败恢复和历史重放。运行中的控制还分为等待人工输入、当前轮次收尾后停止，以及取消正在执行的任务，各自拥有不同的退出和恢复边界。
+本系列面向已经会用 `StateGraph`、`compile()`、`invoke()`，希望理解 LangGraph 内部核心实现与原理的读者。正文从具体输入和节点返回值出发，解释框架怎样构造任务、合并状态、调度下游，再展开并发、恢复和流式输出。读者无需打开源码仓库，也能在文章中理解这些机制及其使用边界。
 
-本系列沿这些真实执行过程解释核心实现。每篇头部保留相对于 LangGraph 仓库根目录的路径与函数入口，正文中的源码保留原始语句，只翻译注释并标明省略。应用示例与执行数据推演另行标注，避免把说明代码当成框架实现。
+内部名字在具体问题中引入，首次出现时说明它是什么、处理什么数据、怎样与上下游衔接。核心实现直接摘录在正文中，配合中文注释、状态变化和调用关系解释；应用示例与框架源码分开标明。每篇头部的相对路径和入口函数供读者按需查阅原实现，正文承担完整的机制讲解。
 
-## 源码基线
+系列采用同一条业务阅读线：**并行整理材料 → 合并报告 → 失败后恢复 → 人工确认 → 交付结果。** 00 说明各环节；01、03 跟踪同一批更新，04、06 跟踪任务失败与恢复，07、09 分别解释审批和界面事件。05 把固定两项处理扩展为动态数量，08、10、11 再进入子图、函数式入口和工具层。
 
-分析项目为 **LangGraph Python monorepo**。本系列对应源码树声明的 `langgraph 1.2.10`、`langgraph-prebuilt 1.1.0`、`langgraph-checkpoint 4.1.1`；分析目录为 `D:/open_code/ai-native/langgraph-main`。
+业务线是说明性推演，各篇保留可独立理解的小例子。真实框架片段与仓库测试另行标注；未把组合后的完整流程描述成本次已运行的示范。
 
-该副本不含 Git 元数据，**commit 未知**。包版本来自各自 `pyproject.toml`，不据此保证内容与同名发布 tag 完全一致。以下文件 SHA-256 指纹记录本文引用的具体实现；行号仅对这份副本有效，阅读其他版本时应优先按函数名定位。
+## 一、源码基线
 
-<details>
-<summary>展开源码文件指纹</summary>
+分析项目为 **LangGraph Python monorepo**。本系列对应源码树声明的 `langgraph 1.2.10`、`langgraph-prebuilt 1.1.0`、`langgraph-checkpoint 4.1.1`。本地快照不含 Git 元数据，无法确认 commit；文中的文件、函数和行号均以该快照为准。[源码基线与证据索引](./source-baseline.md)记录核对日期、关键文件 SHA-256 和已阅读的测试断言，用来识别这份具体快照。
 
-| 相对路径 | SHA-256 |
-| --- | --- |
-| `libs/langgraph/pyproject.toml` | `0e56b26bc402b863133dae89e52e4ff47bdf551f9e381dd7db0c4c192897cac3` |
-| `libs/prebuilt/pyproject.toml` | `700afe262e07a0301190d07c6ff85ae03e1fd1aee2b04b52ac174f507217c0dd` |
-| `libs/checkpoint/pyproject.toml` | `8dd841e77d1c33fc2dbbc6dadf35b0a167d4ec9f6a10818ee144be6347032de6` |
-| `libs/checkpoint/langgraph/checkpoint/base/__init__.py` | `d29511015e2801630f6580353c107104d4ecc86e4bd14e15cd54e2b861a48e26` |
-| `libs/langgraph/langgraph/_internal/_config.py` | `a0f8b4533ab09aeeb7b477d47e4e9a69a47d03abf0de0909c087bc2aabe1e00e` |
-| `libs/langgraph/langgraph/channels/binop.py` | `85dbe7cdd3cea5f2973dbf3f358ad04c61c7b8dad5dc74a579739aa328a1b54e` |
-| `libs/langgraph/langgraph/channels/delta.py` | `c7de0e212055fcbc6508ef39fa6080653f9e7d25554c093b1507970feca03435` |
-| `libs/langgraph/langgraph/channels/last_value.py` | `36cbc586aeaac0f8c9b5a8d8b903039023a7d24294408391eb8c7f10aab3a308` |
-| `libs/langgraph/langgraph/channels/untracked_value.py` | `ea15573ce7899269b75b4aa81dec04a08a5efc7b0887d64bb8ff9810155aafee` |
-| `libs/langgraph/langgraph/func/__init__.py` | `f07e4a9f9bac75e2b48ac987fb91ca8c13a0a3d40723aa1997840bcde56732b7` |
-| `libs/langgraph/langgraph/graph/message.py` | `c811816a1367cd2af060a46724dbd2802ccd7c25f5d94f1d9c0dd127092be6e8` |
-| `libs/langgraph/langgraph/graph/state.py` | `39712e49133f2bf31ab607ac551761d396ecdbcd1ffdde1c3e0812537ddd4e6e` |
-| `libs/langgraph/langgraph/pregel/_algo.py` | `29d54dc6704e4e4a0385d36317faa74f4fa2ceefd6836aca03f1938b9fa51fa5` |
-| `libs/langgraph/langgraph/pregel/_call.py` | `38aa434fc1624e4e2e9140729b8b750f78cd17012620fcb33458a63585e8793d` |
-| `libs/langgraph/langgraph/pregel/_loop.py` | `33150cf70fc08fd01affeae0345aa20569d2705704e3d209733d9c7b43dd5c0a` |
-| `libs/langgraph/langgraph/pregel/_retry.py` | `667a74090e23fda724e74ad377586e32325510cdd9042d320d60306f783f0a9d` |
-| `libs/langgraph/langgraph/pregel/_runner.py` | `316cf133c724163a18ef279322615588b3fa8b96e359289a7cadea90f0df7622` |
-| `libs/langgraph/langgraph/pregel/main.py` | `02651dc9471b88f9299d12f6d836e67ad1114ad84498b9ae26df6cd75be8592c` |
-| `libs/langgraph/langgraph/stream/run_stream.py` | `bd96e3964931e59373c7923f3b42024cf15249686ea6c106ac8ec6d54a11263b` |
-| `libs/langgraph/langgraph/types.py` | `8ba8895d3c1aec51e5ef24d09d983031f52c32939876fd5c63b92fabbb1a1fee` |
-| `libs/prebuilt/langgraph/prebuilt/tool_node.py` | `3c6380e257718a0e2753d7ae890bfcbf9edfe0f726f32a7b844f96630bf363a4` |
-| `libs/langgraph/langgraph/runtime.py` | `5a5e3aad147f67397481ea47c67cde97938d85b5762a7aa4d4ce511dcd693c42` |
-| `libs/langgraph/langgraph/pregel/_executor.py` | `5afb1e7e7bd768fc5ff7ed5e222539abb73bd11f88d8e150eb75c30a8484364d` |
-| `libs/langgraph/langgraph/errors.py` | `545e23178efd6159db1dd11c79411103f809b469cea1fa2f92360f61565f00a0` |
+源码引用中的 `libs/...` 均相对于 LangGraph 源码仓库根目录。头部列出本篇涉及的文件与入口，具体片段旁标明函数、行号及省略范围，便于需要时核对上下文。
 
-</details>
+## 二、从熟悉的 API 理解内部执行
 
-## 一、先建立一条完整执行链
+先读 [00 总览](./00-project-overview-and-repository-structure.md)中的加一例子，跟着 `count=0` 走到 `count=1`。第一次阅读只需要回答三个问题：编译时配好了什么，调用时谁执行 increment，返回更新何时进入状态。
 
 ```text
-StateGraph：声明字段、节点与边
-  → compile：安装通道、触发关系和输出写入器
-  → invoke / stream：创建本次运行
-  → Loop：读取检查点或输入，准备任务
-  → Runner：执行任务，暂存并记录写入
-  → apply_writes：归并字段、推进通道版本
-  → 保存检查点，准备下一轮或返回结果
+StateGraph / add_node / add_edge：记录字段、函数和先后关系
+  → compile：装配成可执行的 graph，此时还不调用业务函数
+  → invoke：接收本次输入，准备并执行节点调用
+  → 合并节点返回的更新，再准备下一批调用或返回结果
 ```
 
-State（状态）是节点读取和更新的业务数据；Channel（通道）保存一个字段或控制信号；reducer（归并函数）规定多份更新怎样合成新值；task 是某次节点调用的执行实例；superstep（超级步）是准备、执行和提交一批任务的轮次。
+读到内部名字时，用它对应回自己的代码。下面这些名字属于不同种类的东西，不是六个连续执行的步骤。
 
-例如两个检索节点同轮返回结果，Runner 可以先报告其中一个已经完成，但下游正常任务要等轮次提交后才能读到合并状态。如果另一个失败，已经保存的任务写入可在恢复时复用；这不等于外部 HTTP 请求获得“恰好一次”语义。
-
-## 二、文章地图
-
-| 文章 | 沿哪条实现链阅读 | 需要理解的边界 |
+| 内部名字 | 它是什么 | 对应到加一例子 |
 | --- | --- | --- |
-| [00 项目总览与执行主线](./00-project-overview-and-repository-structure.md) | 输入 → 隐藏 START → 节点 → 提交 → 返回 | 构建器、编译结果、运行实例 |
-| [01 State、Channel 与 Reducer](./01-state-schema-channels-and-reducers.md) | Schema → 通道选择 → 分组写入 → reducer | 并行覆盖、消息 ID、增量保存 |
-| [02 Builder 与编译](./02-stategraph-builder-and-compilation.md) | 节点登记 → 输入与 writers → 普通边、屏障、条件边 | 数据字段与触发信号，条件路由的局部视图 |
-| [03 Pregel 调度与提交](./03-pregel-supersteps-and-scheduling.md) | tick → 任务准备 → Runner → 重试或超时 → 结果提交 | 超时后的迟到写入，完成与持久保存的时间差 |
-| [04 Send 与 Command](./04-dynamic-routing-and-send.md) | 控制对象 → 通道写入 → 动态任务 → 共享状态 | 独立输入、静态边叠加、跨图命令 |
-| [05 子图与状态边界](./05-subgraphs-and-cross-graph-control.md) | 父任务 → 子图调用 → 子图输出 → 父图归并 | 状态映射、命名空间与恢复重跑 |
-| [06 检查点、恢复与分叉](./06-checkpoints-store-and-recovery.md) | 任务写入 → 检查点 → 加载 → 继续或重放 | durability、查询视图、Store 与副作用 |
-| [07 中断、停止与恢复](./07-interrupts-and-command.md) | interrupt / drain / 取消 → 执行边界 → 保存与恢复 | 人工暂停、停止按钮、取消传播与外部副作用 |
-| [08 流式输出与事件](./08-stream-system.md) | 事件产生 → 队列 → 投影消费 → abort 与清理 | 停止消费、关闭连接与停止执行的区别 |
-| [09 工具执行与参数注入](./09-prebuilt-tool-layer.md) | 输入解析 → 运行上下文 → 参数注入 → 调用 → 消息 | 错误转换、可信参数与工具恢复粒度 |
-| [10 函数式工作流](./10-func-api-entrypoint-and-task.md) | entrypoint → Pregel → task Future → 结果复用 | 调用顺序、previous 与缓存区别 |
+| `Pregel` | 提供图执行方法的基类 | 编译后的 graph 继承它，使用其 invoke / stream 逻辑 |
+| `Loop` | 管理一次图调用的状态与轮次的对象 | 决定什么时候调用 increment、什么时候合并 count 更新 |
+| `Runner` | 执行已准备任务的对象 | 真正调用 increment，记录它的返回或异常 |
+| `task` | 一次具体节点调用的记录 | increment 加上这次的输入 count=0，以及调用身份、结果记录 |
+| `attach_node()` | compile 使用的内部装配方法 | 配好 increment 的输入、触发条件和返回值处理方式 |
+| `EphemeralValue` | 没有新写入时清除旧值的临时通道 | 保存“可以运行 increment”的短暂信号，与长期保留的 count 分开 |
 
-初读按 00—03 建立执行模型，再按需要读控制流与子图（04—05）、持久化与中断停止（06—07）、观察与扩展层（08—10）。需要实现 Agent 停止按钮时，从第 07 篇区分控制语义，再结合第 03 篇理解超时与任务清理、第 06 篇判断进度能否恢复、第 08 篇处理流式连接和运行对象的退出。
+读前几篇时可以暂时把 Loop 读成“管理本次进度”，Runner 读成“执行这批调用”。需要对照源码时再使用完整类名，不必先把整个仓库的名字记下来。
 
-## 三、和 LangChain、Deep Agents 怎样衔接
+## 三、文章地图与阅读顺序
+
+正文共 **12 篇：1 篇总览、9 篇核心模块、2 篇扩展**，另有一页源码基线与证据索引。每篇围绕一项实现职责展开；涉及其他模块时，说明交接关系并链接到主讲文章。
+
+| 顺序 | 文章 | 集中解释的实现 | 需要理解的边界 |
+| --- | --- | --- | --- |
+| 总览 | [00 一次调用如何穿过图运行时](./00-project-overview-and-repository-structure.md) | 输入 → 隐藏 START → 节点 → 提交 → 返回 | 构建器、编译结果、运行实例 |
+| 核心 01 | [状态、通道与归并](./01-state-schema-channels-and-reducers.md) | Schema → 通道选择 → 更新分组 → reducer | 并行覆盖、消息 ID、增量保存、运行依赖 |
+| 核心 02 | [节点与边的编译](./02-stategraph-builder-and-compilation.md) | 节点登记 → 输入与 writers → 触发关系 | 数据字段、普通边、屏障与条件路由 |
+| 核心 03 | [执行循环与轮次提交](./03-pregel-supersteps-and-scheduling.md) | tick → 任务准备 → 执行交接 → after_tick | 状态与保存时序、缓存复用、协作式停止 |
+| 核心 04 | [任务执行、重试与取消](./04-pregel-task-execution.md) | Runner → 执行器 → 任务尝试 → 结果记录 | 并发、超时迟到写入、取消与恢复粒度 |
+| 核心 05 | [Send 与动态控制流](./05-dynamic-routing-and-send.md) | 控制写入 → TASKS → 独立任务 → 状态归并 | 独立输入、静态边叠加、动态汇合 |
+| 核心 06 | [Thread、检查点与恢复](./06-checkpoints-store-and-recovery.md) | thread_id → 历史查找 → 状态延续 → 保存与恢复 | 会话隔离、新输入与恢复、并发和历史生命周期 |
+| 核心 07 | [中断与恢复协议](./07-interrupts-and-command.md) | interrupt → 暂停记录 → resume 匹配 → 重跑 | 人工暂停、静态断点与停止语义 |
+| 核心 08 | [子图与跨图控制](./08-subgraphs-and-cross-graph-control.md) | 父任务 → 子图 → 恢复现场 → 父图写入 | 状态映射、命名空间与 Command.PARENT |
+| 核心 09 | [流式输出与事件](./09-stream-system.md) | 事件产生 → 队列 → 投影消费 → 退出清理 | 事件与状态提交、连接与执行生命周期 |
+| 扩展 10 | [函数式工作流](./10-func-api-entrypoint-and-task.md) | entrypoint → Pregel → task Future → 结果复用 | 调用顺序、previous 与缓存区别 |
+| 扩展 11 | [工具执行与参数注入](./11-prebuilt-tool-layer.md) | 输入解析 → 上下文注入 → 调用 → 消息或控制 | 错误转换、可信参数与工具恢复粒度 |
+
+初读按编号推进：00 建立整体调用链，01—05 解释状态、编译、执行和动态控制，06 从 thread 的多次调用与状态延续进入持久化，07—08 再解释恢复如何延伸到人工输入与嵌套图，09 再观察这些过程产生的事件。10、11 分别展示函数式入口和工具节点如何复用运行时，可按需要选读。
+
+调度与执行分开阅读：第 03 篇回答“下一轮运行谁、何时提交状态”，第 04 篇回答“任务怎样运行、失败怎样处理”。子图放在持久化和中断之后，避免在理解命名空间之前就讨论父子恢复重跑。
+
+### 1、按工程问题定位
+
+- **多轮会话与状态隔离**：06 看 thread、thread_id 与保存器怎样关联多次调用，并区分新输入、恢复和新建会话。
+- **并行更新冲突**：01 看归并规则，03 看提交时机，05 看动态任务的输入与输出。
+- **失败后重复调用工具**：04 看任务边界和错误处理器，06 看成功结果保存及仓库测试，11 区分工具节点内部并行与图任务并行。
+
+- **缓存命中与恢复复用**：03 看输入键和 ttl，06 看任务身份与历史；命中缓存不等于恢复原业务实例。
+
+- **用户身份与数据库连接放哪里**：01 文末区分 State、Runtime context、config 与 Store，并说明 context 依赖如何影响缓存。
+- **人工审批与子流程恢复**：06 → 07 → 08，依次确认现场、恢复值和父子调用身份。
+- **Agent 停止按钮**：03 看当前轮次收尾，04 看取消，06 确认保存边界，09 看事件连接。产品侧状态与确认原则集中到[运行中干预](../../../../notes/agent-system-design/04-decision/agent-runtime-intervention.md)，07 聚焦业务中断。
+
+## 四、和 LangChain、Deep Agents 怎样衔接
 
 LangGraph 负责运行图；LangChain 的 `create_agent()` 装配模型、工具和中间件形成的 Agent 图；Deep Agents 的 `create_deep_agent()` 在其上加入规划、文件和上下文管理等能力。
 
 例如“一次模型响应中的多个工具如何并行”涉及两个具体机制：ToolNode 可在一个节点任务内部使用执行器，也可以由上层路由用多个 Send 创建独立图任务。前者没有逐工具的图级结果恢复，后者可以按各 task ID 保留成功写入。要理解装配策略，可以接着读 [LangChain create_agent](../langchain/03-create-agent-assembly.md)；要理解框架提供的运行时边界，继续读本系列的调度与工具章节。
+
+## 五、阅读到什么程度，可以认为理解了运行时
+
+读完核心章节，应能沿一份具体数据回答以下问题，而不只是认出内部类名：
+
+- left 的返回值暂存在哪里，merge 何时能读到它？
+
+- right 失败后，为什么当前状态视图可能已经包含 left，而历史检查点仍没有？
+
+- 相同输入命中缓存，与使用原 thread 恢复，分别通过什么身份匹配？
+
+- approve 恢复时重跑哪些代码，恢复值何时才进入业务状态？
+
+- updates、values、检查点事件分别能证明什么，外部交付还需要什么确认？
+
+答案主线见 [03 的时序图](./03-pregel-supersteps-and-scheduling.md#result-timeline) 与 [06 的恢复测试](./06-checkpoints-store-and-recovery.md)。本次修订做了源码和静态文档核对，没有运行框架测试、模型或站点构建。

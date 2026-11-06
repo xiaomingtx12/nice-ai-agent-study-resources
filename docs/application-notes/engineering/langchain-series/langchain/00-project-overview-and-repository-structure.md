@@ -1,101 +1,143 @@
 ---
 sidebar_position: 2
-sidebar_label: 00 项目概览与仓库结构
-description: 从 LangChain monorepo 的包边界出发，分清 langchain-core、v1 Agent、Classic、文本切分器和服务商集成各自负责什么。
+sidebar_label: 00 一次 Agent 请求怎样完成
+description: 用订单与退货处理串起 LangChain 的模型决策、工具执行、审批、消息状态和结构化交付，再定位各层源码。
 ---
 
-# LangChain 源码解析 00：项目概览与仓库结构
+# LangChain 源码解析 00：一次 Agent 请求怎样完成
 
-## 一、源码定位
+LangChain 为应用提供模型、消息、工具与检索组件，并用 `create_agent()` 将它们组装成标准 Agent：模型根据请求和已有结果决定下一步，应用工具执行实际操作，中间件在指定位置加入检查与控制。
 
-> **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
-> 源码路径相对 LangChain 仓库根目录；版本与阅读路线见 [系列导读](index.md)。
+理解它的源码，可以从一项完整任务开始：**用户询问订单能否退货，并希望在符合条件时提交申请。** Agent 需要查询订单与政策，对写入操作取得人工决定，再返回处理结果。读清这条链路，才能判断模型回答、工具调用和业务完成分别发生在哪里。
 
-> - 发布包与版本：`libs/core/pyproject.toml`、`libs/langchain_v1/pyproject.toml`、`libs/langchain/pyproject.toml`
-> - 组合协议：`libs/core/langchain_core/runnables/base.py` → `Runnable`、`RunnableSequence`
-> - 标准 Agent 工厂：`libs/langchain_v1/langchain/agents/factory.py` → `create_agent()`
-> - 模型初始化：`libs/langchain_v1/langchain/chat_models/base.py` → `init_chat_model()`
+> 本系列固定分析 LangChain `1.3.7`、langchain-core `1.4.6`，提交 `76c32db9b38dfc287c958dc2a914d4834f022c1c`。依赖版本、固定源码与测试证据见[源码基线](./source-baseline.md)。订单、工具名和返回结果是说明性场景，不是本次运行的应用或真实交易。
 
-路径均相对 LangChain 仓库根目录。后续文章沿用同一快照；涉及 Classic、文本切分器或 LangGraph 时，分别标明所属包与入口。
+## 一、把用户请求变成可执行任务
 
-## 二、LangChain 在三框架中的位置
+### 1、模型决定调用什么，工具决定实际能做什么
 
-```text
-LangGraph
-  └─ 图调度、状态合并、Checkpoint、Interrupt
-       ↓
-LangChain
-  └─ 模型、工具、检索等抽象；Runnable/LCEL；标准 Agent 工厂
-       ↓
-Deep Agents
-  └─ 面向长任务预装文件、技能、记忆、子 Agent 与上下文治理
+假设应用注册了 `lookup_order`、`search_return_policy` 和 `submit_return` 三个工具，分别查询订单、检索政策和提交申请。工具说明与参数 Schema 告诉模型有哪些可用动作；鉴权、数据读取和业务写入由工具实现负责。
+
+模型可以提出“查询这个订单”的请求，但返回一个工具名并不会直接访问数据库。LangChain 先将请求表示成带名称、参数和调用 ID 的 tool call，再交给工具执行入口。
+
+工具也不能只相信模型给出的用户身份。调用方应通过可信运行上下文提供身份，执行端核对订单归属；模型输出的参数只是执行输入的一部分。
+
+### 2、应用设置审批和输出约定
+
+应用可以配置 `HumanInTheLoopMiddleware`，即在指定工具调用前请求人工决定的中间件。它观察模型已经提出的工具名和参数，再通过 LangGraph 的中断协议暂停、恢复。
+
+本例假设对 `submit_return` 要求审批，查询工具无需审批。人工批准后仍由真实工具提交申请；人工拒绝时，框架生成与原调用配对的结果消息，让模型解释未执行的原因。
+
+如果调用方还需要字段稳定的结果，可以传入 `response_format`，要求 Agent 产出处理状态、说明和申请编号等结构化数据。字段合法不证明申请真的已写入，应用仍需核对工具结果与业务服务。
+
+## 二、一次请求怎样走完模型—工具循环
+
+下图是本例一条可能的业务路径。是否先查订单、是否同时查询政策，由模型输出与应用约束决定；图不是强制每次执行完全相同顺序的脚本。
+
+```mermaid
+flowchart TD
+    U[用户提出订单退货请求] --> M[模型读取消息和工具说明]
+    M --> Q[提出订单查询与政策检索调用]
+    Q --> T[工具执行并返回配对结果]
+    T --> M2[模型结合结果判断下一步]
+    M2 -->|信息不足| Q
+    M2 -->|提出提交申请| H[中间件请求人工决定]
+    H -->|批准或编辑| W[执行真实提交工具]
+    H -->|拒绝或直接答复| R[生成配对消息，跳过该次工具执行]
+    W --> F[模型整理最终结果]
+    R --> F
+    M2 -->|无需写入| F
+    F --> V{结构化结果是否可接受}
+    V -->|可修复错误| F
+    V -->|满足对应出口条件| O[返回 Agent 输出状态]
 ```
 
-LangChain 为模型、工具与检索组件提供统一输入输出，并提供两种常用组织方式：LCEL 把步骤组合成可调用对象，标准 Agent 图管理模型与工具的循环。二者都可以含运行时分支，差别在于循环、状态和恢复由哪一层负责：
+图中结构化修复依赖具体输出策略及错误配置，并非所有错误都会自动回到模型。同步与异步执行、中断和失败也有各自退出路径，详见后续专题。
 
-| 主线 | 数据流形态 | 对应文章 |
+### 1、调用前：工厂只装配执行规则
+
+`create_agent()` 归一化模型、工具与响应格式，收集中间件，构造状态结构、节点和边，再调用 `graph.compile()`。返回的是 `CompiledStateGraph`，即已经可以执行的图对象。
+
+这个阶段不会因为注册了 `submit_return` 就提交申请。模型与工具调用发生在之后的 `invoke`、`stream` 或相应异步入口中。[03](./03-create-agent-assembly.md)集中解释这次装配。
+
+### 2、运行中：消息记录决定下一步
+
+输入通常带有用户消息。模型节点根据当前 State 构造 `ModelRequest`，它是本轮模型调用的请求对象，包含消息、工具、系统提示、模型设置和运行上下文。
+
+模型返回 `AIMessage`。如果其中有未处理的业务工具调用，条件边把它们派发到工具节点；结果通过 `ToolMessage` 的 `tool_call_id` 与原请求配对。下一轮模型再读取这些结果。
+
+固定提交的 `factory.py` 中，`_make_model_to_tools_edge` 先筛选待执行调用，关键片段如下，省略前面的显式跳转和空消息处理：
+
+```python
+pending_tool_calls = [
+    c
+    for c in last_ai_message.tool_calls
+    if c["id"] not in tool_message_ids and c["name"] not in structured_output_tools
+]
+```
+
+已配对结果的调用，以及用于结构化输出的特殊工具，都不属于这份普通工具待办集合。因此人工拒绝也必须维持消息配对，而不能只从列表里删除一条请求。
+
+### 3、返回后：框架结果与业务完成需要分别验收
+
+正常完成时，调用方得到 Agent 输出状态，通常包含 messages；结构化输出成功时还包含 `structured_response`。
+
+“图已返回”“有一份格式正确的结果”“退货申请已提交”是三项不同事实。工具可能返回失败消息，人工可能拒绝动作，模型也可能对结果理解错误。应用应以工具及业务系统提供的明确状态验收写入，而不能仅搜索最终回答中的“成功”。
+
+## 三、同一请求中有四份需要区分的数据
+
+| 数据位置 | 本例中的内容 | 谁负责改变 |
 | --- | --- | --- |
-| core 协议 + LCEL | 组合关系通常预先声明，分支可根据运行时输入选择 | [01 Runnable 抽象与 LCEL](./01-runnable-and-lcel.md)、[02 聊天模型、消息与工具](./02-core-abstractions.md) |
-| v1 `create_agent()` + Middleware | 工厂建立标准图，模型输出与 hook 更新决定走哪条边 | [03 工厂](./03-create-agent-assembly.md)、[04 Middleware](./04-middleware-control-plane.md)、[05 Runtime](./05-state-graph-runtime.md) |
+| Agent State | 用户消息、模型工具请求、工具结果、结构化输出和必要业务字段 | 图节点与中间件提交更新，LangGraph 合并 |
+| ModelRequest | 本轮真正送给模型的消息、系统提示、工具集合与设置 | 模型节点构造，模型包装器可以改写 |
+| 运行上下文与资源 | 已认证用户、数据库客户端、Store、工具运行信息 | 应用提供，节点和工具读取 |
+| 外部业务系统 | 订单记录、退货申请及其提交结果 | 真实工具调用及业务服务 |
 
-两条主线共享同一批 core 数据对象；区别在于循环、状态与恢复是否需要框架代为管理。RAG 横跨两条主线：检索结果既可作固定链中的一步，也可包装成 Agent 的工具（[12：RAG 组件与检索链路](./12-rag-components-and-retrieval.md)）。
+上下文压缩可能只改本轮请求，也可能重写消息状态；事件脱敏又作用于对外流。它们不会自动删除所有历史副本，更不会撤销已经提交的业务动作。[05](./05-state-graph-runtime.md)按同一请求追踪这些数据，[09](./09-context-and-privacy.md)再解释治理策略。
 
-## 三、`libs/` 目录地图：发布包边界先于实现细节
+## 四、中间件怎样进入这条链路
 
-```text
-libs/
-├── core/                 # langchain-core：稳定基础协议
-├── langchain_v1/         # langchain：v1 的高层入口与 Agent 装配
-├── langchain/            # langchain-classic：旧 API 兼容层
-├── text-splitters/       # langchain-text-splitters：文本切分实现
-├── partners/             # 一部分官方维护的 provider / vector store 集成
-└── standard-tests/       # 集成包要遵守的标准行为测试
-```
+`AgentMiddleware` 是 LangChain 的扩展协议，一个实例可以同时提供图节点 hook、调用包装器、状态字段、工具和事件转换器。
 
-### 1. core 是协议根
+本例可以在模型调用前检查轮次限额，用包装器重试失败请求，在模型提出写入后进入审批，并在输出时处理敏感信息。这些动作插入的位置不同，不能只按列表顺序画成一串普通函数。
 
-`libs/core/langchain_core/` 放的是可跨服务商复用的抽象：模型输入输出、消息与 Prompt、`Runnable` 组合原语、`BaseTool` 与参数 Schema、`Document` / Loader / Embeddings / VectorStore / Retriever 协议。v1 工厂接收这些契约，不重复实现；各协议的具体输入输出边界在 [02 聊天模型、消息与工具](./02-core-abstractions.md) 展开。
+| 扩展位置 | 本例用途 | 对应文章 |
+| --- | --- | --- |
+| `before_model / after_model` | 检查轮次、记录结果、对工具请求审批 | 04、07、08 |
+| `wrap_model_call` | 重试、模型回退、本轮请求改写 | 04、07、09 |
+| `wrap_tool_call` | 单次工具执行的检查、重试或替代结果 | 04、07、11 |
+| 中间件声明的工具与状态 | 加入计划工具、会话资源等能力 | 06、10 |
+| 流事件转换器 | 处理对外暴露的流式内容 | 05、09 |
 
-### 2. v1 `langchain` 是装配层
+重试包装器可能多次调用内层 handler，而图上的模型轮次计数只记录一轮正常返回。一次 Agent 请求因此不等于一次供应商请求，计量和成本需要按实际执行层次判断。
 
-`libs/langchain_v1/langchain/` 的重点是 Agent、Middleware 与便利工厂：`agents/factory.py` 的 `create_agent()` 把 core 协议、LangGraph 节点和 Middleware 组装成标准 Agent 图，`chat_models/base.py` 提供 `init_chat_model()` 这类模型初始化入口。图调度、状态持久化和中断恢复仍属于 LangGraph Runtime。
+## 五、源码包怎样对应到执行职责
 
-### 3. `langchain`（Classic）是兼容层，不混入 v1 主线
+| 仓库路径 | 发布包与职责 | 在本例中负责什么 |
+| --- | --- | --- |
+| `libs/core/` | `langchain-core`：模型、消息、工具、Runnable 等协议 | 表示工具调用、封装工具输入输出 |
+| `libs/langchain_v1/` | `langchain`：标准 Agent 工厂与中间件 | 组装循环、接入审批和请求治理 |
+| `libs/langchain/` | `langchain-classic`：兼容实现与部分检索组件 | 本系列 12–13 涉及的部分检索链与算法 |
+| `libs/text-splitters/` | 文本切分器 | 政策材料切分与来源信息传递 |
+| `libs/partners/` | 部分服务商集成，其他集成另有仓库 | 将统一模型或存储协议接到具体服务 |
+| `libs/standard-tests/` | 集成行为的标准测试 | 核对适配器应遵循的协议 |
 
-`libs/langchain/` 发布为 `langchain-classic`，保留 `AgentExecutor`、旧 RetrievalQA / retrieval chain 等历史 API 用于存量迁移。它的 Agent 生命周期和运行时边界与 v1 不同，不用于解释 v1 的 `create_agent()`；正文遇到 `langchain_classic` 时会明确标出，避免把旧 API 当作 v1 推荐装配方式。
+LangGraph 提供底层调度、状态与恢复，LangChain 负责标准 Agent 的装配和组件协议，Deep Agents 再加入文件、技能、子代理等长任务能力。具体调用链要按各自版本核对，不能从框架名称推导某个应用已经启用了全部能力。
 
-### 4. 实现与集成按发布边界外移
+## 六、按当前问题选择阅读路线
 
-文本切分在 `libs/text-splitters/`，`RecursiveCharacterTextSplitter` 通过可选依赖进入 RAG 管道。`libs/partners/` 只包含部分官方维护的集成，OpenAI、Anthropic、向量库及很多 Loader 的具体实现是独立包甚至独立仓库。core 的责任是定义“模型 / Embedding / VectorStore 必须提供什么方法”，不维护厂商实现；`standard-tests` 用统一测试约束集成行为。
+理解标准 Agent，建议走 **00 → 03 → 04 → 05**。遇到不熟悉的消息或工具类型时回查 02，再按需要进入治理专题；无需先读完全部 Runnable 实现。
 
-## 四、包边界决定阅读顺序
+研究组件组合，走 **00 → 01 → 02**。LCEL（LangChain 表达式组合方式）适合把明确的处理步骤连接起来；是否使用标准 Agent，取决于是否需要模型在工具循环中决定下一步。
 
-后续文章按依赖方向排列，而不是按 API 复杂度：
+政策检索从 [12](./12-rag-components-and-retrieval.md) 和 [13](./13-advanced-retrieval-techniques.md)进入；结构化结果从 [14](./14-structured-output-and-repair.md)进入。需要自定义图拓扑、研究检查点或节点取消时，转到 [LangGraph 系列](../langgraph/index.md)。
 
-```text
-00 仓库与包边界
-  ↓
-协议层
-  01 Runnable 协议与 LCEL：确定步骤怎么组合
-  02 聊天模型、消息与工具：被组合的对象由哪些协议定义
-  ↓
-Agent 主线
-  03 create_agent：为不确定步骤加入工具循环
-  04 Middleware：在循环上加入控制面
-  05 State、Graph 与运行时：图怎么执行、保存和恢复
-  ↓
-治理专题（可按需跳读）
-  06 内置中间件总览    07 调用治理    08 HITL
-  09 上下文与隐私      10 工具注入    11 工具动态化
-  ↓
-外部知识
-  12 RAG 组件与检索链路 → 13 RAG 高级检索技术
-```
+## 七、源码与证据入口
 
-`create_agent()` 接受模型名称或模型对象、工具及 AgentMiddleware。模型和工具复用 core 协议；AgentMiddleware 是 v1 的扩展接口，ToolNode 则是 LangGraph 提供的工具执行节点。阅读时按这些具体职责识别对象，比把所有参数都视为 Runnable 更准确。
+- [`create_agent` 与路由](https://github.com/langchain-ai/langchain/blob/76c32db9b38dfc287c958dc2a914d4834f022c1c/libs/langchain_v1/langchain/agents/factory.py)：工厂、模型请求、工具派发与循环出口。
 
-06 之后的治理专题彼此独立，可以按手上的问题挑着读：调用老失败看 07，工具要审批看 08，上下文撑爆看 09。
+- [消息与工具协议](https://github.com/langchain-ai/langchain/blob/76c32db9b38dfc287c958dc2a914d4834f022c1c/libs/core/langchain_core/messages/ai.py)：模型响应中的工具调用；工具结果类型位于相邻 `tool.py`。
 
-Deep Agents 不在本目录里，是同级的 [Deep Agents 专栏](../deepagents/index.md)。它复用这里的 Agent 与 Middleware 扩展面，另外增加 Backend、Skills、Memory、SubAgent 和长任务上下文治理。
+- [中间件接口](https://github.com/langchain-ai/langchain/blob/76c32db9b38dfc287c958dc2a914d4834f022c1c/libs/langchain_v1/langchain/agents/middleware/types.py)：扩展点、请求和响应对象。
 
-阅读范围也可以裁剪：步骤固定、只需一次或少量模型调用的任务，LCEL 往往比 Agent 更直接；需要自定义图拓扑、复杂恢复或非标准循环时再下沉 LangGraph，那部分是 [LangGraph 专栏](../langgraph/index.md) 的范围。组合与运行时的区别见 [01：Runnable 抽象与 LCEL](./01-runnable-and-lcel.md)。
+本次是固定源码和测试断言解读，没有执行订单示例、调用模型或访问真实业务系统。

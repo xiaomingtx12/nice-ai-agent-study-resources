@@ -6,7 +6,9 @@ description: 从一轮模型调用的请求、响应和 State 流转入手，区
 
 # LangChain 源码解析 04：Middleware 的执行边界
 
-## 一、源码定位
+> 固定提交与已阅读测试见[源码基线](source-baseline.md)。
+
+**源码定位**
 
 > **阅读基线**：`langchain` 1.3.7、`langchain-core` 1.4.6（仓库快照 `langchain-core==1.4.6-2-g76c32db9b3`）。
 > 源码路径相对 LangChain 仓库根目录；版本与阅读路线见 [系列导读](index.md)。
@@ -34,7 +36,7 @@ description: 从一轮模型调用的请求、响应和 State 流转入手，区
 >    - Middleware 通过 LangChain 工厂接入节点、条件边和中断 API。
 >    - 本篇只确认使用了哪些 API，不追踪 LangGraph 包内部实现。
 >
-## 二、先看一轮调用怎么走
+## 一、先看一轮调用怎么走
 
 这篇要回答一个具体问题：同一个 Middleware 为什么既能出现在 Agent 图里，又能包住一次模型或工具调用？
 
@@ -58,7 +60,7 @@ Agent State
 
 读源码时，顺序也应跟着这条链走：先看 `AgentMiddleware` 提供哪些扩展面，再看生命周期 Hook 如何进入图，接着看 `wrap_model_call` 和 `wrap_tool_call` 如何组成调用栈，再回到请求、响应、State 和路由的边界。
 
-## 三、`AgentMiddleware` 是什么
+## 二、`AgentMiddleware` 是什么
 
 `AgentMiddleware` 是这些扩展面的协议容器。一个实例可以同时声明状态字段、客户端工具、生命周期 Hook、模型/工具包装器和流事件转换器，工厂会把它们接到不同的运行位置。
 
@@ -72,11 +74,11 @@ Agent State
 
 工厂因此会先收集 Middleware，再分别决定图拓扑和调用栈。
 
-## 四、节点型 Hook：有图位置的生命周期逻辑
+## 三、节点型 Hook：有图位置的生命周期逻辑
 
 生命周期 Hook 是工厂直接注册到图里的节点。它们决定一个 Middleware 在 Agent 运行的哪个阶段看到 State，以及它能否影响后继节点。
 
-### 1. Hook 的生命周期
+### 1、Hook 的生命周期
 
 四个节点型 Hook 覆盖的范围不同：
 
@@ -90,7 +92,7 @@ after_agent   自然结束阶段，返回模型后可能再次进入
 这里的 A、B、C 指的是 **三个 Middleware 实例**，不是三个 Hook：
 
 ```python
-middleware = [A(), B(), C()]  # 按注册顺序排列
+middleware = [A(), B(), C()]  # 仅示意三个已注册实例，不是可运行源码
 ```
 
 假设 A、B、C 都实现了对应 Hook，一次完整运行的顺序可以展开成：
@@ -127,7 +129,7 @@ Agent 最终结束：
 
 上述顺序假设没有显式跳转、恢复重放或异常。before_model 和 after_model 围住一次模型节点执行；包装器内部重试不会重新经过这些节点。after_agent 可以请求回到模型，因此未必只执行一次，也不能替代异常清理用的 finally。多个 Middleware 组合时，`before_*` 按注册顺序进入，`after_*` 按反向顺序退出。这个顺序描述的是图节点之间的生命周期关系，不能和后面的包装器嵌套顺序混用。
 
-### 2. 工厂如何判断 Hook 是否存在
+### 2、工厂如何判断 Hook 是否存在
 
 工厂不会为每个 Middleware 都注册一组空节点，而是比较类方法是否覆盖了父类默认实现：
 
@@ -164,7 +166,7 @@ graph.add_node(
 
 节点名使用 `{middleware_name}.{hook_name}`，这样既能在图中定位，也能避免和 `model`、`tools` 冲突。
 
-### 3. 节点型 Hook 的返回值
+### 3、节点型 Hook 的返回值
 
 节点型 Hook 的返回值决定它提交哪些状态更新，以及是否发出控制信号：
 
@@ -175,10 +177,13 @@ dict[str, Any] | Command[Any] | None
 
 这里的 `dict` 是**局部 State 更新**，不是完整 State：
 
+下面摘录 `model_call_limit.py` 中 `ModelCallLimitMiddleware.after_model` 的返回语句；完整方法见 [07](07-call-governance.md)。计数节点只提交自己的两个字段，不重建消息列表：
+
 ```python
-def before_model(self, state, runtime):
-    # 只提交本次 Hook 新增或修改的字段。
-    return {"model_calls": state.get("model_calls", 0) + 1}
+return {
+    "thread_model_call_count": state.get("thread_model_call_count", 0) + 1,
+    "run_model_call_count": state.get("run_model_call_count", 0) + 1,
+}
 ```
 
 没有返回的字段会继续交给图状态协议保留和合并。节点更新如何进入下一节点、`messages` 如何使用合并元数据，见 [05：节点如何更新 State](./05-state-graph-runtime.md#七节点如何更新-state)。
@@ -191,23 +196,17 @@ def before_model(self, state, runtime):
 
 `Command` 是 LangGraph 节点通用的返回协议；工厂不会像处理 `ExtendedModelResponse.command` 那样检查节点型 Hook 返回的 `Command`。本篇不把 `Command(goto=...)` 当作 `create_agent()` 的 Middleware 路由接口，因为它要和图已有的静态、条件边一起理解。需要在 Agent 生命周期中表达“结束、回模型、进工具”时，应使用下面的 `jump_to` 约定并声明 `can_jump_to`。
 
-## 五、包装型 Hook：调用面上的拦截器
+## 四、包装型 Hook：调用面上的拦截器
 
 生命周期 Hook 处理图上的位置；需要围住一次具体调用时，则进入包装型 Hook。
 
-### 1. `wrap_model_call` 拿到什么
+### 1、`wrap_model_call` 拿到什么
 
 模型调用是第一条包装路径。
 
 模型包装器接收 `ModelRequest` 和下一个 handler：
 
-```python
-# handler 代表下一层 Middleware 或真实模型；
-# 是否调用、调用几次由当前 Middleware 决定。
-def wrap_model_call(self, request, handler):
-    response = handler(request)
-    return response
-```
+`ModelRequest` 携带当前模型、消息与工具配置，`handler(request)` 将请求交给下一层。实际重试循环见 [07 的 ModelRetryMiddleware](07-call-governance.md)：它在同一个包装方法中多次调用 handler，直到返回结果或耗尽重试。
 
 `handler` 可以被：
 
@@ -218,18 +217,13 @@ def wrap_model_call(self, request, handler):
 
 它的控制范围是“一次模型调用”，不是整个 Agent 图。`handler` 每调用一次，都会重新进入内层包装器和 `_execute_model_*()`；因此外层的重试会重新执行内层策略。内层 `ExtendedModelResponse.command` 交还给外层 handler 时会先拆成 `ModelResponse`，但组合器会暂存该命令。最终模型节点收到的命令按内层在前、外层在后的顺序排列。外层重试时，组合器会清空上一尝试暂存的内层命令，所以只保留最后一次尝试的结果。
 
-### 2. `wrap_tool_call` 拿到什么
+### 2、`wrap_tool_call` 拿到什么
 
 同样的组合思想也用于工具执行，只是请求对象和短路结果不同。
 
 工具包装器同样接收请求和下一个执行函数：
 
-```python
-# 工具包装器可以在真实工具执行前做权限、审批和参数检查。
-def wrap_tool_call(self, request, handler):
-    check_permission(request)
-    return handler(request)
-```
+工具包装器接收 `ToolCallRequest`，其中包含本次工具调用、可用工具与运行信息；调用 `handler(request)` 才进入下一层包装器或工具执行器。权限检查需要应用实现，框架不会自动提供订单归属判断。
 
 它可以实现：
 
@@ -241,15 +235,11 @@ def wrap_tool_call(self, request, handler):
 
 但它只控制一个 `ToolCallRequest`。模型同时返回三个工具调用时，三个调用如何派发由图路由决定，包装器不会接管整个批次。
 
-## 六、多个包装器如何组成洋葱调用栈
+## 五、多个包装器如何组成洋葱调用栈
 
 无论包装模型还是工具，多个 Middleware 都会按同一套顺序组合。
 
-假设：
-
-```python
-middleware = [Auth(), Retry(), Fallback()]
-```
+假设依次注册权限检查、重试和回退三个包装器。下面用 Auth、Retry、Fallback 表示它们的职责，是嵌套关系示意，不是内置类名。
 
 工厂把列表中的第一个 Middleware 放在最外层：
 
@@ -296,7 +286,7 @@ flowchart TD
 
 修改 Middleware 顺序时，要把调用前和调用后的路径都画出来。
 
-## 七、`ModelRequest`：一次模型调用的快照
+## 六、`ModelRequest`：一次模型调用的快照
 
 包装器要改写模型调用时，操作入口就是这份请求快照。
 
@@ -334,7 +324,7 @@ request = ModelRequest(
 
 工厂在真正调用模型时才把 `system_message` 放到 `messages` 前面。Middleware 可以用 `override(system_message=...)` 改写本次调用的系统提示词，但不应该把临时提示词写进 `state["messages"]`。
 
-### 1. 用 `override()` 生成新请求
+### 1、用 `override()` 生成新请求
 
 快照可被包装器层层传递，因此改写请求时要避免原地污染上游看到的对象。
 
@@ -356,7 +346,7 @@ new_request = request.override(
 
 这里的“不可变”是推荐的使用模式，不是 Python 层面的绝对冻结。`override()` 内部调用 `dataclasses.replace()`，属于**浅复制**：它会替换传入字段，但未替换的 `messages`、`tools`、`state`、`model_settings` 仍与原请求共享引用。要修改消息或工具集合，应先创建新列表再传给 `override()`；不要把 `request.messages.append(...)` 当成不会影响外层请求的操作。直接属性赋值同样仍可发生，但会产生弃用警告。
 
-## 八、`ModelResponse`、`ExtendedModelResponse` 与 State 更新
+## 七、`ModelResponse`、`ExtendedModelResponse` 与 State 更新
 
 请求穿过包装栈后，工厂会把返回值转换成图状态更新。
 
@@ -409,21 +399,25 @@ ModelResponse
 
 包装器返回结果时不能破坏消息协议，尤其不能丢失工具调用对应的消息和 ID。
 
-## 九、`jump_to`：声明有限目的地的控制流约定
+## 八、`jump_to`：声明有限目的地的控制流约定
 
 除了由模型结果驱动默认循环，生命周期 Hook 还可以通过 State 发出有限的路由信号。
 
 `jump_to` 是 `AgentState` 的临时字段，不是任意节点跳转 API。需要让节点按这个约定跳转时，应在节点型 Hook 上声明可达目的地：
 
+`hook_config` 是将控制流配置附加到 hook 方法上的装饰器。`middleware/types.py` 中的实际实现如下，省略外层参数与文档字符串：
+
 ```python
-class StopWhenFull(AgentMiddleware):
-    # 声明这个 Hook 节点需要登记的条件边目的地。
-    @hook_config(can_jump_to=["end", "model"])
-    def before_model(self, state, runtime):
-        if reached_limit(state):
-            return {"jump_to": "end"}
-        return None
+def decorator(func: CallableT) -> CallableT:
+    if can_jump_to is not None:
+        # 在方法上保存目的地声明，供工厂读取并装配条件边。
+        func.__can_jump_to__ = can_jump_to  # type: ignore[attr-defined]
+    return func
+
+return decorator
 ```
+
+例如内置 `ModelCallLimitMiddleware.before_model` 声明 `can_jump_to=["end"]`；计数达到限额且配置为正常结束时，返回包含 `jump_to="end"` 的状态更新。装饰器负责声明目的地，限额 hook 负责判断何时跳转。
 
 工厂随后只为**该 Hook 节点**把声明转换成有限条件边：
 
@@ -444,7 +438,7 @@ jump_to="end" → 最终出口
 
 jump_to 使用 EphemeralValue 通道，供当前更新后的路由与后续读取使用，在下一次没有该字段写入的更新步清除；它不是 Python 读取一次即删除的变量。PrivateStateAttr 使其在默认输入、输出 Schema 中省略。若需求是“模型调用失败后换一个模型”，使用 `wrap_model_call`；若需求是“本轮状态满足条件后结束”，使用节点型 Hook 加 `jump_to`。
 
-## 十、装饰器为什么能生成 Middleware
+## 九、装饰器为什么能生成 Middleware
 
 前面使用的 Hook 装饰器之所以能参与图装配，是因为它们会生成真正的 Middleware 实例。
 
@@ -477,11 +471,11 @@ return cast(
 
 适合用装饰器的场景是单个简单 Hook。`@wrap_model_call` 和 `@wrap_tool_call` 也会生成同类实例，但它们只安装被装饰函数对应的同步或异步包装方法，不会自动补齐另一条包装执行路径。需要多个 Hook、复杂状态或多个工具时，直接继承 `AgentMiddleware` 更容易维护。
 
-## 十一、Middleware 还有三个扩展面
+## 十、Middleware 还有三个扩展面
 
 Hook 解决执行时机，Middleware 还可以从 State、工具和流事件三个方向扩展 Agent。它们进入主执行线的位置不同，排查问题时不要混在一起看。
 
-### 1. `state_schema`
+### 1、`state_schema`
 
 State 字段适合保存需要跨节点读取的运行信息：
 
@@ -494,7 +488,7 @@ State 字段适合保存需要跨节点读取的运行信息：
 
 字段最终会参与 Agent State 合并，具体输入输出可见性见 05。
 
-### 2. `tools`
+### 2、`tools`
 
 如果扩展需要让模型主动调用能力，则把工具注册在 Middleware 上：
 
@@ -506,7 +500,7 @@ Middleware 可以注册额外客户端工具。它们和用户传入的客户端
 - 运行时动态工具需要由包装器处理；
 - 动态工具并不自动绕过权限、来源和参数校验。
 
-### 3. `transformers`
+### 3、`transformers`
 
 State 和工具进入主执行线，流式输出则有独立的处理入口。
 
@@ -552,7 +546,7 @@ State 执行线
 
 在 `create_agent()` 中，Transformer 工厂会在编译阶段注册，并在每次运行时创建对应实例。它不是 `graph.add_node()` 添加的图节点，也不会出现在 `before_model: A → B → C` 这样的 Hook 链里。
 
-## 十二、真实 Middleware 应该怎么读
+## 十一、真实 Middleware 应该怎么读
 
 接口分类落到具体实现时，最容易混淆的是“一个 Middleware 同时占用多个扩展面”的情况。
 
@@ -570,7 +564,7 @@ State 执行线
 
 不要先按文件名背功能。先确认它需要图节点、调用包装器、State 字段还是事件转换器。
 
-## 十三、同步与异步要分开看节点和包装器
+## 十二、同步与异步要分开看节点和包装器
 
 同步和异步路径需要分开检查。节点 Hook 与包装 Hook 的回退规则并不一致。
 
@@ -594,7 +588,7 @@ wrap_tool_call  / awrap_tool_call
 - 两条路径返回的 State 更新和 `ToolMessage` 配对信息是否一致；
 - 外部模型、工具客户端和资源释放逻辑是否与所选调用方式匹配。
 
-## 十四、落地时的边界
+## 十三、落地时的边界
 
 扩展点应由要改变的数据与时机决定。计数、计划和跨轮判断需要 State 更新；临时模型选择或上下文裁剪可以只改 ModelRequest；一个工具的授权与重试在 wrap_tool_call 中执行；流式展示另查事件通道。
 
@@ -602,10 +596,30 @@ wrap_tool_call  / awrap_tool_call
 
 保留状态更新和外部副作用的区别也很关键。组合器丢弃失败尝试暂存的 Command，不会回滚该尝试已经调用的外部服务。工具重试与恢复要复用业务动作身份，由执行服务判断是否已经提交。
 
-## 十五、排查时先定位扩展面
+## 十四、排查时先定位扩展面
 
 排查顺序问题时，先把图节点链和包装器调用栈分开：列表顺序分别作用于两者，重试只重入它的内层 handler。请求被意外改写时，检查是否修改了 override 浅复制后仍共享的消息对象。
 
 状态没有保留时，检查返回的局部更新是否声明在 Schema 中、使用了哪个 Reducer；工具结果无法配对时，核对 tool_call_id；流式输出与最终状态不一致时，检查具体接口是否消费了已注册的 Transformer，不能假定所有流入口都有相同处理。
 
 内置实现见 [06](06-middleware-overview.md)，重试组合见 [07](07-call-governance.md)，审批协议见 [08](08-human-in-the-loop.md)。
+
+## 十五、用组合测试核对进入与返回顺序
+
+`libs/langchain_v1/tests/unit_tests/agents/middleware/core/test_composition.py` 的 `test_three_handlers_composition` 用三个测试包装器记录执行次序。以下是测试中的真实断言，省略前面的包装器定义和组合调用：
+
+```python
+# first 包住 second，second 再包住 third。
+assert execution_order == [
+    "first-before",
+    "second-before",
+    "third-before",
+    "third-after",
+    "second-after",
+    "first-after",
+]
+```
+
+同文件的 `test_inner_handler_retry` 让内层连续尝试三次，最终返回成功，断言尝试序列为 `[0, 1, 2]`。这些是仓库测试预期，本次没有执行测试。
+
+放到订单流程中，权限包装器在重试层外面与里面，检查次数可能不同；内置模型轮次限额却位于 before/after_model 节点，不能只靠调换列表顺序就让它统计每次 HTTP 请求。具体计数与回退组合在 [07](./07-call-governance.md)继续追踪。

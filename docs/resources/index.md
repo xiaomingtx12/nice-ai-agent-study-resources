@@ -11,7 +11,7 @@ description: 站内资源不是书单而是学习地图，按"拿它干什么"�
 
 ## 一点理念
 
-没有哪条资源能一次讲透 Agent。每条都只从一个角度切进去——主线地图、项目实战、模式语言、机制拆解、真实源码。同一个概念，在教程里是一段话，在项目里是一次踩坑，在源码里是一处实现。
+没有哪条资源能一次讲透 Agent。每条都只从一个角度切进去——主线地图、项目实战、模式语言、机制拆解、真实源码。
 
 学习的不同阶段，缺口不一样：入门缺全貌，动手缺项目，卡住缺模式，深究缺机制。所以这里不推唯一答案，而是按阶段和缺口调不同角度的资源来回看，从而积累经验。
 
@@ -27,7 +27,7 @@ description: 站内资源不是书单而是学习地图，按"拿它干什么"�
 | 分类 | 你拿它干什么 | 资源 |
 | --- | --- | --- |
 | 通用 Agent 系统教程 | 通读一本，建立 Agent 全貌 | `AgentBook（新开源）` `HelloAgents` `AI Agents From Zero` |
-| 模式与生产参考 | 模式总结以及作者的踩坑记录 | `Agentic Design Patterns（中文翻译）` `AI Agent Book` |
+| 模式与生产参考 | 模式总结、选型框架和作者的踩坑记录 | `Agentic Design Patterns（中文翻译）` `Agent 设计模式之美（ADPS）` `AI Agent Book` |
 | AI 编程上手 | 教你用 AI工具  | `Easy-Vibe` `CodexGuide` `agent-qa 编码后验证` |
 | Coding Agent 机制拆解 | 看 coding agent 怎么造出来 | `Learn Claude Code` `Claude Certified Architect · 认证自测题库（社区非官方）` `CCB` `Pi Book` |
 | 真实系统源码 | 读完整系统的真实源码 | `OpenClaw 源码解析` `DeerFlow 二次开发` |
@@ -78,6 +78,8 @@ flowchart LR
   LD --> LW
 ```
 
+如果想把路线里的 Claude Code、OpenClaw、DeerFlow 这些系统放回同一张设计地图，可以穿插看 `Agent 设计模式之美（ADPS）` 的 7 类认知功能 × 6 种执行拓扑，以及对应的案例；它不替代具体系统的源码拆解，而是给这些拆解一个共同的定位语言。
+
 ## 如果你现在只能先选 1 条
 
 | 你的当前缺口                    | 先看哪条 | 为什么不是别条 |
@@ -91,6 +93,7 @@ flowchart LR
 | 我想知道 coding agent 是怎么工作   | [Learn Claude Code](https://learn.shareai.run/zh/s01/) | 因为它先拆 harness，不像 `CCB` 那样先给你白皮书式结构 |
 | 我想把 harness 知识串成体系 + 场景自测 | [Claude Certified Architect · 认证自测题库（社区非官方）](https://github.com/paullarionov/claude-certified-architect) | 因为它做的是知识体系梳理和题库自测，不像 `Learn Claude Code` 那样讲新机制 |
 | 我想系统补 Agent 设计模式和模式语言      | [Agentic Design Patterns（中文翻译）](https://adp.xindoo.xyz/) | 因为它是同名书的中文翻译，把模式系统整理成册，不像项目教程那样负责带你从零跑通 |
+| 我想判断一个 Agent 该用哪些模式、是否过度设计 | [Agent 设计模式之美（ADPS）](https://adpsagent.com/zh/patterns/) | 因为它用 7 类认知功能 × 6 种执行拓扑先定位问题，再用案例和失效模式收窄选择，不只是给一张模式清单 |
 | 我卡在多 Agent 协作、预算、重试、权限这类问题上 | [AI Agent Book](https://www.waylandz.com/ai-agent-book/) | 因为它专门回答这些现成教程答不上的工程问题，且模式优先不绑框架，不像 `OpenClaw` 那样更依赖真实源码背景 |
 | 我想拆成熟 coding agent 的产品级边界 | [Claude Code Architecture（CCB）](https://ccb.agent-aura.top/docs/introduction/what-is-claude-code) | 因为它更像逆向架构白皮书，不像 `Learn Claude Code` 那样偏教学 |
 | 我想看一个 coding agent runtime 的架构设计 | [Pi Book](https://zhanghandong.github.io/pi-book/) | 因为它直接围绕 coding agent 的运行时、架构取舍和实现边界展开，不只是使用说明 |
@@ -147,8 +150,7 @@ flowchart LR
 
 ### 模式与生产参考
 
-这一组是"带着具体问题回头查"的参考型资料，不是从头跟着走的路径。  
-适合已经做过一些 Agent 原型、手里有真实问题的人。
+这一组以"带着具体问题回头查"的参考型资料为主，也有可以按模块系统学的课程。适合已经做过一些 Agent 原型、手里有真实问题的人。
 
 #### Agentic Design Patterns（中文翻译）
 
@@ -161,6 +163,18 @@ flowchart LR
 | 建议进入方式 | 先浏览目录建立模式地图，再按当前项目里的具体问题回头细读 |
 
 入口：[资源页](./references/agentic-design-patterns/) · [官方入口](https://adp.xindoo.xyz/)
+
+#### Agent 设计模式之美（ADPS）
+
+| 槽位 | 内容 |
+| --- | --- |
+| 一句定位 | ADPS 框架的中文系统讲解：7 类认知功能 × 6 种执行拓扑 |
+| 最适合现在的谁 | 已经学过工具调用、记忆、RAG、多 Agent、治理这些零散能力，想把它们放回同一张地图、判断什么时候该用哪个模式的人 |
+| 如果你只想拿走 1 个东西 | 模式不是平铺清单，而是有坐标的选择；先定位问题落在哪类认知功能、哪种执行拓扑，再决定用哪个模式 |
+| 最容易读错的地方 | 把矩阵当成要逐个填满的功能清单；或者没注意专栏讲 28 个，而站点 v0.9 另有扩展/候选口径 |
+| 建议进入方式 | 先看双轴框架和模式矩阵，再挑一个熟悉的系统（Claude Code / DeerFlow / Deep Agents）看案例切片，最后用六步选型法收窄到 3-7 个模式 |
+
+入口：[资源页](./references/agent-design-patterns-adps/) · [模式白皮书](https://adpsagent.com/zh/patterns/) · [极客时间专栏](https://time.geekbang.org/column/intro/101162601) · [项目仓库](https://github.com/huangjia2019/agent-design-patterns)
 
 #### AI Agent Book
 

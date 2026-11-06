@@ -12,24 +12,30 @@ description: 记录不同阶段值得关注的高性价比 AI 中转方案，以
 
 模型价格不是唯一成本。做复杂分析、长链路推理、方案比较和需要多轮修正的任务时，强模型通常有更好的问题拆解、上下文理解和结果稳定性。普通模型虽然单次调用更便宜，但如果关键结论错误、分析视角单一或中途返工，实际耗时和总成本反而更高。
 
-## 当前阶段记录：NexaVlinks聚合
+## 中转体验
 
->本栏记录的是阶段性观察。下单前应重新核对当前价格、可用模型、限额、服务条款和站点状态。
+magpie（一个Agent中灵活切换多种供应商）：https://usemagpie.ai/zh/；
 
-[进入 NexaVlinks聚合 中转站](https://www.nexavlinks.com/register?aff=K5JB3ZPBQ36V)
+疯狂领鸡蛋：
 
-目前记录到的站点特色：
+![AI 中转站点记录截图](./ai-relay-ranking-reference.png)
 
-- 号池都是官方美区正充号池20xPro，其他大部分中转崩的情况下，还能稳定使用且不降智
-- 支持订阅和余额充值使用，余额0.4倍率，但是支持和`官方同等重置`
-- 鸡蛋环节支持签到，每天能领0.5刀，连续签到鸡蛋额度会变大
-- 群主是八年老兵退伍，性情人，站内有问题都会即使快速处理，保障稳定和不降智
+### 夯
 
-十几家中转站体验下来，这个站价格相比于其他中转站略贵，但是稳定不降智，适合稳定体验使用GPT6
+- [SuperCodes](https://supercodes.vip/) — 号池里有百十个GPTpro时候就是夯王之王0.06plus、0.08pro，停止注册
+- [SuperCodes子站-free专区](https://megac.vip/) — 0.04freeluna专区，可以注册
 
-中转站就是自己在用觉得不错，自发推荐一些，另外通过这个链接注册使用，我可以获得10%的额度返利(手动狗头)。
+### 顶级（稳定偏贵）
 
-这个入口带有推广参数，具体套餐、模型列表、限额和可用性以站点当前页面为准。是否适合自己，仍要按实际调用量核算。
+- [PokeAPI](https://www.poke2api.com/register?aff=VQACDV5K2HQF) — GPT0.3倍率官key稳定偏贵，模型多，GPT、Claude、国模
+- [NexaVlinks](https://www.nexavlinks.com/register?aff=K5JB3ZPBQ36V) - 老兵中转，0.3-0.4官key，支持多模型，有时有低价稳定组使用，GPT、Claude、国模
+- [Sidrune AI](https://fluxionai.space/register?aff=BDRJBNTYF9X7) - GPT、Claude、国模模型多，倍率从低到高都有
+- [破晓](https://api.poxiao.vip/register?aff=5ZGYMNYV4FTH) - 0.11倍gpt6A稳定、0.16倍gpt6.1sol稳定
+
+### 支持破甲
+
+- [初元API](https://initapi.ai/register?aff=HYE6R9) - 主要是一些低倍率破甲国模，0.085不稳定GPT
+
 
 ## 社区与信息源
 
